@@ -1,6 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "irkop-cell-backend",
+  "name": "konter",
   "main": "src/index.js",
   "compatibility_date": "2026-08-01",
   "legacy_env_names": false,
