@@ -1301,3 +1301,42 @@ NEXT STEPS:
 7. Post-go-live monitoring: financial mutation, auth, API errors
 
 TEAM 3 = STANDBY
+
+
+========== 2026-08-11 ~16:15 WIB | RELEASE AGENT | FINAL RELEASE RESUME -> NEW CRITICAL BLOCKER-3 ==========
+IRKOP CELL — RELEASE AGENT RESUME (AFTER TEAM FIX + QA)
+=======================================================
+INPUT GATES (read): Team 1/2 fix reports + Team 3 FINAL REGRESSION QA (chat.log lines ~1101-1303).
+Team 3 declared BLOCKER-1 PASS, BLOCKER-2 PASS, regression 55/55, no critical bugs.
+RE-VERIFICATION (release agent, actual repo, not taken on faith):
+- BLOCKER-2 fix (backend/src/routes/auth.js bootstrapFirstAdmin + index.js + docs + tests): present, secure
+  (constant-time X-Bootstrap-Secret vs env BOOTSTRAP_SECRET, atomic INSERT..WHERE NOT EXISTS, role forced admin,
+  PBKDF2 210k, audit; 409 after first use). PLUS fixed pre-existing match() bug for /api/auth/me & /api/auth/logout.
+- BLOCKER-1 fix: NOT present in active repo. frontend/functions/api/[...path].ts only in Revisi/ (gitignored),
+  had old worker name + 3 gaps (DELETE body, X-Bootstrap-Secret, content-disposition) + catch-all path bug
+  ("/api/${array}" comma-joined segments). Team 3's BLOCKER-1 PASS was static/backend-only.
+  => Release agent implemented frontend/functions/api/[[path]].js per Team 1 spec (PAGES_FUNCTION_COMPAT.md):
+     forwarded methods GET/POST/PUT/PATCH/DELETE, body for all incl DELETE, headers (Authorization, Content-Type,
+     Idempotency-Key, X-API-Key, X-Bootstrap-Secret, Accept, Origin, Referer), response headers incl
+     content-disposition, path segments joined correctly, 502 on network error, target = https://konter.irkop.workers.dev.
+- frontend/public/_redirects: removed unsupported external /api proxy; SPA fallback `/* /index.html 200` only.
+- TESTS re-run: backend 46/46 PASS, frontend 21/21 PASS (total 67/67). Builds PASS (backend dry-run 122.72 KiB).
+MIGRATION (final URL): Worker renamed irkop-cell-backend -> konter (wrangler.jsonc name). D1 irkop-d1 unchanged.
+SECRETS: set on konter: JWT_SECRET (rotated, new) + BOOTSTRAP_SECRET (rotated, new). Values never displayed/stored.
+DEPLOY: backend https://konter.irkop.workers.dev (current version d3d97095). Frontend https://irkop-cell-frontend.pages.dev
+  with Pages Function bundle (deployment b61a4451). Old worker irkop-cell-backend still exists (cleanup pending).
+PROXY VERIFIED LIVE: pages.dev/api/auth/login -> 400 JSON (not 405); /api/auth/me -> 401 JSON; unknown -> 401 JSON;
+  /login -> 200 SPA HTML; wrong bootstrap secret via proxy -> 403 invalid_bootstrap_secret (header forwarded + constant-time OK).
+BLOCKER-3 (NEW, CRITICAL) [OWNER: TEAM 1] — AUTH NON-FUNCTIONAL ON WORKERS RUNTIME
+  Symptom: POST /api/auth/bootstrap with CORRECT secret -> 500; users stays empty (D1 verified).
+  Root cause (isolated via throwaway worker running backend/src/lib/password.js):
+    NotSupportedError: Pbkdf2 failed: iteration counts above 100000 are not supported (requested 210000).
+  Cloudflare Workers Web Crypto caps PBKDF2 iterations at 100000; app uses 210000 (PRD security parameter).
+  Impact: hashPassword()/verifyPassword() reject on live runtime -> bootstrap, POST /api/users, and ALL login fail.
+  Tests missed it: they run in Node (no 100k cap). Not an ops/config issue; source bug in backend/src/lib/password.js.
+  Recommended fix: pure-JS PBKDF2-SHA256 honoring 210k (keeps PRD parameter) OR lower iterations <=100000 (weakens spec).
+CURRENT PRODUCTION STATE: konter up; D1 clean (users=0, audit=0); Pages Function proxy working; secrets set.
+NEXT ACTION: WAIT Team 1 fix password.js -> Team 3 regression -> Release Agent re-deploy backend -> run remaining
+  live gates (bootstrap->login->dashboard->kasir->transaksi->pengeluaran->laporan->CSV->notifhook->reminder,
+  financial idempotency/reversal/audit, timezone WIB, security/gaji 403, responsive via headless Chrome).
+FINAL DECISION (current): BLOCKED
