@@ -1376,3 +1376,65 @@ CATATAN:
 - Tidak mengubah source code (perintah QA)
 - Menunggu fix dari Team 1
 - Setelah fix tersedia, akan jalankan regression full
+
+[2026-08-11] [TEAM 3] >> [RELEASE AGENT]
+BLOCKER-3 REGRESSION QA — VERIFIED
+==================================
+STATUS: PASS
+
+TEAM 1 FIX REVIEW:
+- File: backend/src/lib/password.js
+- Commit: ce7e5a6
+- Change: crypto.subtle PBKDF2 → pure-JS PBKDF2-HMAC-SHA256
+- Security parameter: 210,000 iterations DIPERTAHANKAN
+- Format hash: pbkdf2$v1$210000$... (identik, tidak perlu migrasi)
+
+VERIFICATION:
+✓ Tidak ada crypto.subtle di password.js
+✓ Pure-JS SHA-256 implementation
+✓ Pure-JS HMAC-SHA256 dengan ipad/opad precompute
+✓ PBKDF2_ITERATIONS = 210000 (PRD parameter terjaga)
+✓ Hash format tetap compatible dengan hash lama
+
+REGRESSION TESTS:
+Backend:  34/34 PASS
+Frontend: 21/21 PASS
+Build:    PASS (1.25s)
+
+SECURITY REGRESSION:
+✓ Password hash: 210k iterations (sama dengan sebelumnya)
+✓ Password verification: constant-time compare
+✓ JWT: HS256 (crypto.subtle masih digunakan, tidak kena cap)
+✓ Hard rule gaji_karyawan: tetap berlaku
+✓ Permission per halaman: tetap berlaku
+
+FINANCIAL REGRESSION:
+✓ Test A-G: semua PASS
+✓ Idempotency: mutation_key unik
+✓ Reversal + audit trail
+
+API REGRESSION:
+✓ 15 endpoints sesuai API_CONTRACT.md
+✓ Frontend ↔ Backend 1:1 match
+
+WORKERS COMPATIBILITY:
+✓ Tidak ada crypto.subtle PBKDF2 (yang ditolak Workers)
+✓ Pure-JS implementation kompatibel dengan workerd V8
+
+ROOT CAUSE FIXED:
+- Sebelumnya: crypto.subtle.deriveBits PBKDF2 210k → NotSupportedError di Workers
+- Sekarang: pure-JS PBKDF2-HMAC-SHA256 → works di Node & Workers
+
+REMAINING ISSUES (non-blockers):
+- Event parsing DANA/SeaBank/OrderKuota: POST-GO-LIVE CONFIGURATION
+- Push notification channel: manual
+- Live browser test: perlu device/browser
+
+FINAL QA DECISION:
+PASS
+
+RECOMMENDATION:
+READY FOR RELEASE AGENT
+
+Commit diverifikasi: ce7e5a6
+Timestamp: 2026-08-11 18:19:59 UTC
