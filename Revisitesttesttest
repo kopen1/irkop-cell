@@ -1,0 +1,26 @@
+### PROJECT UNDERSTANDING
+Irkop Cell POS web app. Kelola penjualan PPOB, service HP, kasbon, pengeluaran. Fitur utama NotifHook auto-input transaksi dari app pembayaran (DANA, SeaBank). Cloudflare Pages, D1, Workers.
+
+### MY TEAM
+Team 3. Role: INTEGRATION, QA & SECURITY. Pihak verifikasi independen.
+
+### TEAM RESPONSIBILITY
+Uji API, UI, finansial, keamanan, integrasi NotifHook, responsif, regresi. Cari dan lapor bug. Verifikasi perbaikan. Tolak fitur gagal kriteria.
+
+### TEAM BOUNDARY
+Bukan pembuat backend (Team 1) atau frontend (Team 2). Tidak tebak payload provider eksternal. Tidak tulis kode aplikasi utama.
+
+### DATABASE UNDERSTANDING
+Fokus `mutasi_saldo` (sumber kebenaran saldo). `kasir_sesi`, `kasir_saldo` untuk opening/closing. `notifhook_log`, `notifhook_source` untuk integrasi. `user_permissions`, `audit_log` untuk security.
+
+### IMPORTANT BUSINESS RULES
+Uang masuk/keluar wajib lewat mutasi. Mutasi wajib idempotent. Closing tidak tambah/kurang saldo lagi. Koreksi finansial wajib reversal + audit. Karyawan tidak boleh lihat nominal gaji.
+
+### DEPENDENCIES
+Butuh API dan database Team 1. Butuh UI Team 2. Butuh data konfigurasi asli sumber NotifHook.
+
+### UNCLEAR / NOT DEFINED
+Aturan `cash_tunai` tidak rinci di PRD. Logout JWT stateless tanpa tabel sesi tidak bisa revoke server-side. Payload/matcher asli DANA/SeaBank/OrderKuota belum ada.
+
+### RECOMMENDED FIRST TASK
+Jalankan tes API finansial (Test A-G) ke endpoint Team 1 yang siap (Sprint 1-2).
