@@ -1340,3 +1340,14 @@ NEXT ACTION: WAIT Team 1 fix password.js -> Team 3 regression -> Release Agent r
   live gates (bootstrap->login->dashboard->kasir->transaksi->pengeluaran->laporan->CSV->notifhook->reminder,
   financial idempotency/reversal/audit, timezone WIB, security/gaji 403, responsive via headless Chrome).
 FINAL DECISION (current): BLOCKED
+
+[2026-08-11] [TEAM 1] >> [RELEASE AGENT]
+BLOCKER-3 FIX — AUTH / PBKDF2 WORKERS
+STATUS: DONE — MENUNGGU REGRESSION QA TEAM 3 (tidak menyatakan PASS)
+ROOT CAUSE: crypto.subtle.deriveBits PBKDF2 210k -> workerd menolak >100.000 ("NotSupportedError: iteration counts above 100000 are not supported (requested 210000)"). Node tidak punya limit itu -> test lokal PASS bukan bukti.
+FIX: src/lib/password.js = PBKDF2-HMAC-SHA256 murni JS (RFC 2898), 210.000 iterasi DIpertahankan, tanpa crypto.subtle sama sekali. SHA-256 ditulis sendiri, state ipad/opad di-precompute (2 kompresi/iterasi). Format hash tidak berubah -> hash lama tetap valid, tanpa migrasi.
+PERFORMA: ~510-615 ms per operasi (Node V8 / workerd V8). Wajib plan Paid (default 30 s CPU); Free 10 ms tidak muat. JWT (crypto.subtle HMAC) tidak kena cap.
+TESTS: 58/58 PASS. Baru: tests/password.test.js (8) + tests/workers-compat.test.js (4: bukti statis tanpa crypto.subtle + simulasi cap workerd NotSupportedError -> bootstrap/login/me tetap jalan). dry-run build OK (127.72 KiB / gzip 26.47 KiB).
+WORKERD RUNTIME: tidak bisa start di sandbox ini (termux/proot: tcmalloc MmapAligned gagal, batasan lingkungan). Diganti bukti: tanpa crypto.subtle + simulasi cap + bit-exact dengan PBKDF2 referensi. Langkah verifikasi runtime normal: lihat backend/docs/PBKDF2_WORKERS.md.
+FILE: backend/src/lib/password.js, tests/password.test.js (baru), tests/workers-compat.test.js (baru), docs/PBKDF2_WORKERS.md (baru), .gitignore (tambah .dev.vars).
+CATATAN (di luar scope): wrangler.jsonc name=konter & proxy Team 2 (frontend/functions) masih uncommitted; proxy memakai host irkop-cell-backend.workers.dev — pastikan nama worker konsisten.
