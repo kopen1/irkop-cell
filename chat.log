@@ -1006,3 +1006,63 @@ STATUS: READY FOR RELEASE
 - Critical Bugs: NO
 - Blockers: NONE
 LAPORAN LENGKAP: /root/konter/TEAM2_RELEASE_PRECHECK.md
+
+
+========== 2026-08-11 21:02 WIB | RELEASE AGENT | RELEASE = BLOCKED (2 BLOCKERS) ==========
+IRKOP CELL — RELEASE PROGRESS REPORT (BLOCKED)
+==============================================
+RELEASE VERSION: 1.0.0-final
+GIT COMMIT: c24fcbe (pushed to github.com/kopen1/irkop-cell main, fast-forward)
+TIMEZONE: Asia/Jakarta
+SOURCE: PASS (flattened to repo root; backend+frontend integrated)
+TEST: 55/55 PASS (backend 34/34 + frontend 21/21, re-run on flattened source)
+BUILD: PASS (backend dry-run 120.11 KiB / frontend vite build OK)
+DATABASE: PASS (irkop-d1, 850aefc2-09d3-45f9-a39d-10260e115c4f)
+MIGRATION: PASS (0001_init.sql + 0002_manual_transaksi.sql applied; 22 tables; tanggal_transaksi + idx verified; seeds OK)
+BACKEND DEPLOY: PASS (irkop-cell-backend.irkop.workers.dev, version 5ec0944c-3852-4b83-8f23-a003800692db; JWT_SECRET set as CF secret, rotated; vars APP_TIMEZONE/TOKEN_TTL)
+FRONTEND DEPLOY: PASS (irkop-cell-frontend.pages.dev, deployment 626b9f48-1c92-49a6-8907-5a0024b0137c, linked to c24fcbe)
+API: FAIL -> BLOCKER-1 (integration)
+SECURITY (auth gates): PASS so far (401 on unauthenticated /api/kasir/reminder-closing, /api/notifhook no-key)
+FINANCIAL: PENDING (blocked by BLOCKER-2, requires login)
+RESPONSIVE: PENDING (no GUI browser in environment)
+NOTIFHOOK: POST-GO-LIVE CONFIGURATION (real-application parsing for DANA/SeaBank/OrderKuota)
+REMINDER CLOSING: auth gate PASS (401 unauth); banner flow pending login
+BROWSER: FAIL -> BLOCKER-1 (frontend cannot reach API in production)
+CRITICAL BUG: YES (2 blockers below)
+BACKEND URL: https://irkop-cell-backend.irkop.workers.dev
+FRONTEND URL: https://irkop-cell-frontend.pages.dev
+
+BLOCKER-1 [OWNER: TEAM 1 + TEAM 2] — API/frontend integration
+  Symptom: pages.dev/api/* does NOT reach the Worker. POST /api/auth/login -> 405;
+  GET /api/kasir/reminder-closing -> 200 SPA index.html; /_redirects served as HTML.
+  Root cause: Cloudflare Pages _redirects proxying ONLY supports relative URLs —
+  external domains CANNOT be proxied (developers.cloudflare.com/pages/configuration/redirects/,
+  "Proxying will only support relative URLs on your site. You cannot proxy external domains.")
+  and 200-status proxy is GET-only. The chosen same-origin _redirects proxy to
+  irkop-cell-backend.irkop.workers.dev is unsupported. Worker has no CORS headers, so
+  direct cross-origin frontend->worker also fails in a browser.
+  Verified recommended fix (a): frontend Pages Function functions/[[path]].js that
+  forwards all methods to the Worker (no CORS needed, works on *.pages.dev).
+  Alternative fix (b): add CORS middleware to Worker + set VITE_API_BASE to worker URL.
+
+BLOCKER-2 [OWNER: TEAM 1] — No bootstrap admin user
+  Symptom: production users table is empty; login cannot succeed.
+  Root cause: no seed/CLI/documented procedure creates the first user; the only
+  createUser route (backend/src/routes/users.js) requires an existing admin (chicken-egg).
+  Required fix: documented first-admin bootstrap (e.g., one-time creation script or
+  guarded first-run endpoint) OR operator-run SQL insert using the app's PBKDF2-SHA256
+  210k-iteration hash (backend/src/lib/password.js). Live smoke/financial gates are blocked
+  on this.
+
+NON-BLOCKERS (recorded, not release-critical):
+  - frontend/index.html title/description say "Iirkop Cell" (double-i typo) [OWNER: TEAM 2, minor]
+  - legacy_env_names false-setting wrangler warning (no functional impact)
+  - transaksi.tanggal_transaksi declared NOT NULL final; made nullable in 0002 then backfilled (SQLite)
+  - pengeluaran backend default date = UTC fallback; frontend always sends WIB tanggal
+  - NotifHook real-application parsing = POST-GO-LIVE CONFIGURATION
+  - Reminder-closing push notification channel still manual
+
+NEXT ACTION: Wait for TEAM 1/TEAM 2 fix + TEAM 3 QA regression -> Release Agent re-applies
+migration (if needed), re-deploys backend/frontend, re-runs full live smoke/financial/
+timezone/security gates -> reissues FINAL RELEASE REPORT.
+FINAL DECISION (current): BLOCKED
