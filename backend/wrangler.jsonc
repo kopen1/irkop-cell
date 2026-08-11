@@ -1,0 +1,22 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "irkop-cell-backend",
+  "main": "src/index.js",
+  "compatibility_date": "2026-08-01",
+  "legacy_env_names": false,
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "irkop-d1",
+      "database_id": "850aefc2-09d3-45f9-a39d-10260e115c4f",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "APP_TIMEZONE": "Asia/Jakarta",
+    "TOKEN_TTL": "2592000"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

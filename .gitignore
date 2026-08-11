@@ -1,0 +1,19 @@
+# Secrets & credentials
+.env
+.env.*
+!.env.example
+token.md
+token.md.bak
+*.pem
+*.key
+
+# Dependencies & build artifacts
+node_modules/
+dist/
+.wrangler/
+
+# Logs
+*.log
+
+# Nested repo artefact (source sudah di-flatten ke root)
+Revisi/

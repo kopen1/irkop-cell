@@ -1,0 +1,21 @@
+{
+  "name": "irkop-cell-backend",
+  "version": "6.2.0",
+  "private": true,
+  "type": "module",
+  "description": "IRKOP CELL — Team 1 Core & Backend (Cloudflare Workers + D1)",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "db:migrate": "wrangler d1 migrations apply irkop-d1",
+    "db:local": "wrangler d1 migrations apply irkop-d1 --local",
+    "test": "node --test --test-concurrency=1 'tests/*.test.js'"
+  },
+  "devDependencies": {
+    "wrangler": "^4.120.1"
+  },
+  "allowScripts": {
+    "esbuild@0.28.1": true,
+    "workerd@1.20260804.1": true
+  }
+}

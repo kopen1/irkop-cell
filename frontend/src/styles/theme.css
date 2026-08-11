@@ -1,0 +1,104 @@
+:root {
+  --font-base: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-mono: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, 'Courier New', monospace;
+
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.12);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.14);
+  --shadow-lg: 0 10px 30px rgba(0, 0, 0, 0.22);
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --space-7: 48px;
+
+  --sidebar-width: 248px;
+  --topbar-height: 60px;
+  --bottomnav-height: 60px;
+  --container-max: 1200px;
+}
+
+[data-theme='classic'] {
+  color-scheme: dark;
+
+  --bg-body: #0e1a2b;
+  --bg-surface: #15263c;
+  --bg-surface-alt: #1c3150;
+  --bg-input: #0f1c30;
+  --bg-hover: #1e3557;
+  --bg-active: #24406a;
+
+  --text-primary: #f2f4f8;
+  --text-secondary: #a8b6c9;
+  --text-muted: #6f7f96;
+  --text-on-accent: #201607;
+
+  --accent: #d8a94e;
+  --accent-hover: #e6bd6b;
+  --accent-soft: rgba(216, 169, 78, 0.16);
+  --accent-border: rgba(216, 169, 78, 0.45);
+
+  --border: #27405f;
+  --border-strong: #33507380;
+
+  --success: #4fbf7f;
+  --success-soft: rgba(79, 191, 127, 0.16);
+  --warning: #e0a13d;
+  --warning-soft: rgba(224, 161, 61, 0.16);
+  --danger: #e06a5a;
+  --danger-soft: rgba(224, 106, 90, 0.16);
+  --info: #5aa2e8;
+  --info-soft: rgba(90, 162, 232, 0.16);
+
+  --focus-ring: rgba(216, 169, 78, 0.55);
+
+  --table-header: #0f1c30;
+  --table-row-alt: #14233800;
+  --positive: #7ad0a0;
+  --negative: #ef9386;
+}
+
+[data-theme='paper'] {
+  color-scheme: light;
+
+  --bg-body: #ece9e0;
+  --bg-surface: #ffffff;
+  --bg-surface-alt: #f7f4ec;
+  --bg-input: #ffffff;
+  --bg-hover: #f3efe4;
+  --bg-active: #eae4d4;
+
+  --text-primary: #1c2430;
+  --text-secondary: #4d5a6c;
+  --text-muted: #8a93a3;
+  --text-on-accent: #ffffff;
+
+  --accent: #12375c;
+  --accent-hover: #1b4a7a;
+  --accent-soft: rgba(18, 55, 92, 0.10);
+  --accent-border: rgba(18, 55, 92, 0.4);
+
+  --border: #d8d2c2;
+  --border-strong: #bfb7a2;
+
+  --success: #2e8b57;
+  --success-soft: rgba(46, 139, 87, 0.12);
+  --warning: #b0762c;
+  --warning-soft: rgba(176, 118, 44, 0.12);
+  --danger: #c2453a;
+  --danger-soft: rgba(194, 69, 58, 0.12);
+  --info: #2b6cb0;
+  --info-soft: rgba(43, 108, 176, 0.12);
+
+  --focus-ring: rgba(18, 55, 92, 0.35);
+
+  --table-header: #f0ece0;
+  --table-row-alt: #faf8f2;
+  --positive: #26734b;
+  --negative: #b13a2e;
+}

@@ -1,0 +1,4 @@
+# Cloudflare Pages proxy: same-origin /api -> Cloudflare Workers backend
+# Membuat frontend (Pages) dan backend (Worker) terlihat same-origin sehingga
+# VITE_API_BASE kosong berfungsi di production tanpa perlu CORS di Worker.
+/api/* https://irkop-cell-backend.irkop.workers.dev/api/:splat 200
