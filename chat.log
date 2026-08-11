@@ -1537,3 +1537,27 @@ REQUIRED TO UNBLOCK (business/owner decision, NOT release agent):
 ACTION TAKEN: no production deploy performed this round. throwaway diagnostics (hashdiag, pwdiag)
 deleted. konter worker still on earlier pre-fix version; D1 clean (users=0). No secrets written.
 FINAL DECISION (current): BLOCKED — STOP until Team 1 + owner resolve runtime feasibility.
+
+
+========== 2026-08-12 03:44 | RELEASE AGENT | FINAL RELEASE GATE -> BLOCKED ==========
+IRKOP CELL — FINAL RELEASE GATE VERIFICATION (LIVE)
+====================================================
+Context: user directed final gates on konter.irkop.workers.dev + konter.irkop.pages.dev.
+REPO/SOURCE CHECK:
+- HEAD = da65d60; working tree clean; source flattened at root; no Revisi gitlink/nested repo.
+- HEAD backend/src/lib/password.js = BROKEN crypto.subtle PBKDF2 (51 lines, 2x crypto.subtle).
+  The pure-JS fix (ce7e5a6) was REVERTED by c60ccfa and NOT re-landed. No new team commits since
+  release agent BLOCKER-3 FAIL report. BLOCKER-3 source state UNCHANGED.
+RUNTIME CHECK (live, konter.irkop.workers.dev):
+- GET /api/auth/me -> 401 (worker live, auth gate OK)
+- POST /api/auth/login {} -> 400
+- POST /api/auth/bootstrap wrong secret -> 403 (header check OK)
+- D1 irkop-d1: users=0 -> bootstrap never succeeded; login impossible.
+- Deployed worker runs pre-fix code (crypto.subtle 210k -> NotSupportedError on Workers).
+DECISIVE RUNTIME BLOCKER-3 EVIDENCE (throwaway workers, exact source): crypto.subtle PBKDF2 >100k
+  -> NotSupportedError; pure-JS PBKDF2 210k -> 1042 CPU time limit. This account's Workers budget
+  cannot run 210k PBKDF2 in any implementation. Requires paid plan (30s CPU) + re-land fix at HEAD,
+  OR explicit owner decision to lower security parameter (forbidden without approval).
+FRONTEND URL: konter.irkop.pages.dev NOT provisioned (Pages project "konter" does not exist;
+  live check HTTP 000). Current frontend lives at irkop-cell-frontend.pages.dev (HTTP 200).
+DECISION: BLOCKED. No production deploy performed this round. Stop.
