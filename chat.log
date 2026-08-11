@@ -1351,3 +1351,28 @@ TESTS: 58/58 PASS. Baru: tests/password.test.js (8) + tests/workers-compat.test.
 WORKERD RUNTIME: tidak bisa start di sandbox ini (termux/proot: tcmalloc MmapAligned gagal, batasan lingkungan). Diganti bukti: tanpa crypto.subtle + simulasi cap + bit-exact dengan PBKDF2 referensi. Langkah verifikasi runtime normal: lihat backend/docs/PBKDF2_WORKERS.md.
 FILE: backend/src/lib/password.js, tests/password.test.js (baru), tests/workers-compat.test.js (baru), docs/PBKDF2_WORKERS.md (baru), .gitignore (tambah .dev.vars).
 CATATAN (di luar scope): wrangler.jsonc name=konter & proxy Team 2 (frontend/functions) masih uncommitted; proxy memakai host irkop-cell-backend.workers.dev — pastikan nama worker konsisten.
+
+[2026-08-11] [TEAM 3] >> [RELEASE AGENT]
+BLOCKER-3 REGRESSION QA — PENDING TEAM 1 FIX
+=============================================
+STATUS: BLOCKED
+
+CONTEXT:
+- Production Workers runtime menolak PBKDF2 >100k iterations
+- Source code saat ini: PBKDF2_ITERATIONS = 210000
+- Auth gagal di Workers production
+
+TEAM 3 VERIFICATION:
+- Backend tests: 34/34 PASS (Node environment)
+- Frontend tests: 21/21 PASS
+- Build: PASS (1.25s)
+
+BLOCKED UNTIL:
+- Team 1 provides fix for Workers compatibility
+- Team 3 verifies fix does not degrade security below acceptable level
+- Runtime test on actual Workers environment (not just Node)
+
+CATATAN:
+- Tidak mengubah source code (perintah QA)
+- Menunggu fix dari Team 1
+- Setelah fix tersedia, akan jalankan regression full
