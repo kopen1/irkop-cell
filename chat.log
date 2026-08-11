@@ -1510,3 +1510,30 @@ READY FOR RELEASE AGENT
 
 Commit diverifikasi: ce7e5a6
 Timestamp: 2026-08-11 18:19:59 UTC
+
+
+========== 2026-08-12 03:09 | RELEASE AGENT | BLOCKER-3 RE-VERIFY (RUNTIME) -> FAIL -> RELEASE BLOCKED ==========
+IRKOP CELL — RELEASE AGENT BLOCKER-3 RE-VERIFICATION (WORKERS RUNTIME)
+=====================================================================
+INPUT: Team 1 fix ce7e5a6 (pure-JS PBKDF2-HMAC-SHA256 210k) + Team 3 regression QA (chat.log 1381-1509).
+RE-VERIFICATION — actual repo + actual Workers runtime (not Node tests):
+1) SOURCE MISMATCH: commit c60ccfa "TEAM3: Blocker-3 Regression QA - PASS - READY FOR RELEASE"
+   REVERTED backend/src/lib/password.js back to the OLD crypto.subtle version (177 lines removed,
+   back to 25-line crypto.subtle PBKDF2). HEAD's password.js = broken crypto.subtle at 210k
+   (verified: git show HEAD:backend/src/lib/password.js contains crypto.subtle, 2 occurrences).
+   So the verified fix does NOT exist at HEAD; the PASS claim contradicts the committed source.
+2) RUNTIME TEST of the pure-JS fix (ce7e5a6 password.js, exact code) via throwaway worker:
+   RESULT: "error code: 1042" = CPU time limit exceeded. Pure-JS PBKDF2-HMAC-SHA256 210.000 iterasi
+   (~550 ms CPU per Team 1's own note) EXCEEDS this account's Workers CPU budget (free tier ~10 ms).
+3) CONCLUSION: on this account/runtime, 210k PBKDF2 CANNOT run in any implementation:
+   - crypto.subtle PBKDF2 >100,000 iterasi -> NotSupportedError (previously proven).
+   - pure-JS PBKDF2 210,000 iterasi -> 1042 CPU time limit (proven now).
+   - Both proven empirically on the live Workers runtime. BLOCKER-3 = FAIL (runtime).
+REQUIRED TO UNBLOCK (business/owner decision, NOT release agent):
+   (a) Upgrade Cloudflare Workers to PAID plan (30s CPU limit) so pure-JS 210k runs; OR
+   (b) Lower PBKDF2 iterations to fit ~10 ms free-tier budget — but user explicitly forbade
+       lowering the security parameter; would need explicit owner approval + PRD change.
+   PLUS: the pure-JS fix must be re-landed at HEAD (currently reverted in c60ccfa).
+ACTION TAKEN: no production deploy performed this round. throwaway diagnostics (hashdiag, pwdiag)
+deleted. konter worker still on earlier pre-fix version; D1 clean (users=0). No secrets written.
+FINAL DECISION (current): BLOCKED — STOP until Team 1 + owner resolve runtime feasibility.
