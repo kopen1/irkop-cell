@@ -28,10 +28,10 @@ function match(pathname) {
   if (parts[0] !== 'api') return null;
   const seg = parts.slice(1);
   if (seg.length && seg[0] === 'auth') {
-    return { name: 'auth', param: null, rest: seg };
+    return { name: 'auth', param: seg[1] ?? null, rest: seg };
   }
   if (seg.length && seg[0] === 'notifhook') {
-    return { name: 'notifhook', param: null, rest: seg };
+    return { name: 'notifhook', param: seg[1] ?? null, rest: seg };
   }
   if (seg.length === 3 && seg[2] === 'permissions') {
     return { name: 'permissions', param: seg[1], rest: seg };
@@ -226,6 +226,11 @@ export default {
     try {
       if (method(request) === 'POST' && url.pathname === '/api/auth/login') {
         const result = await authRoutes.login(db, request, env);
+        return json(result);
+      }
+
+      if (method(request) === 'POST' && url.pathname === '/api/auth/bootstrap') {
+        const result = await authRoutes.bootstrapFirstAdmin(db, request, env);
         return json(result);
       }
 

@@ -20,6 +20,7 @@ Timezone bisnis: `Asia/Jakarta` (WIB)
 | Method | Path | Permission | Keterangan |
 |---|---|---|---|
 | POST | `/api/auth/login` | publik | login → `{token, user}` |
+| POST | `/api/auth/bootstrap` | publik (sekali) | buat admin pertama saat tabel users kosong, wajib header `X-Bootstrap-Secret` |
 | POST | `/api/auth/logout` | login | invalidasi sisi klien (JWT stateless) |
 | GET | `/api/auth/me` | login | profil + permission |
 | GET | `/api/kasir/current` | halaman kasir | status sesi hari ini |
@@ -76,6 +77,18 @@ Request: `{ "username": "...", "password": "..." }`
 Success 200: `{ "token": "<JWT>", "user": { "id", "nama", "username", "role", "permissions": {} } }`
 Error: 400 missing username/password; 401 invalid_credentials; 403 user_inactive.
 Catatan: JWT HS256, TTL default 30 hari, tanpa paksa-expiry (sesuai PRD 3.1).
+
+### POST /api/auth/bootstrap
+
+Hanya tersedia saat tabel `users` kosong (provisioning admin pertama). Wajib header `X-Bootstrap-Secret` yang nilainya diambil dari env `BOOTSTRAP_SECRET` (bukan hardcode di source, lihat `docs/FIRST_ADMIN_BOOTSTRAP.md`).
+
+Request: `{ "nama": "...", "username": "...", "password": "...", "role": "admin" }`
+- `role` dipaksa `admin`; nilai lain → 400.
+- Hanya boleh dipanggil SEKALI; setelah ada user → 409 `bootstrap_done`.
+- Tanpa auth; login tetap lewat `/api/auth/login`.
+
+Success 200: `{ "message": "...", "user": { "id", "nama", "username", "role", "permissions": {} } }`
+Error: 503 `bootstrap_not_configured` (env belum diset); 403 `invalid_bootstrap_secret`; 400 validasi; 409 `bootstrap_done`.
 
 ### GET /api/kasir/current
 Success:
