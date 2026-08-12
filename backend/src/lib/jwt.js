@@ -7,8 +7,13 @@ const b64url = (buf) =>
 
 const b64urlDecode = (s) => {
   const t = s.replace(/-/g, '+').replace(/_/g, '/');
+  if (t.length % 4 === 1) return null;
   const padLen = t.length % 4 === 0 ? 0 : 4 - (t.length % 4);
-  return Uint8Array.from(atob(t + '='.repeat(padLen)), (c) => c.charCodeAt(0));
+  try {
+    return Uint8Array.from(atob(t + '='.repeat(padLen)), (c) => c.charCodeAt(0));
+  } catch {
+    return null;
+  }
 };
 
 async function hmacSign(secret, data) {
@@ -48,7 +53,9 @@ export async function verifyToken(token, secret) {
   const parts = String(token).split('.');
   if (parts.length !== 3) return null;
   const [h, b, s] = parts;
-  const ok = await hmacVerify(secret, `${h}.${b}`, b64urlDecode(s));
+  const sig = b64urlDecode(s);
+  if (!sig) return null;
+  const ok = await hmacVerify(secret, `${h}.${b}`, sig);
   if (!ok) return null;
   let payload;
   try {

@@ -33,6 +33,14 @@ test('login: admin & karyawan berhasil, password salah ditolak', async () => {
   assert.equal(noAuth.status, 401);
 });
 
+test('auth: token malformed (base64 length invalid) ditolak 401 bukan 500', async () => {
+  const { env } = await bootstrap();
+  const res = await call(env, '/api/kasir/current', { token: 'not.a.token' });
+  assert.equal(res.status, 401);
+  const res2 = await call(env, '/api/auth/me', { token: 'aaaa.bbbb.zzzzz' });
+  assert.equal(res2.status, 401);
+});
+
 test('permission: karyawan default tidak boleh akses laporan/pengaturan, admin boleh', async () => {
   const { env, karyToken, adminToken } = await bootstrap();
   const k = await call(env, '/api/logs', { token: karyToken });
