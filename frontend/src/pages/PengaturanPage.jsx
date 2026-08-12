@@ -266,7 +266,7 @@ function UsersTab() {
   const [editUser, setEditUser] = useState(null);
   const [permUser, setPermUser] = useState(null);
 
-  const users = state.data?.items || [];
+  const users = Array.isArray(state.data) ? state.data : (state.data?.items || []);
 
   return (
     <Card title="Manajemen User">
