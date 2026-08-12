@@ -1,76 +1,61 @@
-# IRKOP CELL — BLOCKER-3: PBKDF2 di Cloudflare Workers
+# IRKOP CELL — BLOCKER-3 / FREE PLAN: PBKDF2 di Cloudflare Workers
 
-Status: FIXED (menunggu regression QA Team 3 & re-deploy oleh Release Agent).
+Status: FIXED — parameter final **12.000 iterasi, PBKDF2-HMAC-SHA256 native `crypto.subtle`**, diukur langsung di Workers runtime (Metrics `cpuTimeMs`).
 File: `src/lib/password.js`.
 
-## Root cause
+## Konteks & keputusan
 
-`src/lib/password.js` sebelumnya memakai Web Crypto `crypto.subtle.deriveBits({ name: 'PBKDF2', iterations: 210000 })`.
-Cloudflare Workers (workerd) membatasi PBKDF2 Web Crypto **maksimal 100.000 iterasi**:
+- workerd membatasi PBKDF2 Web Crypto `crypto.subtle.deriveBits` **maksimal 100.000 iterasi** (`NotSupportedError`).
+- Plan worker = **Workers Free**: CPU **10 ms/request** (Paid 30 s default, s.d. 5 mnt via `limits.cpu_ms`).
+- Keputusan pemilik (option B): **tetap di Free**, turunkan iterasi — bukan naikkan plan.
+- Ukur **di Workers runtime asli** via `cpuTimeMs` (Metrics/GraphQL `workersInvocationsAdaptive.quantiles.cpuTimeP50`), bukan Node. Hasil:
+  (alat: `backend/bench/workers-pbkdf2-bench.mjs` + `scan-pbkdf2.mjs`)
 
-```
-NotSupportedError: iteration counts above 100000 are not supported (requested 210000).
-```
+  | iter | cpuP50 | cpuP90 | per_iter |
+  |------|--------|--------|----------|
+  | 5000 | 2.72ms | 2.72ms | 0.543us |
+  | 10000 | 2.56ms | 2.60ms | 0.256us |
+  | 12000 | 5.36ms | 5.91ms | 0.447us |
+  | 15000 | 3.88ms | 3.88ms | 0.259us |
+  | 18000 | 6.25ms | 7.10ms | 0.347us |
+  | 20000 | 5.04ms | 5.81ms | 0.252us |
 
-Node.js tidak punya batas ini, sehingga seluruh test backend (login, bootstrap, dst.) lulus secara lokal
-padahal di production Worker request gagal 500. **Test PASS di Node bukan bukti kompatibel dengan Workers.**
+- Data per menit berisik (p50 dari ~25 sampel). Dipakai model konservatif 0.35µs/iter + ~1ms overhead (cocok dgn 12000 & 18000); 12000 ÷ 5.2ms p50 → **margin ~48% dari 10ms**. Nilai terbesar yang ber-margin aman = **12.000** (15k: ~6.2ms, tipis; 20k: ~8ms, tanpa margin).
 
-## Perbaikan
+## Implementasi (`src/lib/password.js`)
 
-`src/lib/password.js` kini mengimplementasikan **PBKDF2-HMAC-SHA256 murni JavaScript (RFC 2898)**:
+- Jalur utama: **`crypto.subtle` native (BoringSSL)** PBKDF2-HMAC-SHA256, iterasi **12.000** (≤ cap 100k), salt acak 16 byte, dkLen 32.
+- Fallback **pure-JS (RFC 2898)** **hanya untuk verify hash legacy** ber-iterasi >100k (era 210k) yang ditolak `crypto.subtle` di workerd — tidak dipakai untuk hash baru.
+- Format hash **tidak berubah**: `pbkdf2$v1$<iterasi>$<salt_b64>$<hash_b64>`; hash legacy 210k tetap terverifikasi (bit-exact sama, sudah diuji lintas-runtime).
+- `verifyPassword` menolak iterasi < 1 atau > 1.000.000 dan base64 rusak → `false` (tanpa throw).
+- API `hashPassword`/`verifyPassword`/`randomToken` tidak berubah.
 
-- Tidak memanggil `crypto.subtle` sama sekali untuk hash/verifikasi (bukti: test statis).
-- Parameter PRD dipertahankan: **210.000 iterasi**, PBKDF2-HMAC-SHA256, salt acak 16 byte per password.
-- SHA-256 ditulis sendiri (pure JS) — bekerja identik di Node, workerd, dan browser.
-- Optimasi: state SHA-256 untuk `ipad`/`opad` di-precompute sehingga hanya 2 kompresi per iterasi (~510–615 ms per operasi di Node V8 / workerd V8).
-- `hashPassword()` / `verifyPassword()` / `randomToken()` signature API tidak berubah.
-- Format hash **tidak berubah**: `pbkdf2$v1$<iterasi>$<salt_b64>$<hash_b64>`. PBKDF2-HMAC-SHA256 standar → hasil **identik** dengan hashing crypto.subtle lama → **tidak perlu migrasi/re-hash**.
+## Keamanan
 
-## Alasan keamanan
+- 12.000 iterasi native lebih kuat dari opsi pure-JS yang bisa muat 10ms (~4k) dan memakai BoringSSL (audit Cloudflare) bukan crypto JS buatan sendiri.
+- Di bawah rekomendasi OWASP (600k/SHA-256) — kompromi eksplisit demi Workers Free (10ms); dicatat sebagai risiko residu + rekomendasi: bila traffic naik, evaluasi naik ke Paid (30s CPU) dan naikkan iterasi (mis. 100k native).
 
-- Iterasi 210.000 dipertahankan persis seperti PRD (tidak diturunkan ke ≤100.000).
-- Standar PBKDF2 (RFC 2898) dengan HMAC-SHA256 — bukan konstruksi ad-hoc; output diverifikasi sama dengan implementasi referensi (Node crypto, OpenSSL).
-- Salt acak 16 byte per password; verifikasi memakai perbandingan constant-time.
-- `verifyPassword` toleran terhadap hash rusak/base64 invalid (return false, tidak throw).
+## Limitation: verifikasi legacy 210k di Workers
 
-## Catatan performa & CPU (Workers)
-
-- 210.000 iterasi ≈ **510–615 ms CPU** per operasi hash/verify (di Node V8; workerd V8 serupa).
-- CPU dihitung terhadap limit Workers: **Free 10 ms, Paid default 30 s** (dapat dinaikkan sampai 5 menit via `limits.cpu_ms`).
-- **WAJIB production di plan Paid** (default 30 s) — login (~0.5 s CPU) aman. Di plan Free, pure-JS maupun crypto.subtle PBKDF2 tidak muat di 10 ms.
-- Login = 1× verify (~0.5 s); create/update user & bootstrap = 1× hash (~0.6 s).
+- verify hash legacy 210k lewat fallback pure-JS ≈ lambat (Node ~17 s, workerd V8 jauh lebih cepat namun tetap >10ms) → **melebihi budget Free bila dipicu**. D1 production users = 0, sehingga tidak ada hash legacy yang harus diverifikasi. Jika nanti muncul, lakukan re-hash saat login (verify legacy lalu simpan hash 12k baru).
 
 ## Verifikasi
 
-1. `npm test` → **58/58 PASS**, termasuk:
-   - `tests/password.test.js` (8): format hash, verify benar/salah, hash rusak, konsistensi lintas-runtime (hash Node crypto 210k terverifikasi), salt acak, reject password pendek, timing.
-   - `tests/workers-compat.test.js` (4): bukti statis password.js tanpa `crypto.subtle`; simulasi cap workerd (`deriveBits` PBKDF2 >100k → NotSupportedError) dan seluruh alur **bootstrap → login → me** tetap lulus di bawah cap tersebut.
-2. `npx wrangler deploy --dry-run` → PASS (bundle 127.72 KiB / gzip 26.47 KiB).
+1. `npm test` → **60/60 PASS**:
+   - `tests/password.test.js` (10): format 12000, verify benar/salah/hash rusak (tanpa throw), konsistensi lintas-runtime, legacy 210000 valid (fallback), salt acak, reject pendek, timing.
+   - `tests/workers-compat.test.js` (5): statis (native 12000 + cap 100k + fallback pure-JS ada), simulasi cap workerd (NotSupportedError) → hash/verify 12000 jalan, legacy 210k jalan via fallback, **bootstrap → login → me** utuh.
+2. `npx wrangler deploy --dry-run` → PASS.
+3. Benchmark runtime asli diisi ulang bila parameter diubah (file `backend/bench/*`).
 
 ### Catatan: workerd tidak bisa dijalankan di sandbox ini
 
-Runtime workerd (`wrangler dev`) **tidak dapat start di lingkungan kerja ini** karena batasan lingkungan
-(termux/proot; tcmalloc gagal `MmapAligned()` untuk region tagged 1 GB — `sandbox/VSS limitations`),
-bukan karena kode. Bukti pengganti yang diberikan:
-- kode hash/verify **tanpa** `crypto.subtle` (cap PBKDF2 100k tidak mungkin terpicu);
-- simulasi cap workerd yang **presisi** (NotSupportedError yang sama) — seluruh alur auth lulus;
-- kesamaan bit-exact dengan PBKDF2 referensi di 210k iterasi.
-
-Langkah verifikasi runtime yang disarankan untuk Release Agent/Team 3 di environment normal:
-
-```bash
-cd backend
-echo "BOOTSTRAP_SECRET=<secret>" > .dev.vars   # secret lokal, jangan commit
-npx wrangler dev --port 8787
-# lalu:
-curl -X POST http://127.0.0.1:8787/api/auth/bootstrap -H 'Content-Type: application/json' -H 'X-Bootstrap-Secret: <secret>' \
-  -d '{"nama":"Admin","username":"admin","password":"<password min 8>","role":"admin"}'
-curl -X POST http://127.0.0.1:8787/api/auth/login -H 'Content-Type: application/json' \
-  -d '{"username":"admin","password":"<password>"}'
-# keduanya harus 200 (bukan 500 NotSupportedError)
-```
+`wrangler dev` tidak bisa start (termux/proot; tcmalloc `MmapAligned()` gagal region 1 GB — murni keterbatasan lingkungan).
+Bukti pengganti yang diberikan saat BLOCKER-3:
+- simulasi cap workerd yang presisi (NotSupportedError sama) — seluruh alur auth (bootstrap→login→me) lulus;
+- kesamaan bit-exact & lintas-runtime dengan PBKDF2 referensi;
+- **angka CPU final dari Cloudsflare Metrics** (`workersInvocationsAdaptive.cpuTimeP50`) pada worker `konter-pbkdf2-bench` — bukan Node.
 
 ## Tidak diubah
 
-- Schema D1, API contract, financial engine (`src/financial/*`): **tidak disentuh**.
-- Hanya `src/lib/password.js` + test + docs.
+- Schema D1, API contract, financial engine (`src/financial/*`), worker produksi `konter`, plan: **tidak disentuh**.
+- Yang berubah: `src/lib/password.js` (+test +docs); tambahan `backend/bench/*` (alat ukur; tidak di-deploy ke produksi).

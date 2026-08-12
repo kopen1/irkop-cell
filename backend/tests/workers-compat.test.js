@@ -3,12 +3,15 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import { pbkdf2Sync, randomBytes } from 'node:crypto';
 import { hashPassword, verifyPassword } from '../src/lib/password.js';
 import worker from '../src/index.js';
 import { setupEnv } from './helpers.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const passwordSrc = readFileSync(join(__dirname, '../src/lib/password.js'), 'utf8');
+
+const b64encode = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf)));
 
 // Meniru limit workerd: crypto.subtle.deriveBits(PBKDF2) dengan iterasi
 // > 100000 menolak dengan NotSupportedError. Implementasi baru tidak boleh
@@ -30,9 +33,11 @@ function applyWorkerdPbkdf2Cap() {
   return () => { proto.deriveBits = orig; };
 }
 
-test('statis: password.js tidak memanggil crypto.subtle (cap PBKDF2 Workers tidak relevan)', () => {
-  assert.ok(!/crypto\.subtle\./.test(passwordSrc), 'password.js tidak boleh memanggil crypto.subtle.<method>');
-  assert.ok(passwordSrc.includes('210000'), 'iterasi 210000 dipertahankan');
+test('statis: jalur utama crypto.subtle native @12000 (Free-safe); fallback pure-JS utk legacy >100k', () => {
+  assert.ok(passwordSrc.includes('crypto.subtle'), 'jalur utama memakai crypto.subtle native');
+  assert.ok(passwordSrc.includes('12000'), 'iterasi default = 12000 (<= cap workerd)');
+  assert.ok(passwordSrc.includes('MAX_NATIVE_ITER = 100000'), 'cap native 100000 didefinisikan');
+  assert.ok(passwordSrc.includes('pbkdf2Js'), 'fallback pure-JS tersedia utk legacy >100k');
 });
 
 test('workerd cap: simulasi deriveBits PBKDF2 >100k benar-benar ditolak (stub valid)', async () => {
@@ -48,11 +53,24 @@ test('workerd cap: simulasi deriveBits PBKDF2 >100k benar-benar ditolak (stub va
   }
 });
 
-test('workerd cap: hashPassword & verifyPassword tetap bekerja (210k iterasi)', async () => {
+test('workerd cap: hashPassword & verifyPassword tetap bekerja (iterasi native 12000)', async () => {
   const restore = applyWorkerdPbkdf2Cap();
   try {
     const stored = await hashPassword('secret1234');
-    assert.equal(stored.split('$')[2], '210000');
+    assert.equal(stored.split('$')[2], '12000');
+    assert.equal(await verifyPassword('secret1234', stored), true);
+    assert.equal(await verifyPassword('wrong-pass', stored), false);
+  } finally {
+    restore();
+  }
+});
+
+test('workerd cap: verify hash legacy 210000 (>100k) tetap jalan via fallback pure-JS', async () => {
+  const restore = applyWorkerdPbkdf2Cap();
+  try {
+    const salt = randomBytes(16);
+    const dk = pbkdf2Sync('secret1234', salt, 210000, 32, 'sha256');
+    const stored = `pbkdf2$v1$210000$${b64encode(salt)}$${b64encode(new Uint8Array(dk))}`;
     assert.equal(await verifyPassword('secret1234', stored), true);
     assert.equal(await verifyPassword('wrong-pass', stored), false);
   } finally {
