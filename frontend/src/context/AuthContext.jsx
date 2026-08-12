@@ -78,16 +78,21 @@ export function AuthProvider({ children }) {
   }, []);
 
   const value = useMemo(() => {
-    const permissions = user
-      ? Array.isArray(user.permissions)
-        ? { role: user.role, halaman: user.permissions }
-        : { role: user.role, halaman: user.permissions?.halaman ?? [] }
-      : { role: null, halaman: [] };
+    // Backend returns permissions as { dashboard: true, transaksi: true, ... } for admin
+    // or as { halaman: ['dashboard', 'transaksi', ...] } from legacy format
+    const rawPerms = user?.permissions;
+    let halaman = [];
+    if (Array.isArray(rawPerms)) {
+      halaman = rawPerms;
+    } else if (rawPerms && typeof rawPerms === 'object') {
+      // Convert { dashboard: true, ... } -> ['dashboard', ...]
+      halaman = Object.keys(rawPerms).filter((k) => rawPerms[k] === true);
+    }
     return {
       user,
       isAdmin: user?.role === 'admin',
-      permissions,
-      can: (hallKey) => (user?.role === 'admin' ? hallKey !== 'gaji_karyawan' : permissions.halaman.includes(hallKey)),
+      permissions: { role: user?.role, halaman },
+      can: (hallKey) => (user?.role === 'admin' ? hallKey !== 'gaji_karyawan' : halaman.includes(hallKey)),
       login,
       logout,
       ready,
