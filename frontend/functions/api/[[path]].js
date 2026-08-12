@@ -37,6 +37,19 @@ export const onRequest = async (context) => {
   const targetUrl = new URL(request.url);
   const backendUrl = `${BACKEND_BASE}${backendPath}${targetUrl.search}`;
 
+  // Handle CORS preflight
+  if (request.method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'access-control-allow-origin': '*',
+        'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'access-control-allow-headers': 'authorization, content-type, idempotency-key, accept, origin, referer, x-api-key, x-bootstrap-secret',
+        'access-control-max-age': '86400',
+      },
+    });
+  }
+
   const headers = new Headers();
   for (const [key, value] of request.headers) {
     if (FORWARD_REQUEST_HEADERS.includes(key.toLowerCase())) headers.set(key, value);
