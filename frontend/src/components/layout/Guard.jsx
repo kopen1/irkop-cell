@@ -30,8 +30,8 @@ export function RequirePermission({ permission, children }) {
   return children;
 }
 
-export function AdminOnly({ children }) {
-  return <RequirePermission permission="gaji_karyawan">{children}</RequirePermission>;
+export function AdminOnly({ children, permission = 'gaji_karyawan' }) {
+  return <RequirePermission permission={permission}>{children}</RequirePermission>;
 }
 
 export function PermissionDenied() {

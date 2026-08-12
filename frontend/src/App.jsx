@@ -49,7 +49,7 @@ export default function App() {
         <Route path="/pelanggan" element={<RequirePermission permission="pelanggan"><PelangganPage /></RequirePermission>} />
         <Route path="/pengeluaran" element={<RequirePermission permission="pengeluaran"><PengeluaranPage /></RequirePermission>} />
         <Route path="/gaji" element={<AdminOnly><GajiPage /></AdminOnly>} />
-        <Route path="/pengaturan" element={<AdminOnly><PengaturanPage /></AdminOnly>} />
+        <Route path="/pengaturan" element={<AdminOnly permission="pengaturan"><PengaturanPage /></AdminOnly>} />
         <Route path="*" element={<NotFound />} />
       </Route>
     </Routes>
