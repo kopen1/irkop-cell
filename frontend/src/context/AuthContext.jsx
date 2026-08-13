@@ -92,7 +92,7 @@ export function AuthProvider({ children }) {
       user,
       isAdmin: user?.role === 'admin',
       permissions: { role: user?.role, halaman },
-      can: (hallKey) => (user?.role === 'admin' ? hallKey !== 'gaji_karyawan' : halaman.includes(hallKey)),
+      can: (hallKey) => (user?.role === 'admin' ? true : halaman.includes(hallKey)),
       login,
       logout,
       ready,

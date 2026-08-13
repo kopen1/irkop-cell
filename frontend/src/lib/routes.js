@@ -28,7 +28,7 @@ export const MAIN_NAV_MOBILE = NAV.filter((n) => n.main).map((n) => ({ key: n.ke
 // - Karyawan: hanya halaman di dalam daftar permission-nya.
 export function canAccess(permissions, key) {
   if (!permissions) return false;
-  if (permissions.role === 'admin') return key !== 'gaji_karyawan'; // hard rule tetap dijaga
+  if (permissions.role === 'admin') return true; // admin dapat akses semua (termasuk gaji_karyawan & pengaturan)
   if (key === 'gaji_karyawan' || key === 'pengaturan') return false;
   return Array.isArray(permissions.halaman) ? permissions.halaman.includes(key) : false;
 }

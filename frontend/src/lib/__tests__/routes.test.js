@@ -17,11 +17,11 @@ describe('canAccess (permission-aware navigation)', () => {
     expect(canAccess(karyawanDenganGaji, 'gaji_karyawan')).toBe(false);
   });
 
-  it('Admin dapat semua kecuali gaji (hard rule tetap dijaga di domain)', () => {
+  it('Admin dapat semua halaman termasuk gaji_karyawan & pengaturan', () => {
     const admin = { role: 'admin', halaman: [] };
     expect(canAccess(admin, 'pengaturan')).toBe(true);
     expect(canAccess(admin, 'laporan')).toBe(true);
-    expect(canAccess(admin, 'gaji_karyawan')).toBe(false);
+    expect(canAccess(admin, 'gaji_karyawan')).toBe(true);
   });
 });
 

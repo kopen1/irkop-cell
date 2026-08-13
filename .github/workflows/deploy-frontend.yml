@@ -23,6 +23,8 @@ jobs:
           cd frontend
           npm test
       - name: Build
+        env:
+          VITE_API_BASE: /api
         run: |
           cd frontend
           npm run build
@@ -32,4 +34,4 @@ jobs:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
           workingDirectory: frontend
-          command: pages deploy dist --project-name=irkop-cell-frontend
+          command: pages deploy dist --project-name=konter
