@@ -6,7 +6,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useAsync } from '../hooks/useAsync';
-import { formatRupiah, todayWIB } from '../lib/format';
+import { formatRupiah, todayWIB, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
@@ -174,18 +174,19 @@ function KasbonForm({ onCancel, onSaved }) {
   }, []);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setNominal = (k) => (e) => setForm((f) => ({ ...f, [k]: formatRupiahInput(e.target.value) }));
 
   const submit = async (e) => {
     e.preventDefault();
     setError(null);
     if (!form.pelanggan_id) return setError('Pilih pelanggan.');
-    if (!form.nominal || Number(form.nominal) <= 0) return setError('Nominal wajib diisi.');
+    if (!form.nominal || parseRupiah(form.nominal) <= 0) return setError('Nominal wajib diisi.');
     if (!form.tanggal) return setError('Tanggal wajib diisi.');
     setBusy(true);
     try {
       await api.post('/kasbon', {
         pelanggan_id: Number(form.pelanggan_id),
-        nominal: Number(form.nominal),
+        nominal: parseRupiah(form.nominal),
         tanggal: form.tanggal,
         jatuh_tempo: form.jatuh_tempo || undefined,
         catatan: form.catatan.trim() || undefined,
@@ -210,7 +211,7 @@ function KasbonForm({ onCancel, onSaved }) {
       </Field>
       <div className="grid-2">
         <Field label="Nominal (Rp)" required>
-          <Input type="number" inputMode="numeric" value={form.nominal} onChange={set('nominal')} />
+          <Input type="text" inputMode="numeric" value={form.nominal} onChange={setNominal('nominal')} />
         </Field>
         <Field label="Tanggal" required>
           <Input type="date" value={form.tanggal} onChange={set('tanggal')} />

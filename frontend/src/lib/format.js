@@ -24,6 +24,28 @@ export function formatNumber(value) {
   return numberFmt.format(Number(value ?? 0));
 }
 
+// Format nilai saat user mengetik di input nominal: "200000" → "200.000".
+// Hanya angka; hilangkan karakter non-digit kecuali minus di depan (untuk reversals).
+export function formatRupiahInput(value) {
+  const s = String(value ?? '').trim();
+  if (!s) return '';
+  const isNeg = s.startsWith('-') && s.replace(/[-]/g, '').length > 0 && !/^0$/.test(s.replace(/[-]/g, ''));
+  const digits = s.replace(/\D/g, '');
+  if (!digits) return isNeg ? '-' : '';
+  const grouped = numberFmt.format(Number(digits));
+  return (isNeg ? '-' : '') + grouped;
+}
+
+// Parse kembali string terformat menjadi angka murni untuk submit API: "200.000" → 200000.
+export function parseRupiah(value) {
+  const s = String(value ?? '').trim();
+  if (!s) return 0;
+  const isNeg = s.startsWith('-');
+  const n = parseInt(s.replace(/\D/g, ''), 10);
+  if (Number.isNaN(n)) return 0;
+  return isNeg && n !== 0 ? -n : n;
+}
+
 // Format tanggal WIB: 10/08/2026 19:45
 export function formatDateTime(iso) {
   if (!iso) return '-';

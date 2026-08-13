@@ -8,6 +8,9 @@ export default defineConfig(({ mode }) => {
   const proxy = env.VITE_API_PROXY || 'http://localhost:8787';
   return {
     plugins: [react()],
+    build: {
+      cssTarget: ['chrome90', 'firefox78', 'safari13', 'ios12'],
+    },
     server: {
       proxy: {
         '/api': { target: proxy, changeOrigin: true },

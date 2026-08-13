@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useAsync } from '../hooks/useAsync';
 import { useDebounce } from '../hooks/useDebounce';
-import { formatRupiah } from '../lib/format';
+import { formatRupiah, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
@@ -289,6 +289,7 @@ function ProductForm({ initial, kategoriList, onCancel, onSaved }) {
   const [busy, setBusy] = useState(false);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setNominal = (k) => (e) => setForm((f) => ({ ...f, [k]: formatRupiahInput(e.target.value) }));
   const kategori = kategoriList.find((k) => String(k.id) === String(form.kategori_id));
   const nonStok = Boolean(kategori && !kategori.lacak_stok);
 
@@ -297,14 +298,14 @@ function ProductForm({ initial, kategoriList, onCancel, onSaved }) {
     setError(null);
     if (!form.kode.trim()) return setError('Kode produk wajib diisi.');
     if (!form.nama.trim()) return setError('Nama produk wajib diisi.');
-    if (!form.harga || Number(form.harga) <= 0) return setError('Harga jual wajib diisi (lebih dari 0).');
+    if (!form.harga || parseRupiah(form.harga) <= 0) return setError('Harga jual wajib diisi (lebih dari 0).');
 
     const body = {
       kode: form.kode.trim(),
       nama: form.nama.trim(),
       kategori_id: form.kategori_id ? Number(form.kategori_id) : null,
-      harga: Number(form.harga),
-      harga_modal: form.harga_modal ? Number(form.harga_modal) : null,
+      harga: parseRupiah(form.harga),
+      harga_modal: form.harga_modal ? parseRupiah(form.harga_modal) : null,
       satuan: form.satuan || 'pcs',
       ...(!nonStok
         ? { stok: Number(form.stok) || 0, stok_minimum: Number(form.stok_minimum) || 0 }
@@ -345,10 +346,10 @@ function ProductForm({ initial, kategoriList, onCancel, onSaved }) {
             <Input type="text" value={form.satuan} onChange={set('satuan')} />
           </Field>
           <Field label="Harga jual (Rp)" required>
-            <Input type="number" inputMode="numeric" value={form.harga} onChange={set('harga')} />
+            <Input type="text" inputMode="numeric" value={form.harga} onChange={setNominal('harga')} />
           </Field>
           <Field label="Harga modal (Rp, opsional)" hint="Dipakai menghitung laba di Laporan.">
-            <Input type="number" inputMode="numeric" value={form.harga_modal} onChange={set('harga_modal')} />
+            <Input type="text" inputMode="numeric" value={form.harga_modal} onChange={setNominal('harga_modal')} />
           </Field>
         </div>
 

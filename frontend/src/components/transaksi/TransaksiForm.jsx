@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { api, newIdempotencyKey } from '../../lib/api';
 import { useAsync } from '../../hooks/useAsync';
-import { METODE_PEMBAYARAN, formatRupiah, todayWIB } from '../../lib/format';
+import { METODE_PEMBAYARAN, formatRupiah, todayWIB, formatRupiahInput, parseRupiah } from '../../lib/format';
 import { Button } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Field';
 import { Icon } from '../ui/Icon';
@@ -91,7 +91,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
       qty: Number(it.qty),
       ...(it.isKirimUang
         ? {
-            nominal_referensi: Number(it.nominal_referensi) || 0,
+            nominal_referensi: parseRupiah(it.nominal_referensi),
             akun_sumber: it.akun_sumber || undefined,
           }
         : {}),
@@ -174,38 +174,39 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
           >
             <legend className="field-label" style={{ marginLeft: 'var(--space-2)' }}>Keranjang</legend>
             {keranjang.map((it, idx) => (
-              <div key={idx} className="flex flex-col gap-2" style={{ padding: 'var(--space-2)', borderBottom: '1px solid var(--border)' }}>
-                <div className="flex justify-between items-center gap-2">
-                  <div>
-                    <span className="font-mono text-sm text-muted">{it.kode}</span> {it.nama}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      aria-label={`Kurangi ${it.nama}`}
-                      onClick={() => updateItem(idx, { qty: Math.max(1, Number(it.qty) - 1) })}
-                    >
-                      −
-                    </button>
-                    <span className="num" style={{ width: 34, textAlign: 'center' }}>{it.qty}</span>
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      aria-label={`Tambah ${it.nama}`}
-                      onClick={() => updateItem(idx, { qty: Number(it.qty) + 1 })}
-                    >
-                      +
-                    </button>
-                    <span className="num" style={{ width: 110, textAlign: 'right' }}>{formatRupiah(it.harga * it.qty)}</span>
-                    <button type="button" className="btn btn-ghost btn-sm" aria-label={`Hapus ${it.nama}`} onClick={() => removeItem(idx)}>
+              <div key={idx} className="cart-item">
+                <span className="cart-item-kode">{it.kode}</span>
+                <div className="cart-item-nameline">
+                  <span className="cart-item-nama">{it.nama}</span>
+                  <div className="cart-item-side">
+                    <div className="cart-item-stepper">
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        aria-label={`Kurangi ${it.nama}`}
+                        onClick={() => updateItem(idx, { qty: Math.max(1, Number(it.qty) - 1) })}
+                      >
+                        −
+                      </button>
+                      <span className="num cart-item-qty">{it.qty}</span>
+                      <button
+                        type="button"
+                        className="btn btn-secondary btn-sm"
+                        aria-label={`Tambah ${it.nama}`}
+                        onClick={() => updateItem(idx, { qty: Number(it.qty) + 1 })}
+                      >
+                        +
+                      </button>
+                    </div>
+                    <span className="num cart-item-price">{formatRupiah(it.harga * it.qty)}</span>
+                    <button type="button" className="btn btn-ghost btn-sm cart-item-trash" aria-label={`Hapus ${it.nama}`} onClick={() => removeItem(idx)}>
                       <Icon name="trash" size={15} />
                     </button>
                   </div>
                 </div>
 
                 {/* Opsional: produk jasa kirim uang (nominal referensi tidak masuk omzet, PRD 5.2.1) */}
-                <label className="flex items-center gap-2 text-sm">
+                <label className="cart-item-opt">
                   <input
                     type="checkbox"
                     checked={it.isKirimUang}
@@ -214,26 +215,33 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
                   Produk jasa Kirim Uang (isi nominal yang ditransfer)
                 </label>
                 {it.isKirimUang && (
-                  <div className="grid-2">
-                    <Field label="Nominal ditransfer (referensi, bukan omzet)">
-                      <Input
-                        type="number"
-                        inputMode="numeric"
-                        value={it.nominal_referensi}
-                        onChange={(e) => updateItem(idx, { nominal_referensi: e.target.value })}
-                        placeholder="mis. 500000"
-                      />
-                    </Field>
-                    <Field label="Akun sumber eksekusi">
-                      <Select value={it.akun_sumber} onChange={(e) => updateItem(idx, { akun_sumber: e.target.value })}>
-                        <option value="">Pilih akun…</option>
-                        {(akun.data?.items || []).map((a) => (
-                          <option key={a.id} value={a.nama_akun}>
-                            {a.nama_akun}
-                          </option>
-                        ))}
-                      </Select>
-                    </Field>
+                  <div className="card" style={{ padding: 'var(--space-2)', gap: 'var(--space-1)', boxShadow: 'none', background: 'var(--bg-surface-alt)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-center gap-2" style={{ padding: '4px 6px' }}>
+                      <span className="text-sm" style={{ flexShrink: 0 }}>Nominal transfer</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          value={it.nominal_referensi ? formatRupiahInput(String(it.nominal_referensi)) : ''}
+                          onChange={(e) => updateItem(idx, { nominal_referensi: formatRupiahInput(e.target.value) })}
+                          placeholder="mis. 500.000"
+                          style={{ padding: '6px 8px', fontSize: '.82rem' }}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2" style={{ padding: '4px 6px' }}>
+                      <span className="text-sm" style={{ flexShrink: 0 }}>Akun sumber</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Select value={it.akun_sumber} onChange={(e) => updateItem(idx, { akun_sumber: e.target.value })} style={{ padding: '6px 8px', fontSize: '.82rem' }}>
+                          <option value="">Pilih akun…</option>
+                          {(akun.data?.items || []).map((a) => (
+                            <option key={a.id} value={a.nama_akun}>
+                              {a.nama_akun}
+                            </option>
+                          ))}
+                        </Select>
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>

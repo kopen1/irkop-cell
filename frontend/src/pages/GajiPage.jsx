@@ -6,7 +6,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
-import { todayWIB, formatRupiah } from '../lib/format';
+import { todayWIB, formatRupiah, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select, Textarea } from '../components/ui/Field';
@@ -120,7 +120,7 @@ export default function GajiPage() {
 }
 
 function GajiEditForm({ target, onCancel, onSaved }) {
-  const [nominal, setNominal] = useState(target?.nominal ?? '');
+  const [nominal, setNominal] = useState(target?.nominal ? formatRupiahInput(String(target.nominal)) : '');
   const [catatan, setCatatan] = useState('');
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -128,10 +128,10 @@ function GajiEditForm({ target, onCancel, onSaved }) {
   const submit = async (e) => {
     e.preventDefault();
     setError(null);
-    if (!nominal || Number(nominal) < 0) return setError('Nominal wajib diisi (0 ke atas).');
+    if (!nominal || parseRupiah(nominal) < 0) return setError('Nominal wajib diisi (0 ke atas).');
     setBusy(true);
     try {
-      await api.put(`/gaji/${target.id}`, { nominal: Number(nominal), catatan: catatan.trim() || undefined });
+      await api.put(`/gaji/${target.id}`, { nominal: parseRupiah(nominal), catatan: catatan.trim() || undefined });
       onSaved();
     } catch (err) {
       setError(err.message);
@@ -147,7 +147,7 @@ function GajiEditForm({ target, onCancel, onSaved }) {
         Gunakan untuk kasus cuti tidak dibayar; perubahan tercatat di audit.
       </p>
       <Field label="Nominal gaji (Rp)" required>
-        <Input type="number" inputMode="numeric" value={nominal} onChange={(e) => setNominal(e.target.value)} />
+        <Input type="text" inputMode="numeric" value={nominal} onChange={(e) => setNominal(formatRupiahInput(e.target.value))} />
       </Field>
       <Field label="Catatan (opsional)">
         <Textarea value={catatan} onChange={(e) => setCatatan(e.target.value)} placeholder="mis. cuti tidak dibayar…" />
@@ -197,13 +197,13 @@ function RateModal({ open, onClose, onSaved }) {
     setBusy(true);
     try {
       if (tipe === 'flat') {
-        if (!rateFlat || Number(rateFlat) <= 0) {
+        if (!rateFlat || parseRupiah(rateFlat) <= 0) {
           setBusy(false);
           return setError('Rate flat wajib diisi.');
         }
-        await api.post('/gaji/rate', { user_id: Number(sel), tipe: 'flat', rate_flat: Number(rateFlat) });
+        await api.post('/gaji/rate', { user_id: Number(sel), tipe: 'flat', rate_flat: parseRupiah(rateFlat) });
       } else {
-        const harian = HARI.map((h) => ({ hari: h, rate: Number(custom[h]) || 0 }));
+        const harian = HARI.map((h) => ({ hari: h, rate: parseRupiah(custom[h]) }));
         if (harian.some((h) => h.rate <= 0)) {
           setBusy(false);
           return setError('Semua hari wajib diisi untuk tipe custom per hari.');
@@ -248,14 +248,14 @@ function RateModal({ open, onClose, onSaved }) {
         </Field>
         {tipe === 'flat' ? (
           <Field label="Rate harian (Rp)" required>
-            <Input type="number" inputMode="numeric" value={rateFlat} onChange={(e) => setRateFlat(e.target.value)} />
+            <Input type="text" inputMode="numeric" value={rateFlat} onChange={(e) => setRateFlat(formatRupiahInput(e.target.value))} />
           </Field>
         ) : (
           <div className="flex flex-col gap-2">
             {HARI.map((h) => (
               <div key={h} className="flex items-center gap-3">
                 <span style={{ width: 90, fontSize: '0.88rem' }}>{HARI_LABEL[h]}</span>
-                <Input type="number" inputMode="numeric" value={custom[h] ?? ''} onChange={(e) => setCustom((c) => ({ ...c, [h]: e.target.value }))} placeholder="0" />
+                <Input type="text" inputMode="numeric" value={custom[h] ? formatRupiahInput(custom[h]) : ''} onChange={(e) => setCustom((c) => ({ ...c, [h]: formatRupiahInput(e.target.value) }))} placeholder="0" />
               </div>
             ))}
           </div>

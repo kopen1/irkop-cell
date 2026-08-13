@@ -7,7 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, newIdempotencyKey } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { todayWIB, formatRupiah, formatDateTime } from '../lib/format';
+import { todayWIB, formatRupiah, formatDateTime, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
@@ -171,12 +171,13 @@ function PengeluaranForm({ initial, akunList, onCancel, onSaved }) {
   const [busy, setBusy] = useState(false);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setNominal = (k) => (e) => setForm((f) => ({ ...f, [k]: formatRupiahInput(e.target.value) }));
 
   const onSubmit = async (e) => {
     e.preventDefault();
     setError(null);
     if (!form.deskripsi.trim()) return setError('Deskripsi wajib diisi.');
-    if (!form.nominal || Number(form.nominal) <= 0) return setError('Nominal wajib diisi (lebih dari 0).');
+    if (!form.nominal || parseRupiah(form.nominal) <= 0) return setError('Nominal wajib diisi (lebih dari 0).');
     if (!form.tanggal) return setError('Tanggal wajib diisi.');
     if (!form.akun_sumber) return setError('Akun sumber wajib dipilih.');
 
@@ -185,7 +186,7 @@ function PengeluaranForm({ initial, akunList, onCancel, onSaved }) {
       const body = {
         deskripsi: form.deskripsi.trim(),
         kategori: form.kategori.trim() || undefined,
-        nominal: Number(form.nominal),
+        nominal: parseRupiah(form.nominal),
         metode_bayar: form.metode_bayar,
         akun_sumber: form.akun_sumber,
         tanggal: form.tanggal,
@@ -208,7 +209,7 @@ function PengeluaranForm({ initial, akunList, onCancel, onSaved }) {
         </Field>
         <div className="grid-2">
           <Field label="Nominal (Rp)" required>
-            <Input type="number" inputMode="numeric" value={form.nominal} placeholder="mis. 300000" onChange={set('nominal')} />
+            <Input type="text" inputMode="numeric" value={form.nominal} placeholder="mis. 300.000" onChange={setNominal('nominal')} />
           </Field>
           <Field label="Kategori (opsional)">
             <Input type="text" value={form.kategori} placeholder="mis. sparepart, listrik, sewa…" onChange={set('kategori')} />

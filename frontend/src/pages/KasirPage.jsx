@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useAsync } from '../hooks/useAsync';
-import { todayWIB, formatRupiah, formatDateTime, formatSignedRupiah } from '../lib/format';
+import { todayWIB, formatRupiah, formatDateTime, formatSignedRupiah, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -79,7 +79,7 @@ export default function KasirPage() {
     setOpeningBusy(true);
     try {
       const res = await api.post('/kasir/opening', {
-        saldo_awal: entries.map((o) => ({ nama_akun: o.nama_akun, saldo: Number(o.saldo) || 0 })),
+        saldo_awal: entries.map((o) => ({ nama_akun: o.nama_akun, saldo: parseRupiah(o.saldo) })),
       });
       toast.success('Kasir dibuka.');
       if (res.notif_admin) toast.info('Notifikasi Opening telah dikirim ke Admin.');
@@ -101,7 +101,7 @@ export default function KasirPage() {
     setClosingBusy(true);
     try {
       await api.post('/kasir/closing', {
-        saldo_real: closing.map((c) => ({ nama_akun: c.nama_akun, saldo_real: Number(c.saldo_real) || 0 })),
+        saldo_real: closing.map((c) => ({ nama_akun: c.nama_akun, saldo_real: parseRupiah(c.saldo_real) })),
         catatan_closing: closingCatatan || undefined,
       });
       toast.success('Kasir ditutup. Rekonsiliasi tersimpan.');
@@ -181,11 +181,11 @@ export default function KasirPage() {
                     </div>
                     <Field label="Saldo awal (Rp)">
                       <Input
-                        type="number"
+                        type="text"
                         inputMode="numeric"
                         value={o.saldo}
                         onChange={(e) =>
-                          setOpening((prev) => prev.map((x, i) => (i === idx ? { ...x, saldo: e.target.value } : x)))
+                          setOpening((prev) => prev.map((x, i) => (i === idx ? { ...x, saldo: formatRupiahInput(e.target.value) } : x)))
                         }
                       />
                     </Field>
@@ -229,11 +229,11 @@ export default function KasirPage() {
                       </div>
                       <Field label="Saldo real (Rp)">
                         <Input
-                          type="number"
+                          type="text"
                           inputMode="numeric"
                           value={c.saldo_real}
                           onChange={(e) =>
-                            setClosing((prev) => prev.map((x, i) => (i === idx ? { ...x, saldo_real: e.target.value } : x)))
+                            setClosing((prev) => prev.map((x, i) => (i === idx ? { ...x, saldo_real: formatRupiahInput(e.target.value) } : x)))
                           }
                         />
                       </Field>

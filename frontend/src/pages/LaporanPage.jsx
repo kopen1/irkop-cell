@@ -26,9 +26,12 @@ const MONTH_NAMES = [
 ];
 
 function monthName(ym) {
-  if (!ym || !/^\d{4}-\d{2}$/.test(ym)) return ym || '-';
-  const [, y, m] = ym.split('-');
-  return `${MONTH_NAMES[Number(m) - 1] || m} ${y}`;
+  if (!ym) return '-';
+  const s = String(ym).trim();
+  const m = /^\d{4}-\d{2}$/.test(s) ? Number(s.split('-')[1]) : /^\d{1,2}$/.test(s) ? Number(s) : null;
+  if (m === null || m < 1 || m > 12) return ym || '-';
+  const y = /^\d{4}-\d{2}$/.test(s) ? s.split('-')[0] : null;
+  return `${MONTH_NAMES[m - 1]}${y ? ' ' + y : ''}`;
 }
 
 function deltaPct(before, after) {
@@ -111,7 +114,7 @@ export default function LaporanPage() {
   async function handleCsv() {
     try {
       const filename = 'irkop-laporan-' + period + '-' + (isBulanan ? bulanParam : year) + '.csv';
-      await downloadFile('/laporan/export', { cakupan: period, bulan: bulanParam, tahun: year }, filename);
+      await downloadFile('/laporan/export', { cakupan: isBulanan ? 'bulan' : 'tahun', bulan: bulanParam, tahun: year }, filename);
       toast.success('Export CSV berhasil diunduh.');
     } catch (err) {
       toast.error(err && err.message ? err.message : 'Gagal mengekspor CSV.');

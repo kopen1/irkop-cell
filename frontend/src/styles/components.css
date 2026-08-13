@@ -110,6 +110,7 @@
 /* ---------- Table ---------- */
 .table-wrap {
   overflow-x: auto;
+  max-width: 100%;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: var(--bg-surface);
@@ -160,10 +161,14 @@
   border-radius: var(--radius-lg);
   width: 100%;
   max-width: 560px;
+  max-height: calc(100vh - 2 * var(--space-6));
+  display: flex;
+  flex-direction: column;
   box-shadow: var(--shadow-lg);
   animation: modal-in 0.16s ease;
 }
 .modal-lg { max-width: 760px; }
+.modal-body { padding: var(--space-5); overflow-y: auto; min-height: 0; }
 @keyframes modal-in {
   from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: translateY(0); }
@@ -176,7 +181,6 @@
   border-bottom: 1px solid var(--border);
 }
 .modal-title { font-size: 1rem; font-weight: 700; }
-.modal-body { padding: var(--space-5); }
 .modal-footer {
   display: flex;
   justify-content: flex-end;
@@ -557,7 +561,79 @@
   margin-bottom: -1px;
 }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.tab:active { color: var(--text-primary); }
 .tab:hover { color: var(--text-primary); }
+
+/* ---------- Keranjang transaksi ---------- */
+.cart-item {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--border);
+}
+.cart-item:last-child { border-bottom: none; }
+.cart-item-nameline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.cart-item-kode {
+  font-family: var(--font-mono);
+  font-size: 0.78rem;
+  color: var(--text-muted);
+}
+.cart-item-nama {
+  flex: 1 1 auto;
+  font-size: 0.9rem;
+  line-height: 1.35;
+  min-width: 0;
+}
+.cart-item-side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.cart-item-stepper {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+.cart-item-stepper .btn {
+  padding: 5px 9px;
+  min-width: 30px;
+  justify-content: center;
+}
+.cart-item-qty {
+  width: 30px;
+  text-align: center;
+  font-size: 0.88rem;
+}
+.cart-item-price {
+  width: 100px;
+  text-align: right;
+  flex-shrink: 0;
+  font-size: 0.88rem;
+}
+.cart-item-trash {
+  flex-shrink: 0;
+  color: var(--danger);
+  border-color: transparent;
+}
+.cart-item-trash:hover:not(:disabled) { background: var(--bg-hover); color: var(--danger); }
+.cart-item-opt {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 0.84rem;
+  color: var(--text-secondary);
+  min-width: 0;
+}
+.cart-item-opt input { flex-shrink: 0; }
 
 /* Responsive */
 @media (max-width: 767px) {
@@ -567,15 +643,23 @@
   .page { padding: var(--space-4); }
   .shell-content { margin-bottom: var(--bottomnav-height); }
   .modal-overlay { padding: var(--space-3); align-items: flex-end; }
-  .modal { max-width: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+  .modal { max-width: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; max-height: calc(100vh - var(--space-8)); }
   .modal-footer .btn { flex: 1; }
+  .tabs { overflow-x: auto; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tab { white-space: nowrap; }
+  .filter-actions { width: 100%; flex-wrap: wrap; }
+  .filter-actions .btn { flex: 1 1 100%; white-space: nowrap; }
+  .cart-item { padding: var(--space-2) 4px; gap: var(--space-1); }
+  .cart-item-kode { font-size: 0.72rem; }
+  .cart-item-nama { font-size: 0.86rem; overflow-wrap: anywhere; }
+  .cart-item-side { gap: var(--space-1); }
+  .cart-item-stepper .btn { padding: 4px 9px; min-width: 30px; font-size: 0.84rem; }
+  .cart-item-qty { width: 24px; font-size: 0.85rem; }
+  .cart-item-price { width: auto; font-size: 0.84rem; }
+  .cart-item-opt { font-size: 0.8rem; }
 }
 @media (min-width: 768px) {
   .mobile-only { display: none !important; }
-}
-@media (min-width: 768px) and (max-width: 1023px) {
-  .sidebar-desktop { display: none; }
-}
-@media (min-width: 1024px) {
   .sidebar-desktop { display: flex; }
 }

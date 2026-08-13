@@ -7,7 +7,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useDebounce } from '../hooks/useDebounce';
-import { formatRupiah, formatDate } from '../lib/format';
+import { formatRupiah, formatDate, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select, Textarea } from '../components/ui/Field';
@@ -242,6 +242,7 @@ function ServiceForm({ onCancel, onSaved }) {
   }, [isAdmin]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
+  const setNominal = (k) => (e) => setForm((f) => ({ ...f, [k]: formatRupiahInput(e.target.value) }));
 
   const submit = async (e) => {
     e.preventDefault();
@@ -254,8 +255,8 @@ function ServiceForm({ onCancel, onSaved }) {
         nama_device: form.nama_device.trim(),
         deskripsi_kerusakan: form.deskripsi_kerusakan.trim(),
         pelanggan_id: form.pelanggan_id ? Number(form.pelanggan_id) : null,
-        estimasi_biaya: form.estimasi_biaya ? Number(form.estimasi_biaya) : null,
-        biaya: form.biaya ? Number(form.biaya) : null,
+        estimasi_biaya: form.estimasi_biaya ? parseRupiah(form.estimasi_biaya) : null,
+        biaya: form.biaya ? parseRupiah(form.biaya) : null,
         teknisi_id: form.teknisi_id ? Number(form.teknisi_id) : null,
         catatan: form.catatan.trim() || undefined,
         tanggal_masuk: form.tanggal_masuk || undefined,
@@ -283,10 +284,10 @@ function ServiceForm({ onCancel, onSaved }) {
       </Field>
       <div className="grid-2">
         <Field label="Estimasi biaya (Rp, opsional)">
-          <Input type="number" inputMode="numeric" value={form.estimasi_biaya} onChange={set('estimasi_biaya')} />
+          <Input type="text" inputMode="numeric" value={form.estimasi_biaya} onChange={setNominal('estimasi_biaya')} />
         </Field>
         <Field label="Biaya final (Rp, diisi saat selesai)">
-          <Input type="number" inputMode="numeric" value={form.biaya} onChange={set('biaya')} />
+          <Input type="text" inputMode="numeric" value={form.biaya} onChange={setNominal('biaya')} />
         </Field>
       </div>
       <div className="grid-2">
