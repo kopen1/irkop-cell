@@ -32,7 +32,6 @@ export async function webhookNotifHook(db, request, env) {
     return { status: 'diabaikan', duplicate: true, message: 'Webhook sudah pernah diterima', transaksi_id: existing.transaksi_id };
   }
 
-  const sourceRows = await db.many('SELECT * FROM notifhook_source WHERE enabled = 1');
   const autoInput = conf.notifhook_auto_input === '1' || conf.notifhook_auto_input === 'true';
 
   let status = 'diterima';

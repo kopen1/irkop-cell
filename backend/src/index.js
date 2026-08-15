@@ -1,6 +1,6 @@
 import { createDb } from './lib/db.js';
 import { handleError, json } from './lib/errors.js';
-import { authenticate, buildCtx, requirePage, requireAdmin, readAuthHeader } from './lib/auth.js';
+import { authenticate, buildCtx, requirePage, requireAdmin } from './lib/auth.js';
 import { readBody } from './lib/validate.js';
 
 import * as authRoutes from './routes/auth.js';

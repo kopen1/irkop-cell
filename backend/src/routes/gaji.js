@@ -38,14 +38,21 @@ export async function createGajiManual(db, request, ctx) {
   if (!u) throw err(400, 'invalid_user', 'User tidak ditemukan');
   if (u.role !== 'karyawan') throw err(400, 'invalid_user', 'Rate gaji hanya untuk role karyawan');
 
-  const existing = await db.one('SELECT id FROM gaji_harian WHERE user_id = ? AND tanggal = ?', userId, tanggal);
-  const res = await db.exec(
+  const ts = nowIso();
+  await db.exec(
     `INSERT INTO gaji_harian (user_id, tanggal, nominal, sumber, catatan, diedit_oleh, created_at)
-     VALUES (?, ?, ?, 'manual_edit', ?, ?, ?)`,
-    userId, tanggal, nominal, body.catatan || null, admin.id, nowIso()
+     VALUES (?, ?, ?, 'manual_edit', ?, ?, ?)
+     ON CONFLICT(user_id, tanggal) DO UPDATE SET
+       nominal     = excluded.nominal,
+       sumber      = 'manual_edit',
+       catatan     = excluded.catatan,
+       diedit_oleh = excluded.diedit_oleh,
+       updated_at  = excluded.created_at`,
+    userId, tanggal, nominal, body.catatan || null, admin.id, ts
   );
-  const id = existing ? existing.id : res.lastRowId;
-  await writeAudit(db, { userId: admin.id, aksi: 'create', tabel: 'gaji_harian', recordId: id, dataAfter: { user_id: userId, tanggal, nominal } });
+  const row = await db.one('SELECT id FROM gaji_harian WHERE user_id = ? AND tanggal = ?', userId, tanggal);
+  const id = row.id;
+  await writeAudit(db, { userId: admin.id, aksi: 'create', tabel: 'gaji_harian', recordId: id, dataAfter: { user_id: userId, tanggal, nominal, sumber: 'manual_edit' } });
   return { id, user_id: userId, tanggal, nominal, sumber: 'manual_edit' };
 }
 

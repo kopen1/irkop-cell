@@ -8,7 +8,6 @@ export function setupEnv() {
     DB: d1,
     JWT_SECRET: 'irkop-test-secret-2026',
     TOKEN_TTL: '2592000',
-    APP_TIMEZONE: 'Asia/Jakarta',
   };
   return { sqliteDb, env };
 }

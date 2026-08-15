@@ -269,3 +269,287 @@ test('Gaji karyawan: admin only; nominal tidak bocor ke karyawan', async () => {
   const g = await call(env, '/api/gaji', { token: adminToken });
   assert.equal(g.status, 200);
 });
+
+test('R1: createGajiManual buat baru (user+tanggal belum ada)', async () => {
+  const { env, adminToken, karyId } = await bootstrap();
+  const r = await call(env, '/api/gaji', {
+    method: 'POST', token: adminToken,
+    body: { user_id: karyId, tanggal: '2026-08-14', nominal: 80000 },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.sumber, 'manual_edit');
+  assert.equal(r.data.nominal, 80000);
+
+  const list = await call(env, `/api/gaji?user_id=${karyId}&tanggal=2026-08-14`, { token: adminToken });
+  assert.equal(list.status, 200);
+  assert.equal(list.data.items.length, 1);
+});
+
+test('R1: createGajiManual conflict dengan auto-input tidak 500 (UPSERT)', async () => {
+  const { env, adminToken, karyId } = await bootstrap();
+  await env.DB.prepare(
+    `INSERT INTO gaji_harian (user_id, tanggal, nominal, sumber, created_at)
+     VALUES (?, ?, ?, 'auto', ?)`
+  ).bind(karyId, '2026-08-14', 75000, new Date().toISOString()).run();
+
+  const r = await call(env, '/api/gaji', {
+    method: 'POST', token: adminToken,
+    body: { user_id: karyId, tanggal: '2026-08-14', nominal: 95000, catatan: 'lembur' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.sumber, 'manual_edit');
+  assert.equal(r.data.nominal, 95000);
+
+  const rows = await env.DB.prepare(
+    'SELECT id, nominal, sumber, catatan, diedit_oleh FROM gaji_harian WHERE user_id = ? AND tanggal = ?'
+  ).bind(karyId, '2026-08-14').all();
+  assert.equal(rows.results.length, 1);
+  const row = rows.results[0];
+  assert.equal(row.nominal, 95000);
+  assert.equal(row.sumber, 'manual_edit');
+  assert.equal(row.catatan, 'lembur');
+  assert.ok(row.diedit_oleh != null);
+});
+
+test('R1: createGajiManual non-admin ditolak 403', async () => {
+  const { env, karyToken, karyId } = await bootstrap();
+  const r = await call(env, '/api/gaji', {
+    method: 'POST', token: karyToken,
+    body: { user_id: karyId, tanggal: '2026-08-14', nominal: 80000 },
+  });
+  assert.equal(r.status, 403);
+});
+
+test('R1: createGajiManual target user bukan karyawan ditolak 400', async () => {
+  const { env, adminToken, adminId } = await bootstrap();
+  const r = await call(env, '/api/gaji', {
+    method: 'POST', token: adminToken,
+    body: { user_id: adminId, tanggal: '2026-08-14', nominal: 80000 },
+  });
+  assert.equal(r.status, 400);
+});
+
+async function makeKirimUangSvc(env, kategoriId, harga = 5000) {
+  return createProdukRaw(env, { kode: `S-KIRIM-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, nama: 'Kirim Uang', kategori_id: kategoriId, harga });
+}
+
+async function netKirimUangMutasi(env, kode) {
+  const res = await env.DB.prepare(
+    `SELECT nama_akun, SUM(jumlah) AS net FROM mutasi_saldo
+      WHERE (sumber_tipe='transaksi' OR sumber_tipe='reversal')
+        AND sumber_id=(SELECT id FROM transaksi WHERE kode_transaksi=?)
+      GROUP BY nama_akun`
+  ).bind(kode).all();
+  return res.results;
+}
+
+test('R2: kirim uang tunai — fee tidak double-count ke Tunai Laci', async () => {
+  const { env, adminToken, k2 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const svc = await makeKirimUangSvc(env, k2, 5000);
+  const nominal = 100000;
+  const fee = 5000;
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken,
+    body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: nominal, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.total, fee);
+
+  const rows = await netKirimUangMutasi(env, r.data.id);
+  const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
+  const dest = rows.find((m) => m.nama_akun === 'SeaBank');
+  assert.ok(tunai, 'Tunai Laci harus ada');
+  assert.equal(tunai.net, nominal + fee);
+  assert.ok(dest, 'akun_sumber harus ada');
+  assert.equal(dest.net, -nominal);
+});
+
+test('R2: kirim uang cash_tunai — fee tidak double-count', async () => {
+  const { env, adminToken, k2 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const svc = await makeKirimUangSvc(env, k2, 5000);
+  const nominal = 100000;
+  const fee = 5000;
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken,
+    body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: nominal, akun_sumber: 'SeaBank' }], metode_bayar: 'cash_tunai' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.total, fee);
+
+  const rows = await netKirimUangMutasi(env, r.data.id);
+  const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
+  const dest = rows.find((m) => m.nama_akun === 'SeaBank');
+  assert.equal(tunai.net, nominal + fee);
+  assert.equal(dest.net, -nominal);
+});
+
+test('R2: kirim uang idempotency — retry tidak menambah mutasi', async () => {
+  const { env, adminToken, k2 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const svc = await makeKirimUangSvc(env, k2, 5000);
+  const key = 'rk-r2-idem-001';
+  const body = { items: [{ produk_id: svc, qty: 1, nominal_referensi: 100000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' };
+  const r1 = await call(env, '/api/transaksi', { method: 'POST', token: adminToken, body, headers: { 'Idempotency-Key': key } });
+  assert.equal(r1.status, 200);
+  const cnt1 = await env.DB.prepare("SELECT COUNT(*) AS n FROM mutasi_saldo WHERE sumber_tipe='transaksi'").all();
+  const r2 = await call(env, '/api/transaksi', { method: 'POST', token: adminToken, body, headers: { 'Idempotency-Key': key } });
+  assert.equal(r2.status, 200);
+  assert.equal(r2.data.duplicate, true);
+  assert.equal(r2.data.id, r1.data.id);
+  const cnt2 = await env.DB.prepare("SELECT COUNT(*) AS n FROM mutasi_saldo WHERE sumber_tipe='transaksi'").all();
+  assert.equal(cnt2.results[0].n, cnt1.results[0].n);
+});
+
+test('R2: update transaksi kirim uang — fee tidak double-count', async () => {
+  const { env, adminToken, k2 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const svc = await makeKirimUangSvc(env, k2, 5000);
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken,
+    body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: 100000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(r.status, 200);
+
+  const u = await call(env, `/api/transaksi/${r.data.id}`, {
+    method: 'PUT', token: adminToken,
+    body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: 200000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(u.status, 200);
+  assert.equal(u.data.total, 5000);
+
+  const rows = await netKirimUangMutasi(env, r.data.id);
+  const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
+  const dest = rows.find((m) => m.nama_akun === 'SeaBank');
+  assert.equal(tunai.net, 200000 + 5000);
+  assert.equal(dest.net, -200000);
+});
+
+async function getKasbonForTx(env, kode) {
+  const res = await env.DB.prepare(
+    `SELECT k.* FROM kasbon k JOIN transaksi t ON t.id = k.transaksi_id WHERE t.kode_transaksi = ?`
+  ).bind(kode).all();
+  return res.results;
+}
+
+async function createBonTx(env, adminToken, pel, produkId, qty, tanggal = undefined) {
+  const body = { items: [{ produk_id: produkId, qty }], metode_bayar: 'bon', pelanggan_id: pel };
+  if (tanggal !== undefined) body.tanggal_transaksi = tanggal;
+  return call(env, '/api/transaksi', { method: 'POST', token: adminToken, body });
+}
+
+async function updateBonTx(env, adminToken, kode, produkId, qty, tanggal = undefined) {
+  const body = { items: [{ produk_id: produkId, qty }], metode_bayar: 'bon' };
+  if (tanggal !== undefined) body.tanggal_transaksi = tanggal;
+  return call(env, `/api/transaksi/${kode}`, { method: 'PUT', token: adminToken, body });
+}
+
+test('R3: create bon -> kasbon nominal = total, status belum_lunas', async () => {
+  const { env, adminToken, p1 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3' } });
+  const r = await createBonTx(env, adminToken, pel.data.id, p1, 1); // harga p1 = 100000
+  assert.equal(r.status, 200);
+  assert.equal(r.data.total, 100000);
+
+  const kb = await getKasbonForTx(env, r.data.id);
+  assert.equal(kb.length, 1);
+  assert.equal(kb[0].nominal, 100000);
+  assert.equal(kb[0].status, 'belum_lunas');
+});
+
+test('R3: update bon 100k -> 150k, nominal kasbon ikut', async () => {
+  const { env, adminToken, p1, k1 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3b' } });
+  const p150 = await createProdukRaw(env, { kode: `P-150-${Date.now()}`, nama: 'Item 150k', kategori_id: k1, harga: 150000 });
+  const r = await createBonTx(env, adminToken, pel.data.id, p1, 1); // total 100000
+  const u = await updateBonTx(env, adminToken, r.data.id, p150, 1); // total 150000
+  assert.equal(u.status, 200);
+  assert.equal(u.data.total, 150000);
+  const kb = await getKasbonForTx(env, r.data.id);
+  assert.equal(kb.length, 1);
+  assert.equal(kb[0].nominal, 150000);
+  assert.equal(kb[0].status, 'belum_lunas');
+});
+
+test('R3: update bon 100k -> 50k, nominal kasbon turun', async () => {
+  const { env, adminToken, p1, k1 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3c' } });
+  const p50 = await createProdukRaw(env, { kode: `P-50-${Date.now()}`, nama: 'Item 50k', kategori_id: k1, harga: 50000 });
+  const r = await createBonTx(env, adminToken, pel.data.id, p1, 1); // total 100000
+  const u = await updateBonTx(env, adminToken, r.data.id, p50, 1); // total 50000
+  assert.equal(u.status, 200);
+  assert.equal(u.data.total, 50000);
+  const kb = await getKasbonForTx(env, r.data.id);
+  assert.equal(kb.length, 1);
+  assert.equal(kb[0].nominal, 50000);
+});
+
+test('R3: update tanggal saja -> tanggal kasbon ikut, nominal tetap', async () => {
+  const { env, adminToken, p1 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3d' } });
+  const r = await createBonTx(env, adminToken, pel.data.id, p1, 1);
+  const oldDate = (await getKasbonForTx(env, r.data.id))[0].tanggal;
+  const newDate = '2026-08-01';
+  const u = await updateBonTx(env, adminToken, r.data.id, p1, 1, newDate);
+  assert.equal(u.status, 200);
+  assert.notEqual(newDate, oldDate);
+  const kb = await getKasbonForTx(env, u.data.id);
+  assert.equal(kb.length, 1);
+  assert.equal(kb[0].tanggal, newDate);
+  assert.equal(kb[0].nominal, 100000);
+});
+
+test('R3: update nominal + tanggal -> keduanya sinkron', async () => {
+  const { env, adminToken, p1, k1 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3e' } });
+  const p150 = await createProdukRaw(env, { kode: `P-150-${Date.now()}`, nama: 'Item 150k', kategori_id: k1, harga: 150000 });
+  const r = await createBonTx(env, adminToken, pel.data.id, p1, 1); // total 100000
+  const newDate = '2026-08-01';
+  const u = await updateBonTx(env, adminToken, r.data.id, p150, 1, newDate); // total 150000 + tanggal baru
+  assert.equal(u.status, 200);
+  assert.equal(u.data.total, 150000);
+  const kb = await getKasbonForTx(env, u.data.id);
+  assert.equal(kb.length, 1);
+  assert.equal(kb[0].nominal, 150000);
+  assert.equal(kb[0].tanggal, newDate);
+});
+
+test('R3: update transaksi non-bon tidak membuat kasbon', async () => {
+  const { env, adminToken, p1 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken,
+    body: { items: [{ produk_id: p1, qty: 1 }], metode_bayar: 'tunai' },
+  });
+  assert.equal(r.status, 200);
+  const u = await call(env, `/api/transaksi/${r.data.id}`, {
+    method: 'PUT', token: adminToken,
+    body: { items: [{ produk_id: p1, qty: 2 }], metode_bayar: 'tunai' },
+  });
+  assert.equal(u.status, 200);
+  const kb = await getKasbonForTx(env, r.data.id);
+  assert.equal(kb.length, 0);
+});
+
+test('R3: update bon status lunas -> nominal kasbon tidak berubah', async () => {
+  const { env, adminToken, p1 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3f' } });
+  const r = await createBonTx(env, adminToken, pel.data.id, p1, 1);
+  const kb0 = await getKasbonForTx(env, r.data.id);
+  await call(env, `/api/kasbon/${kb0[0].id}`, { method: 'PUT', token: adminToken, body: { status: 'lunas' } });
+
+  const u = await updateBonTx(env, adminToken, r.data.id, p1, 4); // total jadi 400000
+  assert.equal(u.status, 200);
+  assert.equal(u.data.total, 400000);
+  const kb = await getKasbonForTx(env, r.data.id);
+  assert.equal(kb.length, 1);
+  assert.equal(kb[0].status, 'lunas');
+  assert.equal(kb[0].nominal, 100000);
+});

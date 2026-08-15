@@ -13,7 +13,6 @@
     }
   ],
   "vars": {
-    "APP_TIMEZONE": "Asia/Jakarta",
     "TOKEN_TTL": "2592000"
   },
   "observability": {

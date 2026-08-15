@@ -5,6 +5,7 @@ import { err } from '../lib/errors.js';
 import { requireAuth, loadPagePermissions } from '../lib/auth.js';
 import { writeAudit } from '../lib/audit.js';
 import { nowIso } from '../lib/time.js';
+import { getClientIp, checkLoginAttempt, recordFailure, resetOnSuccess, assertNotLimited } from '../lib/rateLimit.js';
 
 const BOOTSTRAP_HEADER = 'x-bootstrap-secret';
 
@@ -23,12 +24,28 @@ export async function login(db, request, env) {
   if (!body.username || !body.password) {
     throw err(400, 'missing_field', 'username dan password wajib diisi');
   }
-  const user = await db.one('SELECT * FROM users WHERE username = ?', String(body.username).trim());
-  if (!user) throw err(401, 'invalid_credentials', 'Username atau password salah');
-  if (user.aktif !== 1) throw err(403, 'user_inactive', 'Akun dinonaktifkan');
+  const username = String(body.username).trim();
+  const ip = getClientIp(request);
+
+  assertNotLimited(await checkLoginAttempt(db, { username, ip }));
+
+  const user = await db.one('SELECT * FROM users WHERE username = ?', username);
+  if (!user) {
+    await recordFailure(db, { username, ip });
+    throw err(401, 'invalid_credentials', 'Username atau password salah');
+  }
+  if (user.aktif !== 1) {
+    await recordFailure(db, { username, ip });
+    throw err(403, 'user_inactive', 'Akun dinonaktifkan');
+  }
 
   const ok = await verifyPassword(String(body.password), user.password_hash);
-  if (!ok) throw err(401, 'invalid_credentials', 'Username atau password salah');
+  if (!ok) {
+    await recordFailure(db, { username, ip });
+    throw err(401, 'invalid_credentials', 'Username atau password salah');
+  }
+
+  await resetOnSuccess(db, username);
 
   const token = await signToken(
     { sub: user.id, role: user.role, nama: user.nama },

@@ -394,7 +394,7 @@ function effBody(itemRows) {
   const effects = { tunai: 0, akun: new Map() };
   for (const it of itemRows) {
     if (it.nominal_referensi != null && it.nominal_referensi !== 0 && it.akun_sumber) {
-      effects.tunai += it.nominal_referensi + it.harga * it.qty;
+      effects.tunai += it.nominal_referensi;
       effects.akun.set(it.akun_sumber, (effects.akun.get(it.akun_sumber) || 0) - it.nominal_referensi);
     }
   }
@@ -488,8 +488,11 @@ export async function updateTransaksi(db, body, ctx, idStr) {
     );
   });
   const { results } = await db.batch(stmts);
-  if (metodeBayar === 'bon' && tanggalTx !== tx.tanggal_transaksi) {
-    await db.exec('UPDATE kasbon SET tanggal = ? WHERE transaksi_id = ?', tanggalTx, tx.id);
+  if (metodeBayar === 'bon') {
+    await db.exec(
+      'UPDATE kasbon SET nominal = ?, tanggal = ? WHERE transaksi_id = ? AND status = ?',
+      total, tanggalTx, tx.id, 'belum_lunas'
+    );
   }
   if (!results.every((r) => r.success)) throw err(500, 'tx_update_failed', 'Gagal memperbarui transaksi');
 

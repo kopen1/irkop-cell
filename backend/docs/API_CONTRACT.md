@@ -133,7 +133,7 @@ Request:
   "pelanggan_id": null, "akun_penerima": "SeaBank",
   "manual_entry": false, "tanggal_transaksi": null }
 ```
-Item jasa "Kirim Uang": tambah `nominal_referensi` (nominal ditransfer) dan `akun_sumber` (akun eksekusi, mis. DANA). Omzet hanya `harga` (biaya admin); `nominal_referensi` murni info.
+Item jasa "Kirim Uang": tambah `nominal_referensi` (nominal ditransfer) dan `akun_sumber` (akun eksekusi, mis. DANA). Omzet/laba hanya `harga` (biaya admin); `nominal_referensi` **bukan omzet** tapi tetap masuk cash flow (lihat aturan kirim uang di bawah: Tunai Laci + (nominal_referensi + biaya admin), akun_sumber − nominal_referensi).
 Aturan metode:
 - `tunai` → mutasi +total ke `Tunai Laci`.
 - `transfer` → butuh `akun_penerima`; mutasi +total ke akun tsb; `konfirmasi_pembayaran='menunggu'` (dipasang manual/otomatis via NotifHook).

@@ -121,7 +121,7 @@ Pengeluaran → mutasi_saldo → Laporan
 
 ## Security
 
-- **Password hashing**: PBKDF2-SHA256, 210.000 iterasi
+- **Password hashing**: PBKDF2-SHA256, 12.000 iterasi (budget CPU Workers Free; hash lama 210k tetap diverifikasi via fallback pure-JS)
 - **JWT**: HS256, TTL 30 hari, stateless
 - **Permission**: granular per halaman, hard rule enforced di frontend & backend
 - **Parameterized SQL**: semua query menggunakan prepared statement (wrangler D1)
@@ -177,6 +177,30 @@ Pengeluaran → mutasi_saldo → Laporan
 
 ---
 
+## Local Development
+
+Struktur project saat ini berada di root repository (bukan `Revisi/`):
+
+```
+backend/     # Cloudflare Worker (src/index.js, routes, lib, financial, migrations)
+frontend/    # React 19 + Vite (src/pages, components, lib)
+```
+
+```bash
+# Preview frontend + backend sekaligus (skrip bantu)
+./start-preview.sh
+
+# Backend saja
+cd backend && npm run dev   # wrangler dev
+
+# Frontend saja
+cd frontend && npm run dev
+```
+
+Catatan: zona waktu bisnis aplikasi ditetapkan WIB (+07:00) secara langsung di `backend/src/lib/time.js`.
+
+---
+
 ## Deployment
 
 Project menggunakan ekosistem Cloudflare:
@@ -209,17 +233,17 @@ Semua task Sprint 1–5 selesai. QA dan integration test lulus.
 
 | Area | Tests | Status |
 |---|---|---|
-| Backend (financial engine, auth, laporan, manual transaksi, NotifHook, reminder, timezone) | 34 | ✅ PASS |
+| Backend (financial engine, auth, laporan, manual transaksi, NotifHook, reminder, timezone) | 76 | ✅ PASS |
 | Frontend (format, routes, smoke login/tema/redirect, smoke laporan) | 21 | ✅ PASS |
-| **Total** | **55** | **✅ PASS** |
+| **Total** | **97** | **✅ PASS** |
 
 Jalankan:
 ```bash
 # Backend
-cd Revisi/backend && npm test
+cd backend && npm test
 
 # Frontend
-cd Revisi/frontend && npm test
+cd frontend && npm test
 ```
 
 ---
