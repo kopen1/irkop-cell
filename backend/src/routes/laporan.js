@@ -250,6 +250,56 @@ export async function exportLaporan(db, request, ctx) {
   });
 }
 
+export async function rekapPerAkun(db, request, ctx) {
+  const url = new URL(request.url);
+  const bulan = url.searchParams.get('bulan') || currentBulanWib();
+  const mr = monthRange(bulan);
+  const startD = mr.startDate;
+  const endD = mr.endDate;
+
+  const rows = await db.many(
+    `SELECT ms.nama_akun AS nama_akun, SUM(ms.jumlah) AS total
+       FROM mutasi_saldo ms
+       JOIN transaksi t ON t.id = ms.sumber_id AND ms.sumber_tipe = 'transaksi'
+      WHERE t.deleted_at IS NULL AND t.tanggal_transaksi >= ? AND t.tanggal_transaksi <= ?
+      GROUP BY ms.nama_akun`,
+    startD, endD
+  );
+  const perAkun = {};
+  for (const r of rows) perAkun[r.nama_akun] = Number(r.total);
+
+  const IGNORE = ['Tunai Laci', 'Saldo Akun', 'Laba'];
+  const tunai = perAkun['Tunai Laci'] || 0;
+  const saldoAkun = perAkun['Saldo Akun'] || 0;
+  const labaAkun = perAkun['Laba'] || 0;
+  const transfer = Object.entries(perAkun)
+    .filter(([k]) => !IGNORE.includes(k))
+    .reduce((s, [, v]) => s + v, 0);
+
+  const adminRow = await db.one(
+    `SELECT COALESCE(SUM(ms.jumlah), 0) AS a
+       FROM mutasi_saldo ms
+       JOIN transaksi t ON t.id = ms.sumber_id AND ms.sumber_tipe = 'transaksi'
+      WHERE ms.kategori = 'pendapatan_admin' AND t.deleted_at IS NULL
+        AND t.tanggal_transaksi >= ? AND t.tanggal_transaksi <= ?`,
+    startD, endD
+  );
+  const labaCol = await db.one(
+    'SELECT COALESCE(SUM(laba), 0) AS l FROM transaksi WHERE deleted_at IS NULL AND tanggal_transaksi >= ? AND tanggal_transaksi <= ?',
+    startD, endD
+  );
+
+  return {
+    periode: bulan,
+    tunai,
+    saldo_akun: saldoAkun,
+    transfer,
+    admin: Number(adminRow.a),
+    laba: Number(labaCol.l),
+    per_akun: perAkun,
+  };
+}
+
 function currentBulanWib() {
   const d = new Date(new Date().getTime() + 7 * 3600 * 1000);
   return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`;

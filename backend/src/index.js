@@ -18,6 +18,7 @@ import * as settingsRoutes from './routes/settings.js';
 import * as logsRoutes from './routes/logs.js';
 import * as notifhookRoutes from './routes/notifhook.js';
 import * as laporanRoutes from './routes/laporan.js';
+import * as tarifRoutes from './financial/tarif.js';
 
 function method(req) {
   return req.method.toUpperCase();
@@ -200,8 +201,22 @@ async function dispatch(db, request, ctx, route) {
       requirePage(ctx, 'laporan');
       if (m === 'GET' && param === 'bulan') return laporanRoutes.reportBulanan(db, request, ctx);
       if (m === 'GET' && param === 'tahun') return laporanRoutes.reportTahunan(db, request, ctx);
+      if (m === 'GET' && param === 'akun') return laporanRoutes.rekapPerAkun(db, request, ctx);
       if (m === 'GET' && param === 'export') return laporanRoutes.exportLaporan(db, request, ctx);
       break;
+
+    case 'tarif': {
+      requirePage(ctx, 'transaksi');
+      const url = new URL(request.url);
+      const provider = url.searchParams.get('provider');
+      const nominal = url.searchParams.get('nominal');
+      try {
+        const admin = await tarifRoutes.hitungAdmin(db, provider, nominal);
+        return json({ provider, nominal: Number(nominal), admin });
+      } catch (e) {
+        return json({ error: { code: e.code || 'error', message: e.message } }, 400);
+      }
+    }
 
     case 'settings':
       if (m === 'GET' && !param) return settingsRoutes.getSettings(db, request, ctx);
