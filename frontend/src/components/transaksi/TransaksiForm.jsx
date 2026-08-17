@@ -30,6 +30,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
       isKirimUang: Boolean(i.nominal_referensi),
       nominal_referensi: i.nominal_referensi ?? '',
       akun_sumber: i.akun_sumber ?? '',
+      kategoriNama: '',
     }))
   );
   const [metodeBayar, setMetodeBayar] = useState(initial?.metode_bayar || 'tunai');
@@ -67,6 +68,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
           isKirimUang: autoKirim,
           nominal_referensi: '',
           akun_sumber: '',
+          kategoriNama: kat?.nama || '',
         },
       ];
     });
@@ -211,7 +213,9 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
             style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', padding: 'var(--space-2)' }}
           >
             <legend className="field-label" style={{ marginLeft: 'var(--space-2)' }}>Keranjang</legend>
-            {keranjang.map((it, idx) => (
+            {keranjang.map((it, idx) => {
+              const isTarik = /tarik/i.test(it.kategoriNama || '');
+              return (
               <div key={idx} className="cart-item">
                 <span className="cart-item-kode">{it.kode}</span>
                 <div className="cart-item-nameline">
@@ -243,19 +247,21 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
                   </div>
                 </div>
 
-                {/* Opsional: produk jasa kirim uang (nominal referensi tidak masuk omzet, PRD 5.2.1) */}
+                {/* Opsional: produk jasa kirim uang / tarik tunai (nominal referensi tidak masuk omzet, PRD 5.2.1) */}
                 <label className="cart-item-opt">
                   <input
                     type="checkbox"
                     checked={it.isKirimUang}
                     onChange={(e) => updateItem(idx, { isKirimUang: e.target.checked })}
                   />
-                  Produk jasa Kirim Uang (isi nominal yang ditransfer)
+                  {isTarik
+                    ? 'Produk jasa Tarik Tunai (isi nominal saldo yang diterima)'
+                    : 'Produk jasa Kirim Uang (isi nominal yang ditransfer)'}
                 </label>
                 {it.isKirimUang && (
                   <div className="card" style={{ padding: 'var(--space-2)', gap: 'var(--space-1)', boxShadow: 'none', background: 'var(--bg-surface-alt)', border: '1px solid var(--border)' }}>
                     <div className="flex items-center gap-2" style={{ padding: '4px 6px' }}>
-                      <span className="text-sm" style={{ flexShrink: 0 }}>Nominal transfer</span>
+                      <span className="text-sm" style={{ flexShrink: 0 }}>{isTarik ? 'Nominal diterima' : 'Nominal transfer'}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <Input
                           type="text"
@@ -268,7 +274,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
                       </div>
                     </div>
                     <div className="flex items-center gap-2" style={{ padding: '4px 6px' }}>
-                      <span className="text-sm" style={{ flexShrink: 0 }}>Akun sumber</span>
+                      <span className="text-sm" style={{ flexShrink: 0 }}>{isTarik ? 'Akun penerima saldo' : 'Akun sumber'}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <Select value={it.akun_sumber} onChange={(e) => updateItem(idx, { akun_sumber: e.target.value })} style={{ padding: '6px 8px', fontSize: '.82rem' }}>
                           <option value="">Pilih akun…</option>
@@ -283,7 +289,8 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
                   </div>
                 )}
               </div>
-            ))}
+              );
+            })}
           </fieldset>
         )}
 

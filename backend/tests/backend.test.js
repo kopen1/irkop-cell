@@ -426,6 +426,49 @@ test('R2: update transaksi kirim uang — fee tidak double-count', async () => {
   assert.equal(dest.net, -200000);
 });
 
+// Regresi: dengan Idempotency-Key, mutation_key per nama_akun menyebabkan entri
+// Tunai Laci kedua (nominal) ter-drop oleh INSERT OR IGNORE. Plan harus di-merge.
+test('R2: kirim uang dengan Idempotency-Key — nominal tidak hilang dari Tunai Laci', async () => {
+  const { env, adminToken, k2 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const svc = await makeKirimUangSvc(env, k2, 5000);
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'rk-merge-001' },
+    body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: 100000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(r.status, 200);
+
+  const rows = await netKirimUangMutasi(env, r.data.id);
+  const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
+  const dest = rows.find((m) => m.nama_akun === 'SeaBank');
+  assert.ok(tunai, 'Tunai Laci harus ada');
+  assert.equal(tunai.net, 105000);
+  assert.ok(dest, 'akun_sumber harus ada');
+  assert.equal(dest.net, -100000);
+});
+
+// Tarik Tunai via produk: pelanggan kirim saldo ke kita → saldo akun NAMBAH,
+// laci KELUAR sebesar nominal (fee tetap masuk laci).
+test('R2: tarik tunai via produk — saldo akun bertambah, laci berkurang', async () => {
+  const { env, adminToken } = await bootstrap();
+  await openKasir(env, adminToken);
+  const kt = await createKategoriRaw(env, 'Tarik Tunai', 0);
+  const svc = await makeKirimUangSvc(env, kt, 5000);
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'rk-tarik-001' },
+    body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: 100000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(r.status, 200);
+
+  const rows = await netKirimUangMutasi(env, r.data.id);
+  const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
+  const dest = rows.find((m) => m.nama_akun === 'SeaBank');
+  assert.ok(tunai, 'Tunai Laci harus ada');
+  assert.equal(tunai.net, 5000 - 100000); // fee masuk, nominal keluar
+  assert.ok(dest, 'akun_sumber harus ada');
+  assert.equal(dest.net, 100000); // saldo akun NAMBAH
+});
+
 async function getKasbonForTx(env, kode) {
   const res = await env.DB.prepare(
     `SELECT k.* FROM kasbon k JOIN transaksi t ON t.id = k.transaksi_id WHERE t.kode_transaksi = ?`

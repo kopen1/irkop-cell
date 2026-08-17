@@ -215,12 +215,33 @@ async function loadProducts(db, items) {
   const out = new Map();
   for (const it of items) {
     if (!it || !it.produk_id) throw err(400, 'missing_field', 'setiap item wajib punya produk_id');
-    const prod = await db.one('SELECT * FROM produk WHERE id = ?', it.produk_id);
+    const prod = await db.one(
+      'SELECT p.*, k.nama AS kategori_nama FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id WHERE p.id = ?',
+      it.produk_id
+    );
     if (!prod) throw err(400, 'invalid_product', `Produk id ${it.produk_id} tidak ditemukan`);
     if (prod.deleted_at) throw err(400, 'invalid_product', `Produk ${prod.nama} sudah dihapus`);
     out.set(String(prod.id), prod);
   }
   return out;
+}
+
+// Arah mutasi kirim-uang diturunkan dari nama kategori produk:
+// - "Tarik ..." (Tarik Tunai): pelanggan kirim saldo ke kita → saldo akun NAMBAH, laci KELUAR.
+// - lainnya (Transfer/Saldo/Kirim Uang/dst.): kita kirim saldo → saldo akun KURANG, laci MASUK.
+const TARIK_KATEGORI = /tarik/i;
+
+// Gabungkan entri plan dengan akun yang sama. Wajib: dengan Idempotency-Key,
+// mutation_key hanya per nama_akun, sehingga entri duplikat akan di-drop oleh
+// INSERT OR IGNORE (bug: nominal kirim uang hilang dari Tunai Laci).
+function mergePlan(plan) {
+  const out = [];
+  for (const m of plan) {
+    const ex = out.find((x) => x.nama_akun === m.nama_akun);
+    if (ex) ex.jumlah += m.jumlah;
+    else out.push({ ...m });
+  }
+  return out.filter((m) => m.jumlah !== 0);
 }
 
 function computeItems(items, produkMap) {
@@ -247,6 +268,11 @@ function computeItems(items, produkMap) {
       }
       if (!akunSumber) throw err(400, 'missing_field', 'item kirim uang wajib memiliki akun_sumber');
       validatedAkun = akunSumber;
+      // Tarik tunai: delta negatif (laci keluar, saldo akun bertambah);
+      // kirim uang/transfer/saldo: delta positif (laci masuk, saldo akun berkurang).
+      const delta = TARIK_KATEGORI.test(prod.kategori_nama || '') ? -nominalRef : nominalRef;
+      effects.tunai += delta;
+      effects.akun.set(validatedAkun, (effects.akun.get(validatedAkun) || 0) - delta);
     }
 
     itemRows.push({
@@ -261,7 +287,7 @@ function computeItems(items, produkMap) {
     });
   }
 
-  return { subtotal, total: subtotal, laba, itemRows };
+  return { subtotal, total: subtotal, laba, itemRows, effects };
 }
 
 function planMutations({ metodeBayar, akunPenerima, total, effects }) {
@@ -277,7 +303,7 @@ function planMutations({ metodeBayar, akunPenerima, total, effects }) {
   for (const [akun, jml] of effects.akun) {
     if (jml !== 0) list.push({ nama_akun: akun, jumlah: jml });
   }
-  return list;
+  return mergePlan(list);
 }
 
 async function validatedAccountNames(db, plan, body) {
@@ -477,7 +503,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
 
   const sesi = await requireOpenSession(db);
   const produkMap = await loadProducts(db, body.items);
-  const { total, laba, itemRows } = computeItems(body.items, produkMap);
+  const { total, laba, itemRows, effects } = computeItems(body.items, produkMap);
 
   const payments = Array.isArray(body.payments) ? body.payments : [];
   let plan;
@@ -486,7 +512,6 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
   let paymentRows = [];
 
   if (payments.length > 0) {
-    const effects = effBody(itemRows);
     plan = [];
     let sum = 0;
     let anyTransfer = false;
@@ -516,6 +541,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     for (const [akun, jml] of effects.akun) {
       if (jml !== 0) plan.push({ nama_akun: akun, jumlah: jml, kategori: 'kirim_uang' });
     }
+    plan = mergePlan(plan);
     konfirmasi = anyTransfer ? 'menunggu' : 'tidak_perlu';
     derivedMetode = payments.every((p) => p.metode === 'tunai') ? 'tunai'
       : payments.every((p) => p.metode === 'transfer') ? 'transfer' : 'cash_tunai';
@@ -530,7 +556,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
       if (!body.akun_penerima) throw err(400, 'missing_field', 'Metode transfer wajib menyertakan akun_penerima');
       akunPenerima = (await getAccount(db, body.akun_penerima)).nama_akun;
     }
-    plan = planMutations({ metodeBayar, akunPenerima, total, effects: effBody(itemRows) });
+    plan = planMutations({ metodeBayar, akunPenerima, total, effects });
     konfirmasi = metodeBayar === 'transfer' ? 'menunggu' : 'tidak_perlu';
   }
 
@@ -595,17 +621,6 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
   return { id: saved.kode_transaksi, total: saved.total, status: 'sukses', konfirmasi_pembayaran: saved.konfirmasi_pembayaran, created_at: saved.created_at, duplicate: false };
 }
 
-function effBody(itemRows) {
-  const effects = { tunai: 0, akun: new Map() };
-  for (const it of itemRows) {
-    if (it.nominal_referensi != null && it.nominal_referensi !== 0 && it.akun_sumber) {
-      effects.tunai += it.nominal_referensi;
-      effects.akun.set(it.akun_sumber, (effects.akun.get(it.akun_sumber) || 0) - it.nominal_referensi);
-    }
-  }
-  return effects;
-}
-
 export async function softDeleteTransaksi(db, body, ctx, idStr) {
   const { user } = ctx.auth;
   const tx = await findTransaksiByRef(db, idStr);
@@ -649,7 +664,7 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   const actionKey = ctx.idempotencyKey || `upd-${tx.id}-${Date.now()}`;
 
   const produkMap = await loadProducts(db, body.items);
-  const { total, laba, itemRows } = computeItems(body.items, produkMap);
+  const { total, laba, itemRows, effects } = computeItems(body.items, produkMap);
 
   let akunPenerima = null;
   if (metodeBayar === 'transfer') {
@@ -659,7 +674,7 @@ export async function updateTransaksi(db, body, ctx, idStr) {
 
   await reverseFullSource(db, { sumberTipe: 'transaksi', sumberId: tx.id, kasirSesiId: sesi.id, actionKey });
 
-  const plan = planMutations({ metodeBayar, akunPenerima, total, effects: effBody(itemRows) });
+  const plan = planMutations({ metodeBayar, akunPenerima, total, effects });
   await validatedAccountNames(db, plan, body);
 
   const now = nowIso();

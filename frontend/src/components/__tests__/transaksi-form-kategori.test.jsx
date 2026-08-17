@@ -15,6 +15,7 @@ const produk = {
     { id: 2, kode: 'TNR-001', nama: 'Toner', harga: 50000, kategori_id: 1, deleted_at: null },
     { id: 3, kode: 'TANPA-1', nama: 'Tanpa Kategori', harga: 3000, kategori_id: null, deleted_at: null },
     { id: 4, kode: 'TF-DANA', nama: 'Transfer DANA', harga: 1000, kategori_id: 3, deleted_at: null },
+    { id: 5, kode: 'TT-X', nama: 'Tarik Tunai', harga: 1000, kategori_id: 4, deleted_at: null },
   ],
 };
 const kategori = {
@@ -22,6 +23,7 @@ const kategori = {
     { id: 1, nama: 'Fisik', lacak_stok: 1 },
     { id: 2, nama: 'Digital', lacak_stok: 0 },
     { id: 3, nama: 'Transfer', lacak_stok: 0 },
+    { id: 4, nama: 'Tarik Tunai', lacak_stok: 0 },
   ],
 };
 
@@ -140,6 +142,18 @@ describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
     await waitFor(() => expect(screen.getByText(/Pulsa/)).toBeTruthy());
     fireEvent.click(screen.getByText(/Pulsa/));
     await waitFor(() => expect(screen.getByLabelText(/Produk jasa Kirim Uang/).checked).toBe(false));
+    expect(screen.queryByText('Nominal transfer')).toBeNull();
+  });
+
+  it('produk dari kategori Tarik Tunai: label sadar-arah (nominal diterima, akun penerima saldo)', async () => {
+    render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    const filter = await screen.findByLabelText('Filter Kategori');
+    fireEvent.change(filter, { target: { value: '4' } });
+    const btn = await screen.findByRole('button', { name: /Tarik Tunai/ });
+    fireEvent.click(btn);
+    await waitFor(() => expect(screen.getByLabelText(/Produk jasa Tarik Tunai/).checked).toBe(true));
+    expect(screen.getByText('Nominal diterima')).toBeTruthy();
+    expect(screen.getByText('Akun penerima saldo')).toBeTruthy();
     expect(screen.queryByText('Nominal transfer')).toBeNull();
   });
 
