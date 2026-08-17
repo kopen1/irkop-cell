@@ -8,6 +8,10 @@ import { Button } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Field';
 import { Icon } from '../ui/Icon';
 
+// Kategori kirim-uang: produk dari kategori ini otomatis menampilkan input
+// Nominal transfer + Akun sumber (checkbox "Kirim Uang" langsung tercentang).
+const KIRIM_UANG_KATEGORI = /transfer|tarik|saldo|kirim/i;
+
 export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTransaksi: propTanggal, manualEntry = false, showKategoriFilter = true }) {
   const today = todayWIB();
   const maxBackdate = (() => {
@@ -45,6 +49,8 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
   const kategoriList = (kategori.data?.items || []).filter((k) => !k.deleted_at);
 
   const onPickProduk = (p) => {
+    const kat = kategoriList.find((k) => String(k.id) === String(p.kategori_id));
+    const autoKirim = kat ? KIRIM_UANG_KATEGORI.test(kat.nama) : false;
     setKeranjang((prev) => {
       const existing = prev.find((it) => String(it.produk_id) === String(p.id));
       if (existing) {
@@ -58,7 +64,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
           nama: p.nama,
           harga: p.harga,
           qty: 1,
-          isKirimUang: false,
+          isKirimUang: autoKirim,
           nominal_referensi: '',
           akun_sumber: '',
         },

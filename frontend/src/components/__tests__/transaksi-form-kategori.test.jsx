@@ -14,12 +14,14 @@ const produk = {
     { id: 1, kode: 'PLS-001', nama: 'Pulsa', harga: 12000, kategori_id: 2, deleted_at: null },
     { id: 2, kode: 'TNR-001', nama: 'Toner', harga: 50000, kategori_id: 1, deleted_at: null },
     { id: 3, kode: 'TANPA-1', nama: 'Tanpa Kategori', harga: 3000, kategori_id: null, deleted_at: null },
+    { id: 4, kode: 'TF-DANA', nama: 'Transfer DANA', harga: 1000, kategori_id: 3, deleted_at: null },
   ],
 };
 const kategori = {
   items: [
     { id: 1, nama: 'Fisik', lacak_stok: 1 },
     { id: 2, nama: 'Digital', lacak_stok: 0 },
+    { id: 3, nama: 'Transfer', lacak_stok: 0 },
   ],
 };
 
@@ -117,6 +119,28 @@ describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
     expect(screen.getByText('Pulsa')).toBeTruthy();
     expect(screen.getByText('2')).toBeTruthy();
     expect(screen.getByText(/Simpan Perubahan/)).toBeTruthy();
+  });
+
+  it('produk dari kategori kirim-uang (Transfer) otomatis menampilkan input Nominal & Akun sumber', async () => {
+    render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    const filter = await screen.findByLabelText('Filter Kategori');
+    fireEvent.change(filter, { target: { value: '3' } });
+    await waitFor(() => expect(screen.getByText(/Transfer DANA/)).toBeTruthy());
+    fireEvent.click(screen.getByText(/Transfer DANA/));
+    await waitFor(() => expect(screen.getByLabelText(/Produk jasa Kirim Uang/).checked).toBe(true));
+    expect(screen.getByText('Nominal transfer')).toBeTruthy();
+    expect(screen.getByPlaceholderText(/mis\. 500\.000/)).toBeTruthy();
+    expect(screen.getByText('Akun sumber')).toBeTruthy();
+  });
+
+  it('produk dari kategori biasa tidak otomatis tercentang Kirim Uang', async () => {
+    render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    await screen.findByLabelText('Filter Kategori');
+    search('Pulsa');
+    await waitFor(() => expect(screen.getByText(/Pulsa/)).toBeTruthy());
+    fireEvent.click(screen.getByText(/Pulsa/));
+    await waitFor(() => expect(screen.getByLabelText(/Produk jasa Kirim Uang/).checked).toBe(false));
+    expect(screen.queryByText('Nominal transfer')).toBeNull();
   });
 
   it('showKategoriFilter=false menyembunyikan filter (manual entry LaporanPage tetap aman)', async () => {
