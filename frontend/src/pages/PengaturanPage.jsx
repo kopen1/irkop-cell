@@ -5,6 +5,7 @@ import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useTheme, THEMES } from '../context/ThemeContext';
 import { formatDateTime, HALAMAN_PERMISSION } from '../lib/format';
+import { setSiteNameCache } from '../hooks/useSiteName';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -65,6 +66,7 @@ function UmumTab() {
     setBusy(true);
     try {
       await api.put('/settings', { nama_website: nama.trim(), default_theme: theme });
+      setSiteNameCache(nama.trim());
       toast.success('Pengaturan umum disimpan.');
     } catch (err) {
       toast.error(err.message);
@@ -608,6 +610,7 @@ function AkunForm({ onCancel, onSaved }) {
 /* ---------------- Log ---------------- */
 function LogTab() {
   const [state, setState] = useState({ status: 'idle', data: null, error: null });
+  const [rawLog, setRawLog] = useState(null);
   const load = useMemo(
     () => async () => {
       setState((s) => ({ ...s, status: 'loading' }));
@@ -625,6 +628,8 @@ function LogTab() {
   }, [load]);
 
   const logs = state.data?.items || [];
+
+  const hasRaw = (l) => Boolean(l.data_before !== undefined && l.data_before !== null) || Boolean(l.data_after !== undefined && l.data_after !== null);
 
   return (
     <Card title="Log / Audit Trail" subtitle="Catatan aktivitas: siapa mengubah apa, kapan (WIB).">
@@ -661,7 +666,13 @@ function LogTab() {
                   <td className="font-mono text-xs">{l.tabel_terkait}</td>
                   <td className="num text-xs">{l.record_id}</td>
                   <td className="text-xs">
-                    {(l.data_before || l.data_after) ? 'lihat raw' : '—'}
+                    {hasRaw(l) ? (
+                      <Button variant="ghost" size="sm" onClick={() => setRawLog(l)}>
+                        lihat raw
+                      </Button>
+                    ) : (
+                      '—'
+                    )}
                   </td>
                 </tr>
               ))}
@@ -672,6 +683,56 @@ function LogTab() {
       {state.status === 'success' && state.data?.total && (
         <p className="text-xs text-muted mt-3">Total entri: {state.data.total}. Menampilkan terbaru.</p>
       )}
+
+      <Modal
+        open={Boolean(rawLog)}
+        onClose={() => setRawLog(null)}
+        size="lg"
+        title={`Raw data — ${rawLog?.tabel_terkait} #${rawLog?.record_id} (${rawLog?.aksi})`}
+      >
+        <RawDetail data={rawLog} onClose={() => setRawLog(null)} />
+      </Modal>
     </Card>
+  );
+}
+
+function RawDetail({ data, onClose }) {
+  if (!data) return null;
+  const before = data.data_before !== undefined && data.data_before !== null ? data.data_before : null;
+  const after = data.data_after !== undefined && data.data_after !== null ? data.data_after : null;
+
+  if (!before && !after) {
+    return (
+      <div className="flex flex-col gap-3">
+        <EmptyState title="Tidak ada data raw" icon="database" description="Entri audit ini tidak menyimpan data_before / data_after." />
+        <div className="flex justify-end">
+          <Button variant="secondary" onClick={onClose}>Tutup</Button>
+        </div>
+      </div>
+    );
+  }
+
+  const renderJson = (label, value) => (
+    <div className="flex flex-col gap-1">
+      <p className="text-xs text-muted">{label}</p>
+      <pre
+        className="raw-json"
+        style={{ margin: 0, padding: 'var(--space-3)', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', overflow: 'auto', maxHeight: '38vh', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}
+      >
+        {JSON.stringify(value, null, 2)}
+      </pre>
+    </div>
+  );
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-4">
+        {before !== null && renderJson('data_before', before)}
+        {after !== null && renderJson('data_after', after)}
+      </div>
+      <div className="flex justify-end">
+        <Button variant="secondary" onClick={onClose}>Tutup</Button>
+      </div>
+    </div>
   );
 }

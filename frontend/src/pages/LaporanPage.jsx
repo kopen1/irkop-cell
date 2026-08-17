@@ -9,6 +9,7 @@
 import { useEffect, useState } from 'react';
 import { api, downloadFile } from '../lib/api';
 import { useToast } from '../context/ToastContext';
+import { useSiteName } from '../hooks/useSiteName';
 import { todayWIB, formatRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
@@ -45,7 +46,7 @@ function deltaPctText(delta) {
   return `${sign}${delta.toFixed(1)}%`;
 }
 
-function openPrint(title, html) {
+function openPrint(title, html, siteName = 'Iirkop Cell') {
   const style = [
     'body{font-family:system-ui,sans-serif;margin:24px;color:#111}',
     'h1{font-size:18px;margin:0 0 4px}',
@@ -62,7 +63,7 @@ function openPrint(title, html) {
   const meta = new Date().toLocaleString('id-ID', { timeZone: 'Asia/Jakarta' });
   w.document.write(
     '<!doctype html><html><head><meta charset="utf-8"><title>' + title + '</title><style>' + style + '</style></head>' +
-      '<body><h1>' + title + '</h1><p class="meta">Iirkop Cell — ' + title +
+      '<body><h1>' + title + '</h1><p class="meta">' + siteName + ' — ' + title +
       ' · dicetak ' + meta + ' WIB · data sumber: backend</p>' + html + '</body></html>'
   );
   w.document.close();
@@ -81,6 +82,7 @@ export default function LaporanPage() {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const siteName = useSiteName();
 
   const isBulanan = period === 'bulanan';
   const periodeLabel = isBulanan ? monthName(year + '-' + month) : String(year);
@@ -136,7 +138,7 @@ export default function LaporanPage() {
       toast.error('Data laporan belum tersedia untuk dicetak.');
       return;
     }
-    if (!openPrint(title, html)) {
+    if (!openPrint(title, html, siteName)) {
       toast.error('Popup diblokir browser. Izinkan popup lalu coba lagi.');
     }
   }
@@ -418,7 +420,7 @@ export default function LaporanPage() {
           </Button>
         </div>
         <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Tambah Transaksi Manual" size="lg">
-          <TransaksiForm manualEntry={true} tanggalTransaksi={todayWIB()} onSaved={() => { setCreateOpen(false); setStatus('loading'); run(); }} onCancel={() => setCreateOpen(false)} />
+          <TransaksiForm manualEntry={true} showKategoriFilter={false} tanggalTransaksi={todayWIB()} onSaved={() => { setCreateOpen(false); setStatus('loading'); run(); }} onCancel={() => setCreateOpen(false)} />
         </Modal>
       </Card>
     </div>

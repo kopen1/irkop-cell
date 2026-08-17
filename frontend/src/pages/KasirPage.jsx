@@ -11,6 +11,7 @@ import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Textarea } from '../components/ui/Field';
 import { Loader, ErrorState, EmptyState } from '../components/ui/States';
+import { Modal } from '../components/ui/Modal';
 import { KasirStatusBadge } from '../components/ui/Badge';
 import { Icon } from '../components/ui/Icon';
 
@@ -28,6 +29,13 @@ export default function KasirPage() {
   const [closingCatatan, setClosingCatatan] = useState('');
   const [closingBusy, setClosingBusy] = useState(false);
   const [errForm, setErrForm] = useState(null);
+
+  const [editSesi, setEditSesi] = useState(null);
+  const [editRows, setEditRows] = useState([]);
+  const [editCatatan, setEditCatatan] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editErr, setEditErr] = useState(null);
 
   useEffect(() => {
     if (sesi.status === 'error') return;
@@ -113,6 +121,56 @@ export default function KasirPage() {
     }
   };
 
+  // Edit sesi lampau (dari reminder): koreksi saldo_real (klosing) + catatan,
+  // lalu simpan = melakukan closing untuk sesi tersebut (rekonsiliasi tanpa
+  // membuat mutasi baru — aman dan tercatat di audit).
+  const openEdit = async (s) => {
+    setEditSesi({ ...s });
+    setEditRows([]);
+    setEditCatatan('');
+    setEditErr(null);
+    setEditLoading(true);
+    setEditBusy(false);
+    try {
+      const data = await api.get('/kasir/current', { kasir_sesi_id: s.kasir_sesi_id });
+      const rows = data.closing?.length
+        ? data.closing.map((c) => ({ nama_akun: c.nama_akun, saldo_sistem: c.saldo_sistem ?? 0, saldo_real: c.saldo_real ?? c.saldo_sistem ?? 0 }))
+        : (data.saldo || []).map((x) => ({ nama_akun: x.nama_akun, saldo_sistem: x.saldo_sistem ?? 0, saldo_real: x.saldo_sistem ?? 0 }));
+      setEditRows(rows);
+      setEditCatatan(data.catatan_closing || '');
+      setEditSesi((prev) => ({ ...prev, status: data.status }));
+    } catch (err) {
+      setEditErr(err.message);
+    } finally {
+      setEditLoading(false);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!editSesi?.kasir_sesi_id) return;
+    setEditErr(null);
+    if (!editRows || editRows.length === 0) {
+      setEditErr('Tidak ada akun untuk direkonsiliasi.');
+      return;
+    }
+    setEditBusy(true);
+    try {
+      await api.post('/kasir/closing', {
+        kasir_sesi_id: editSesi.kasir_sesi_id,
+        saldo_real: editRows.map((r) => ({ nama_akun: r.nama_akun, saldo_real: parseRupiah(r.saldo_real) })),
+        catatan_closing: editCatatan || undefined,
+      });
+      toast.success('Sesi lampau ditutup. Rekonsiliasi tersimpan.');
+      setEditSesi(null);
+      reminder.run();
+      sesi.run();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setEditBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       <PageHeader
@@ -137,16 +195,17 @@ export default function KasirPage() {
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700, marginBottom: 4 }}>Perlu Closing — Ada Sesi Lampau</div>
               <p className="text-sm" style={{ color: 'var(--text-secondary)', margin: '0 0 8px' }}>
-                Terdapat {sesiLampau.length} sesi kasir yang masih berstatus <b>buka</b> dari hari sebelum <b>{date}</b>. Mohon segera lakukan closing untuk setiap sesi yang belum ditutup.
+                Terdapat {sesiLampau.length} sesi kasir yang masih berstatus <b>buka</b> dari hari sebelum <b>{date}</b>. Klik <b>Edit</b> pada sesi untuk mengoreksi saldo real (klosing) &amp; catatan, lalu simpan untuk menutup sesi tersebut.
               </p>
               {sesiLampau.length > 0 && (
-                <div className="table-wrap" style={{ maxHeight: 140, overflowY: 'auto' }}>
+                <div className="table-wrap" style={{ maxHeight: 160, overflowY: 'auto' }}>
                   <table className="table">
                     <thead>
                       <tr>
                         <th>Tanggal</th>
                         <th>Dibuka</th>
                         <th>Oleh</th>
+                        <th className="col-right">Aksi</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -155,6 +214,11 @@ export default function KasirPage() {
                           <td className="num">{s.tanggal}</td>
                           <td className="text-xs">{formatDateTime(s.dibuka_at)}</td>
                           <td>{s.dibuka_oleh || '—'}</td>
+                          <td className="row-actions">
+                            <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
+                              <Icon name="edit" size={14} /> Edit
+                            </Button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -195,7 +259,7 @@ export default function KasirPage() {
                 <p className="text-sm text-muted">Belum ada akun. Admin dapat menambah akun di Pengaturan.</p>
               )}
               {errForm && <p className="field-error" role="alert">{errForm}</p>}
-              <div>
+              <div className="page-actions">
                 <Button type="submit" loading={openingBusy} disabled={!opening?.length}>
                   <Icon name="wallet" size={16} /> Buka Kasir
                 </Button>
@@ -247,7 +311,7 @@ export default function KasirPage() {
                     />
                   </Field>
                   {errForm && <p className="field-error" role="alert">{errForm}</p>}
-                  <div>
+                  <div className="page-actions">
                     <Button type="submit" variant="primary" loading={closingBusy}>
                       <Icon name="check" size={16} /> Tutup Kasir
                     </Button>
@@ -304,6 +368,68 @@ export default function KasirPage() {
           </div>
         </>
       )}
+
+      <Modal
+        open={Boolean(editSesi)}
+        onClose={() => setEditSesi(null)}
+        title={editSesi ? `Edit Sesi — ${editSesi.tanggal}` : ''}
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setEditSesi(null)} disabled={editBusy}>
+              Batal
+            </Button>
+            <Button
+              variant="primary"
+              onClick={saveEdit}
+              loading={editBusy}
+              disabled={!editRows?.length || editSesi?.status === 'tutup'}
+            >
+              <Icon name="check" size={16} /> Simpan &amp; Closing
+            </Button>
+          </>
+        }
+      >
+        {editLoading ? (
+          <Loader />
+        ) : editErr ? (
+          <p className="field-error" role="alert">{editErr}</p>
+        ) : editSesi?.status === 'tutup' ? (
+          <p className="text-sm text-secondary">Sesi ini sudah ditutup. Perbarui halaman untuk melihat hasilnya.</p>
+        ) : (
+          <>
+            <p className="text-sm text-secondary mb-3">
+              Sesi <b>{editSesi?.tanggal}</b> masih berstatus buka. Koreksi saldo real (klosing) &amp; catatan, lalu simpan untuk menutup sesi tersebut. Closing tidak mengubah mutasi — selisih dihitung backend dan dicatat di audit.
+            </p>
+            <div className="flex flex-col gap-3">
+              {(editRows || []).map((c, idx) => (
+                <div key={c.nama_akun} className="akun-row">
+                  <div>
+                    <div style={{ fontWeight: 600 }}>{c.nama_akun}</div>
+                    <span className="num text-sm text-secondary">Sistem: {formatRupiah(c.saldo_sistem)}</span>
+                  </div>
+                  <Field label="Saldo real (Rp)">
+                    <Input
+                      type="text"
+                      inputMode="numeric"
+                      value={c.saldo_real}
+                      onChange={(e) =>
+                        setEditRows((prev) => prev.map((x, i) => (i === idx ? { ...x, saldo_real: formatRupiahInput(e.target.value) } : x)))
+                      }
+                    />
+                  </Field>
+                </div>
+              ))}
+              <Field label="Catatan closing (opsional)">
+                <Textarea
+                  value={editCatatan}
+                  onChange={(e) => setEditCatatan(e.target.value)}
+                  placeholder="Isi jika ada selisih / note rekonsiliasi…"
+                />
+              </Field>
+            </div>
+          </>
+        )}
+      </Modal>
     </div>
   );
 }

@@ -8,7 +8,7 @@ import { Button } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Field';
 import { Icon } from '../ui/Icon';
 
-export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTransaksi: propTanggal, manualEntry = false }) {
+export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTransaksi: propTanggal, manualEntry = false, showKategoriFilter = true }) {
   const today = todayWIB();
   const maxBackdate = (() => {
     const d = new Date();
@@ -32,14 +32,17 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
   const [akunPenerima, setAkunPenerima] = useState(initial?.akun_penerima || '');
   const [pelangganId, setPelangganId] = useState(initial?.pelanggan_id || '');
   const [search, setSearch] = useState('');
+  const [kategoriFilter, setKategoriFilter] = useState('');
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState(null);
 
   const produk = useAsync(() => api.get('/produk', { limit: 200 }), { deps: [] });
+  const kategori = useAsync(() => api.get('/kategori'), { deps: [] });
   const akun = useAsync(() => api.get('/akun'), { deps: [] });
   const pelanggan = useAsync(() => api.get('/pelanggan', { limit: 200 }), { deps: [] });
 
   const allProduk = (produk.data?.items || []).filter((p) => !p.deleted_at);
+  const kategoriList = (kategori.data?.items || []).filter((k) => !k.deleted_at);
 
   const onPickProduk = (p) => {
     setKeranjang((prev) => {
@@ -128,12 +131,38 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
       it.id?.toString().includes(s)
     );
   };
-  const hasilCari = search && allProduk.filter((p) => predikat(p, search)).slice(0, 12);
+  const matchKategori = (p) => {
+    if (kategoriFilter === '') return true;
+    if (kategoriFilter === 'none') return p.kategori_id == null;
+    return String(p.kategori_id) === kategoriFilter;
+  };
+  // Saat mengetik: cari produk (dibatasi kategori). Saat tidak mengetik tetapi
+  // kategori dipilih: langsung tampilkan produk dalam kategori itu, sehingga
+  // filter kategori terasa "diterapkan".
+  const hasilProduk = search
+    ? allProduk.filter((p) => matchKategori(p) && predikat(p, search)).slice(0, 12)
+    : kategoriFilter !== ''
+      ? allProduk.filter(matchKategori).slice(0, 50)
+      : null;
 
   return (
     <form onSubmit={onSubmit} noValidate>
       <div className="flex flex-col gap-4">
-        {/* Pencarian & keranjang */}
+        {/* Filter kategori & pencarian */}
+        {showKategoriFilter && (
+          <Field label="Filter Kategori" hint="Saring produk berdasarkan kategori. Produk tanpa kategori tetap bisa dicari.">
+            <Select value={kategoriFilter} onChange={(e) => setKategoriFilter(e.target.value)}>
+              <option value="">Semua kategori</option>
+              <option value="none">Tanpa kategori</option>
+              {kategoriList.map((k) => (
+                <option key={k.id} value={k.id}>
+                  {k.nama}
+                  {!k.lacak_stok ? ' (non-stok)' : ''}
+                </option>
+              ))}
+            </Select>
+          </Field>
+        )}
         <Field label="Cari produk (kode / nama)">
           <Input
             type="search"
@@ -144,9 +173,9 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
           />
         </Field>
 
-        {hasilCari && hasilCari.length > 0 && (
+        {hasilProduk && hasilProduk.length > 0 && (
           <div className="card" style={{ padding: 'var(--space-2)', maxHeight: 190, overflowY: 'auto', boxShadow: 'none' }}>
-            {hasilCari.map((p) => (
+            {hasilProduk.map((p) => (
               <button
                 key={p.id}
                 type="button"
@@ -163,6 +192,9 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
               </button>
             ))}
           </div>
+        )}
+        {!search && kategoriFilter !== '' && hasilProduk && hasilProduk.length === 0 && (
+          <p className="text-sm text-muted">Tidak ada produk pada kategori ini.</p>
         )}
 
         {keranjang.length === 0 ? (

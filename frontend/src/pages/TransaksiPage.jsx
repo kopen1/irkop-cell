@@ -21,7 +21,6 @@ import { Pagination } from '../components/ui/Pagination';
 import { Icon } from '../components/ui/Icon';
 import TransaksiForm from '../components/transaksi/TransaksiForm';
 import { TransaksiDetail } from '../components/transaksi/TransaksiDetail';
-import R6AdminForm from '../components/transaksi/R6AdminForm';
 
 const LIMIT = 50;
 
@@ -91,22 +90,17 @@ export default function TransaksiPage() {
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
-  const [createKind, setCreateKind] = useState(null); // null=chooser | barang | transfer | topup | tariktunai
   const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const openCreate = () => {
     setEditItem(null);
-    setCreateKind(null);
     setCreateOpen(true);
   };
-  const chooseKind = (kind) => setCreateKind(kind);
-  const backToChooser = () => setCreateKind(null);
   const closeModal = () => {
     setCreateOpen(false);
     setEditItem(null);
-    setCreateKind(null);
   };
   const handleSaved = () => {
     const wasEdit = Boolean(editItem);
@@ -301,8 +295,7 @@ export default function TransaksiPage() {
                 onClick={() => {
                   api.get(`/transaksi/${encodeURIComponent(detailData.id)}`).then((r) => {
                     const d = r.transaksi || r;
-                    setEditItem({ ...d, items: d.items || [] });
-                    setCreateKind(null);
+                    setEditItem({ ...d, items: d.items || [], akun_penerima: d.pembayaran?.[0]?.akun_id || '' });
                     setCreateOpen(true);
                   });
                 }}
@@ -313,49 +306,22 @@ export default function TransaksiPage() {
           )
         }
       >
-        {detailLoading ? <Loader /> : detailData?._error ? <ErrorState error={{ message: detailData._error }} /> : <TransaksiDetail transaksi={detailData} />}
+        {detailLoading ? <Loader /> : detailData?._error ? <ErrorState error={{ message: detailData._error }} /> : <TransaksiDetail transaksi={detailData} onConfirm={() => load().catch(() => {})} />}
       </Modal>
 
       {/* Create / Edit */}
       <Modal
         open={createOpen}
         onClose={closeModal}
-        title={
-          editItem
-            ? 'Edit Transaksi'
-            : createKind === 'topup'
-            ? 'Top Up'
-            : createKind === 'tariktunai'
-            ? 'Tarik Tunai'
-            : createKind === 'transfer'
-            ? 'Transfer'
-            : createKind === 'barang'
-            ? 'Produk / Jasa'
-            : 'Transaksi Baru'
-        }
+        title={editItem ? 'Edit Transaksi' : 'Transaksi Baru'}
         size="lg"
       >
-        {editItem ? (
-          <TransaksiForm
-            initial={editItem}
-            onCancel={closeModal}
-            onSaved={handleSaved}
-          />
-        ) : createKind === null ? (
-          <JenisChooser onSelect={chooseKind} />
-        ) : createKind === 'topup' || createKind === 'tariktunai' ? (
-          <R6AdminForm
-            jenis={createKind === 'topup' ? 'topup' : 'tariktunai'}
-            onCancel={backToChooser}
-            onSaved={handleSaved}
-          />
-        ) : (
-          <TransaksiForm
-            initial={createKind === 'transfer' ? { metode_bayar: 'transfer' } : null}
-            onCancel={backToChooser}
-            onSaved={handleSaved}
-          />
-        )}
+        <TransaksiForm
+          key={editItem ? String(editItem.id) : 'baru'}
+          initial={editItem || undefined}
+          onCancel={closeModal}
+          onSaved={handleSaved}
+        />
       </Modal>
 
       {/* Delete confirm (soft-delete + reversal di sisi backend) */}
@@ -388,36 +354,4 @@ function dateDisplay(v) {
   if (!v) return '-';
   const [y, m, d] = v.split('-');
   return `${d}/${m}/${y}`;
-}
-
-const JENIS_OPTIONS = [
-  { key: 'barang', label: 'Produk / Jasa', desc: 'Barang & jasa konter (tunai/transfer/bon)' },
-  { key: 'transfer', label: 'Transfer', desc: 'Kirim uang / transfer ke akun eksternal' },
-  { key: 'topup', label: 'Top Up', desc: 'Isi ulang saldo (Admin Luar)' },
-  { key: 'tariktunai', label: 'Tarik Tunai', desc: 'Tarik tunai (Admin Dalam/Luar)' },
-];
-
-function JenisChooser({ onSelect }) {
-  return (
-    <div>
-      <p className="text-sm text-muted" style={{ marginBottom: 'var(--space-3)' }}>
-        Pilih jenis transaksi:
-      </p>
-      <div className="grid gap-3" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))' }}>
-        {JENIS_OPTIONS.map((o) => (
-          <button
-            key={o.key}
-            type="button"
-            className="card"
-            style={{ textAlign: 'left', padding: 'var(--space-4)', cursor: 'pointer', border: '1px solid var(--border)' }}
-            aria-label={o.label}
-            onClick={() => onSelect(o.key)}
-          >
-            <div className="font-semibold" style={{ marginBottom: 4 }}>{o.label}</div>
-            <div className="text-sm text-muted">{o.desc}</div>
-          </button>
-        ))}
-      </div>
-    </div>
-  );
 }

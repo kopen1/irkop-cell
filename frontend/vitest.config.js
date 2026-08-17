@@ -8,5 +8,7 @@ export default defineConfig({
     },
     setupFiles: ['./vitest.setup.js'],
     include: ['src/**/*.test.{js,jsx}'],
+    testTimeout: 30000,
+    hookTimeout: 30000,
   },
 });

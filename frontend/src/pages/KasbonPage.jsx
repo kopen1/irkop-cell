@@ -1,6 +1,10 @@
 // Halaman Kasbon (PRD 5.7): daftar hutang pelanggan & status pelunasan.
-// Set lunas → PUT /api/kasbon/:id (backend membuat mutasi kasbon_pelunasan).
-// UI TIDAK menawarkan hard-delete; tidak ada endpoint hapus kasbon di contract.
+// - Grouping per pelanggan (item 9): klik nama pelanggan untuk buka/tutup
+//   daftar bon miliknya. Murni presentasi; tidak menggabungkan baris DB.
+// - Pembayaran sebagian / pelunasan (item 10): input "Bayar" per bon →
+//   POST /api/kasbon/:id/payment; status 'sebagian' diwakili
+//   status='belum_lunas' + terbayar>0. Lunas saat terbayar >= nominal.
+// - Set lunas → PUT /api/kasbon/:id (backend membuat mutasi kasbon_pelunasan).
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
@@ -48,9 +52,30 @@ export default function KasbonPage() {
   const [lunasAkun, setLunasAkun] = useState('');
   const [lunasBusy, setLunasBusy] = useState(false);
 
+  const [expanded, setExpanded] = useState({});
+  const [bayar, setBayar] = useState({});
+  const [bayarBusy, setBayarBusy] = useState({});
+
   const data = state.data || {};
   const rows = (data.items || []).map((k) => ({ ...k, key: k.id }));
-  const totalBelumLunas = rows.filter((k) => k.status === 'belum_lunas').reduce((s, k) => s + Number(k.nominal), 0);
+
+  const sisaBon = (k) => Number(k.nominal) - Number(k.terbayar || 0);
+  const totalBelumLunas = rows.filter((k) => k.status === 'belum_lunas').reduce((s, k) => s + sisaBon(k), 0);
+  const totalKasbon = rows.reduce((s, k) => s + Number(k.nominal), 0);
+
+  const groups = useMemo(() => {
+    const map = new Map();
+    for (const k of rows) {
+      const key = String(k.pelanggan_id ?? 'umum');
+      if (!map.has(key)) {
+        map.set(key, { key, pelanggan_id: k.pelanggan_id, nama: k.pelanggan_nama || 'Umum', bons: [] });
+      }
+      map.get(key).bons.push(k);
+    }
+    return Array.from(map.values());
+  }, [rows]);
+
+  const toggleGroup = (gkey) => setExpanded((s) => ({ ...s, [gkey]: !s[gkey] }));
 
   const doLunas = async () => {
     setLunasBusy(true);
@@ -59,6 +84,7 @@ export default function KasbonPage() {
       toast.success(`Kasbon ${formatRupiah(lunasTarget.nominal)} ditandai lunas. Mutasi pelunasan dibuat backend.`);
       setLunasTarget(null);
       setLunasAkun('');
+      setBayar((s) => ({ ...s, [lunasTarget.id]: '' }));
       load().catch(() => {});
     } catch (err) {
       toast.error(err.message);
@@ -67,11 +93,32 @@ export default function KasbonPage() {
     }
   };
 
+  const doBayar = async (k) => {
+    const nominal = parseRupiah(bayar[k.id]);
+    const sisa = sisaBon(k);
+    if (!nominal || nominal < 1) return;
+    if (nominal > sisa) {
+      toast.error(`Pembayaran melebihi sisa (${formatRupiah(sisa)}).`);
+      return;
+    }
+    setBayarBusy((s) => ({ ...s, [k.id]: true }));
+    try {
+      await api.post(`/kasbon/${k.id}/payment`, { nominal, metode: 'tunai', akun_id: 'Tunai Laci' });
+      toast.success(`Pembayaran ${formatRupiah(nominal)} tercatat untuk ${k.pelanggan_nama || 'pelanggan'}.`);
+      setBayar((s) => ({ ...s, [k.id]: '' }));
+      load().catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBayarBusy((s) => ({ ...s, [k.id]: false }));
+    }
+  };
+
   return (
     <div className="page">
       <PageHeader
         title="Kasbon"
-        subtitle="Hutang pelanggan & status pelunasan. Jatuh tempo opsional untuk membantu proses nagih."
+        subtitle="Hutang pelanggan & status pelunasan. Klik nama pelanggan untuk membuka daftar bon. Pembayaran sebagian tercatat via tombol Bayar."
         actions={
           can('kasbon') && (
             <Button onClick={() => setCreateOpen(true)}>
@@ -83,12 +130,12 @@ export default function KasbonPage() {
 
       <div className="summary-bar">
         <div className="summary-item">
-          <div className="summary-label">Kasbon belum lunas</div>
+          <div className="summary-label">Sisa belum lunas</div>
           <div className="summary-value text-warning">{formatRupiah(totalBelumLunas)}</div>
         </div>
         <div className="summary-item">
           <div className="summary-label">Total kasbon</div>
-          <div className="summary-value">{formatRupiah(rows.reduce((s, k) => s + Number(k.nominal), 0))}</div>
+          <div className="summary-value">{formatRupiah(totalKasbon)}</div>
         </div>
       </div>
 
@@ -99,31 +146,82 @@ export default function KasbonPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="Belum ada kasbon" description="Kasbon dibuat dari transaksi ber-metode Bon atau ditambah manual." icon="kasbon" />
       ) : (
-        <Table
-          columns={[
-            { key: 'pelanggan', header: 'Pelanggan', render: (r) => <span style={{ fontWeight: 600 }}>{r.pelanggan_nama || '-'}</span> },
-            { key: 'nominal', header: 'Nominal', align: 'right', render: (r) => <span className="num">{formatRupiah(r.nominal)}</span> },
-            { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
-            {
-              key: 'jatuh_tempo',
-              header: 'Jatuh tempo',
-              render: (r) => (r.jatuh_tempo ? <span className="text-sm">{r.jatuh_tempo}</span> : <span className="text-muted">—</span>),
-            },
-            { key: 'status', header: 'Status', render: (r) => <PelunasanBadge status={r.status} /> },
-            {
-              key: 'aksi',
-              header: '',
-              align: 'right',
-              render: (r) =>
-                can('kasbon') && r.status === 'belum_lunas' ? (
-                  <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); setLunasTarget(r); setLunasAkun(''); }}>
-                    <Icon name="check" size={14} /> Set Lunas
-                  </Button>
-                ) : null,
-            },
-          ]}
-          rows={rows}
-        />
+        <div className="flex flex-col gap-3">
+          {groups.map((g) => {
+            const isOpen = Boolean(expanded[g.key]);
+            const groupSisa = g.bons.reduce((s, k) => s + (k.status === 'lunas' ? 0 : sisaBon(k)), 0);
+            return (
+              <div key={g.key} className="card" style={{ padding: 'var(--space-3)' }}>
+                <button
+                  type="button"
+                  onClick={() => toggleGroup(g.key)}
+                  className="flex items-center justify-between"
+                  style={{ width: '100%', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left' }}
+                  aria-expanded={isOpen}
+                >
+                  <span style={{ fontWeight: 600 }}>{g.nama}</span>
+                  <span className="flex items-center gap-3">
+                    <span className="num text-sm text-warning">{formatRupiah(groupSisa)}</span>
+                    <Icon name={isOpen ? 'minus' : 'plus'} size={16} />
+                  </span>
+                </button>
+                {isOpen && (
+                  <div style={{ marginTop: 'var(--space-3)' }}>
+                    <Table
+                      columns={[
+                        { key: 'nominal', header: 'Total bon', align: 'right', render: (r) => <span className="num">{formatRupiah(r.nominal)}</span> },
+                        { key: 'terbayar', header: 'Bayar', align: 'right', render: (r) => <span className="num">{formatRupiah(r.terbayar || 0)}</span> },
+                        { key: 'sisa', header: 'Sisa', align: 'right', render: (r) => <span className="num text-warning">{formatRupiah(sisaBon(r))}</span> },
+                        { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
+                        {
+                          key: 'jatuh_tempo',
+                          header: 'Jatuh tempo',
+                          render: (r) => (r.jatuh_tempo ? <span className="text-sm">{r.jatuh_tempo}</span> : <span className="text-muted">—</span>),
+                        },
+                        { key: 'status', header: 'Status', render: (r) => <PelunasanBadge status={r.status} /> },
+                        {
+                          key: 'aksi',
+                          header: '',
+                          align: 'right',
+                          render: (r) =>
+                            can('kasbon') && r.status === 'belum_lunas' ? (
+                              <div className="flex items-center justify-end gap-2">
+                                <Input
+                                  type="text"
+                                  inputMode="numeric"
+                                  aria-label={`Bayar kasbon ${r.id}`}
+                                  placeholder="Bayar…"
+                                  value={bayar[r.id] || ''}
+                                  onChange={(e) => setBayar((s) => ({ ...s, [r.id]: formatRupiahInput(e.target.value) }))}
+                                  style={{ width: 110 }}
+                                />
+                                <Button
+                                  size="sm"
+                                  loading={Boolean(bayarBusy[r.id])}
+                                  disabled={!bayar[r.id] || parseRupiah(bayar[r.id]) < 1 || parseRupiah(bayar[r.id]) > sisaBon(r)}
+                                  onClick={() => doBayar(r)}
+                                >
+                                  Bayar
+                                </Button>
+                                <Button
+                                  variant="secondary"
+                                  size="sm"
+                                  onClick={(e) => { e.stopPropagation(); setLunasTarget(r); setLunasAkun(''); }}
+                                >
+                                  <Icon name="check" size={14} /> Set Lunas
+                                </Button>
+                              </div>
+                            ) : null,
+                        },
+                      ]}
+                      rows={g.bons}
+                    />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
       )}
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Tambah Kasbon">
@@ -148,7 +246,7 @@ export default function KasbonPage() {
       >
         <p style={{ fontSize: '0.9rem', marginBottom: 'var(--space-4)' }}>
           Kasbon {lunasTarget ? formatRupiah(lunasTarget.nominal) : ''} milik {lunasTarget?.pelanggan_nama || 'pelanggan'} akan ditandai lunas.
-          Backend membuat 1 mutasi <span className="num">kasbon_pelunasan</span> (default ke Tunai Laci).
+          Sisa tagihan {lunasTarget ? formatRupiah(sisaBon(lunasTarget)) : ''}. Backend membuat 1 mutasi <span className="num">kasbon_pelunasan</span> (default ke Tunai Laci).
         </p>
         <Field label="Akun penerima pelunasan (opsional)">
           <Select value={lunasAkun} onChange={(e) => setLunasAkun(e.target.value)}>

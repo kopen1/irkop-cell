@@ -37,6 +37,12 @@ function match(pathname) {
   if (seg.length === 3 && seg[2] === 'permissions') {
     return { name: 'permissions', param: seg[1], rest: seg };
   }
+  if (seg.length === 3 && seg[0] === 'transaksi' && seg[2] === 'konfirmasi') {
+    return { name: 'transaksi', param: seg[1], rest: seg };
+  }
+  if (seg.length === 3 && seg[0] === 'kasbon' && seg[2] === 'payment') {
+    return { name: 'kasbon', param: seg[1], rest: seg };
+  }
   if (seg.length === 2 && seg[1] === 'merge') {
     return { name: 'merge', param: seg[0], rest: seg };
   }
@@ -109,6 +115,10 @@ async function dispatch(db, request, ctx, route) {
         const body = await readBody(request);
         return transaksiRoutes.createTransaksi(db, body, ctx, request);
       }
+      if (m === 'PUT' && param && route.rest?.[2] === 'konfirmasi') {
+        const body = await readBody(request);
+        return transaksiRoutes.updateKonfirmasi(db, body, ctx, param);
+      }
       if (m === 'GET' && param) return transaksiRoutes.getTransaksi(db, request, ctx, param);
       if (m === 'PUT' && param) {
         const body = await readBody(request);
@@ -172,6 +182,7 @@ async function dispatch(db, request, ctx, route) {
       requirePage(ctx, 'kasbon');
       if (m === 'GET' && !param) return kasbonRoutes.listKasbon(db, request, ctx);
       if (m === 'POST' && !param) return kasbonRoutes.createKasbon(db, request, ctx);
+      if (m === 'POST' && param && route.rest?.[2] === 'payment') return kasbonRoutes.payKasbon(db, request, ctx, param);
       if (m === 'PUT' && param) return kasbonRoutes.updateKasbon(db, request, ctx, param);
       break;
 

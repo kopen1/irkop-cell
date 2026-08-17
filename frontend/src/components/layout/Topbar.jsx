@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useSiteName } from '../../hooks/useSiteName';
 import { useTheme, THEMES } from '../../context/ThemeContext';
 import { Icon } from '../ui/Icon';
 
 export function Topbar({ title, onOpenMenu }) {
   const { user } = useAuth();
+  const siteName = useSiteName();
   return (
     <header className="topbar">
       <button type="button" className="btn btn-ghost btn-sm mobile-only" onClick={onOpenMenu} aria-label="Buka menu navigasi">
@@ -12,7 +14,7 @@ export function Topbar({ title, onOpenMenu }) {
       </button>
       <span className="topbar-brand-mobile">
         <span className="sidebar-logo" style={{ width: 30, height: 30, fontSize: '0.7rem' }}>IK</span>
-        Iirkop Cell
+        {siteName}
       </span>
       <span className="topbar-title desktop-only">{title}</span>
       <span className="topbar-spacer" />

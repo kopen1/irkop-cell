@@ -1,13 +1,24 @@
 // Detail transaksi + preview struk & print dialog browser (PRD 5.2).
 // Struk hanya menampilkan data transaksi yang dikembalikan backend.
-import { useMemo } from 'react';
-import { formatDateTime, formatRupiah, labelMetode, labelKonfirmasi } from '../../lib/format';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { api } from '../../lib/api';
+import { useToast } from '../../context/ToastContext';
+import { useSiteName } from '../../hooks/useSiteName';
+import { formatDateTime, formatRupiah, formatSignedRupiah, labelMetode, labelKonfirmasi } from '../../lib/format';
 import { Button } from '../ui/Button';
+import { Select } from '../ui/Field';
 import { KonfirmasiBadge } from '../ui/Badge';
 
-function buildStruk(t, konterNama = 'Iirkop Cell') {
+const KONFIRMASI_OPTIONS = [
+  { value: 'tidak_perlu', label: 'Tidak Perlu' },
+  { value: 'menunggu', label: 'Menunggu' },
+  { value: 'otomatis', label: 'Otomatis' },
+  { value: 'manual', label: 'Manual' },
+];
+
+function buildStruk(t, konterNama) {
   const lines = [];
-  lines.push(konterNama.toUpperCase());
+  lines.push((konterNama || 'Iirkop Cell').toUpperCase());
   lines.push('Jl. Kasir — PPOB & Service HP');
   lines.push('================================');
   lines.push(`No: ${t.id}`);
@@ -29,7 +40,8 @@ function buildStruk(t, konterNama = 'Iirkop Cell') {
 }
 
 export function StrukPreview({ transaksi }) {
-  const struk = useMemo(() => (transaksi ? buildStruk(transaksi) : ''), [transaksi]);
+  const siteName = useSiteName();
+  const struk = useMemo(() => (transaksi ? buildStruk(transaksi, siteName) : ''), [transaksi, siteName]);
   if (!transaksi) return null;
 
   const print = () => {
@@ -107,41 +119,179 @@ export function StrukPreview({ transaksi }) {
   );
 }
 
-export function TransaksiDetail({ transaksi }) {
-  if (!transaksi) return null;
+// Ledger mutasi_saldo (sumber kebenaran backend). Menampilkan tiap baris
+// dengan tanda & akun yang benar (DANA +/-, Tunai Laci, Laba, dsb). Baris
+// reversal (pembatalan) ditandai agar tidak membingungkan dengan mutasi asli.
+function MutasiSection({ mutasi, loading }) {
+  if (!mutasi || mutasi.length === 0) {
+    if (loading) {
+      return (
+        <div>
+          <p className="text-xs text-muted">Mutasi Saldo</p>
+          <p className="text-sm text-muted">Memuat mutasi…</p>
+        </div>
+      );
+    }
+    return null;
+  }
+  return (
+    <div>
+      <p className="text-xs text-muted">Mutasi Saldo (sumber: backend)</p>
+      <div className="table-wrap" style={{ maxHeight: '40vh', overflowY: 'auto' }}>
+        <table className="table" style={{ minWidth: 0 }}>
+          <thead>
+            <tr>
+              <th>Akun</th>
+              <th className="col-right">Mutasi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {mutasi.map((m, i) => {
+              const jumlah = Number(m.jumlah ?? 0);
+              const isReversal = m.sumber_tipe === 'reversal';
+              return (
+                <tr key={m.id ?? `${m.nama_akun}:${m.mutation_key}:${i}`}>
+                  <td>
+                    {m.nama_akun}
+                    {isReversal ? (
+                      <span className="text-xs text-muted" style={{ marginLeft: 6 }}>· Pembatalan</span>
+                    ) : null}
+                  </td>
+                  <td className={`col-right num ${jumlah < 0 ? 'text-danger' : 'text-success'}`}>
+                    {formatSignedRupiah(jumlah)}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+export function TransaksiDetail({ transaksi, onConfirm }) {
+  // Parent bisa mengirim data ringkasan dari list (tanpa mutasi_saldo).
+  // Pastikan kita selalu menampilkan data otoritatif dari backend.
+  const [data, setData] = useState(transaksi);
+  const [loadingMutasi, setLoadingMutasi] = useState(false);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const [confirmValue, setConfirmValue] = useState(transaksi?.konfirmasi_pembayaran || 'manual');
+  const { toast } = useToast();
+
+  useEffect(() => {
+    if (transaksi) setConfirmValue(transaksi.konfirmasi_pembayaran || 'manual');
+  }, [transaksi]);
+
+  useEffect(() => {
+    if (!transaksi) {
+      setData(null);
+      return undefined;
+    }
+    setData(transaksi);
+    if (!transaksi.mutasi_saldo && transaksi.id != null) {
+      let cancelled = false;
+      setLoadingMutasi(true);
+      api
+        .get(`/transaksi/${encodeURIComponent(transaksi.id)}`)
+        .then((r) => {
+          if (!cancelled) setData(r.transaksi || r);
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setLoadingMutasi(false);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+    setLoadingMutasi(false);
+    return undefined;
+  }, [transaksi]);
+
+  const reload = useCallback(() => {
+    if (!data?.id) return;
+    api
+      .get(`/transaksi/${encodeURIComponent(data.id)}`)
+      .then((r) => {
+        setData(r.transaksi || r);
+        onConfirm?.();
+      })
+      .catch(() => {});
+  }, [data?.id, onConfirm]);
+
+  const hasKirimUang = (data?.items || []).some((it) => Number(it.nominal_referensi || 0) > 0);
+  const isAdminTx = data?.jenis === 'transfer' || data?.jenis === 'tariktunai';
+  const showKonfirmasi = data?.metode_bayar === 'transfer' || hasKirimUang || isAdminTx;
+
+  const saveKonfirmasi = async () => {
+    if (!data?.id || confirmBusy) return;
+    setConfirmBusy(true);
+    try {
+      await api.put(`/transaksi/${encodeURIComponent(data.id)}/konfirmasi`, { konfirmasi_pembayaran: confirmValue });
+      toast.success('Status konfirmasi diperbarui.');
+      reload();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setConfirmBusy(false);
+    }
+  };
+
+  if (!data) return null;
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <div>
-          <span className="num" style={{ fontSize: '1.05rem', fontWeight: 800 }}>{transaksi.id}</span>
+          <span className="num" style={{ fontSize: '1.05rem', fontWeight: 800 }}>{data.id}</span>
         </div>
-        <KonfirmasiBadge status={transaksi.konfirmasi_pembayaran} />
+        <KonfirmasiBadge status={data.konfirmasi_pembayaran} />
       </div>
+      {showKonfirmasi && (
+        <div className="card" style={{ padding: 'var(--space-3)', background: 'var(--bg-surface-alt)', border: '1px solid var(--border)' }}>
+          <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>Status konfirmasi pembayaran (dapat diubah)</p>
+          <div className="flex items-end gap-2">
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Select
+                value={confirmValue}
+                onChange={(e) => setConfirmValue(e.target.value)}
+                aria-label="Status konfirmasi pembayaran"
+              >
+                {KONFIRMASI_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </Select>
+            </div>
+            <Button onClick={saveKonfirmasi} loading={confirmBusy}>Simpan</Button>
+          </div>
+        </div>
+      )}
       <div className="grid-2">
         <div>
           <p className="text-xs text-muted">Tanggal/Jam (WIB)</p>
-          <p className="text-sm">{formatDateTime(transaksi.created_at)}</p>
+          <p className="text-sm">{formatDateTime(data.created_at)}</p>
         </div>
         <div>
           <p className="text-xs text-muted">Metode bayar</p>
-          <p className="text-sm">{labelMetode(transaksi.metode_bayar)}</p>
+          <p className="text-sm">{labelMetode(data.metode_bayar)}</p>
         </div>
         <div>
           <p className="text-xs text-muted">Pelanggan</p>
-          <p className="text-sm">{transaksi.pelanggan_nama || 'Umum / Tanpa Nama'}</p>
+          <p className="text-sm">{data.pelanggan_nama || 'Umum / Tanpa Nama'}</p>
         </div>
         <div>
           <p className="text-xs text-muted">Sumber</p>
-          <p className="text-sm">{transaksi.manual_entry ? 'Input manual (Laporan)' : 'Transaksi'}</p>
+          <p className="text-sm">{data.manual_entry ? 'Input manual (Laporan)' : 'Transaksi'}</p>
         </div>
       </div>
-      {transaksi.laba !== undefined && transaksi.laba !== null && (
+      {data.laba !== undefined && data.laba !== null && (
         <div>
           <p className="text-xs text-muted">Laba</p>
-          <p className="num text-sm">{formatRupiah(transaksi.laba)}</p>
+          <p className="num text-sm">{formatRupiah(data.laba)}</p>
         </div>
       )}
-      <StrukPreview transaksi={transaksi} />
+      <MutasiSection mutasi={data.mutasi_saldo} loading={loadingMutasi} />
+      <StrukPreview transaksi={data} />
     </div>
   );
 }

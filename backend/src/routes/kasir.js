@@ -12,7 +12,10 @@ export async function doClosing(db, request, ctx) {
 }
 
 export async function current(db, request, ctx) {
-  return sessionStatus(db, {});
+  const url = new URL(request.url);
+  const tanggal = url.searchParams.get('tanggal') || undefined;
+  const kasirSesiId = url.searchParams.get('kasir_sesi_id');
+  return sessionStatus(db, { date: tanggal, kasirSesiId: kasirSesiId ? Number(kasirSesiId) : null });
 }
 
 export async function reminderClosing(db, request, ctx) {

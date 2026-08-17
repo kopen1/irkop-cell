@@ -535,6 +535,15 @@
   background: var(--bg-surface-alt);
 }
 
+/* Action rows (submit buttons, dsb) — membungkus agar tombol tidak terpotong */
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+.page-actions .btn { flex: 0 0 auto; }
+
 /* Login */
 .login-page {
   min-height: 100%;
@@ -650,6 +659,11 @@
   .tab { white-space: nowrap; }
   .filter-actions { width: 100%; flex-wrap: wrap; }
   .filter-actions .btn { flex: 1 1 100%; white-space: nowrap; }
+  .page-actions { width: 100%; }
+  .page-actions .btn { flex: 1 1 100%; white-space: normal; }
+  .akun-row { grid-template-columns: minmax(0, 1fr); }
+  .akun-row .field { min-width: 0; }
+  .card-header { flex-wrap: wrap; }
   .cart-item { padding: var(--space-2) 4px; gap: var(--space-1); }
   .cart-item-kode { font-size: 0.72rem; }
   .cart-item-nama { font-size: 0.86rem; overflow-wrap: anywhere; }

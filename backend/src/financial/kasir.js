@@ -38,6 +38,10 @@ export async function getTodaySession(db, { date = wibDateToday() } = {}) {
   return db.one('SELECT * FROM kasir_sesi WHERE tanggal = ?', date);
 }
 
+export async function getSessionById(db, kasirSesiId) {
+  return db.one('SELECT * FROM kasir_sesi WHERE id = ?', kasirSesiId);
+}
+
 export async function requireOpenSession(db, date = wibDateToday()) {
   const sesi = await getTodaySession(db, { date });
   if (!sesi) {
@@ -45,6 +49,25 @@ export async function requireOpenSession(db, date = wibDateToday()) {
   }
   if (sesi.status !== 'buka') {
     throw err(409, 'session_closed', 'Sesi kasir hari ini sudah ditutup');
+  }
+  return sesi;
+}
+
+// Sesi yang masih 'buka' — bisa sesi hari ini (default) atau sesi lampau yang
+// belum di-closing (dari reminder). Sesi yang sudah tutup TIDAK boleh diubah.
+async function resolveOpenSession(db, targetId, today) {
+  if (targetId === null) {
+    return requireOpenSession(db, today);
+  }
+  if (!Number.isInteger(targetId) || targetId <= 0) {
+    throw err(400, 'invalid_value', 'kasir_sesi_id tidak valid');
+  }
+  const sesi = await getSessionById(db, targetId);
+  if (!sesi) {
+    throw err(404, 'session_not_found', 'Sesi kasir tidak ditemukan');
+  }
+  if (sesi.status !== 'buka') {
+    throw err(409, 'session_closed', 'Sesi kasir sudah ditutup');
   }
   return sesi;
 }
@@ -126,7 +149,9 @@ export async function opening(db, { body, user, ip }) {
 
 export async function closing(db, { body, user, ip }) {
   const today = wibDateToday();
-  const sesi = await requireOpenSession(db, today);
+  const targetId = body.kasir_sesi_id != null ? Number(body.kasir_sesi_id) : null;
+  const sesi = await resolveOpenSession(db, targetId, today);
+  const tanggal = sesi.tanggal;
 
   const closingRows = body.saldo_real;
   if (Array.isArray(closingRows)) {
@@ -173,15 +198,22 @@ export async function closing(db, { body, user, ip }) {
     throw err(500, 'close_failed', 'Gagal menutup kasir');
   }
 
-  await writeAudit(db, { userId: user.id, aksi: 'closing', tabel: 'kasir_sesi', recordId: sesi.id, dataAfter: { tanggal: today, rekonsiliasi: processed, catatan: body.catatan_closing ?? null }, ip });
+  await writeAudit(db, { userId: user.id, aksi: 'closing', tabel: 'kasir_sesi', recordId: sesi.id, dataAfter: { tanggal, kasir_sesi_id: sesi.id, rekonsiliasi: processed, catatan: body.catatan_closing ?? null }, ip });
 
-  return { kasir_sesi_id: sesi.id, tanggal: today, status: 'tutup', rekonsiliasi: processed };
+  return { kasir_sesi_id: sesi.id, tanggal, status: 'tutup', rekonsiliasi: processed };
 }
 
-export async function sessionStatus(db, { date = wibDateToday() } = {}) {
-  const sesi = await getTodaySession(db, { date });
+export async function sessionStatus(db, { date = wibDateToday(), kasirSesiId = null } = {}) {
+  let sesi = null;
+  let effectiveDate = date;
+  if (kasirSesiId) {
+    sesi = await getSessionById(db, kasirSesiId);
+    if (sesi) effectiveDate = sesi.tanggal;
+  } else {
+    sesi = await getTodaySession(db, { date });
+  }
   if (!sesi) {
-    return { tanggal: date, status: 'belum_buka', kasir_sesi_id: null, saldo: [] };
+    return { tanggal: effectiveDate, status: 'belum_buka', kasir_sesi_id: null, saldo: [] };
   }
   const openingRows = await getOpeningBalances(db, sesi.id);
   const accountRows = {};
@@ -212,7 +244,7 @@ export async function sessionStatus(db, { date = wibDateToday() } = {}) {
   }
 
   return {
-    tanggal: date,
+    tanggal: effectiveDate,
     kasir_sesi_id: sesi.id,
     status: sesi.status,
     dibuka_oleh: sesi.dibuka_oleh,

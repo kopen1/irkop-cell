@@ -34,12 +34,16 @@ export async function createService(db, request, ctx) {
   if (!namaDevice) throw err(400, 'missing_field', 'nama_device wajib diisi');
   if (!deskripsi) throw err(400, 'missing_field', 'deskripsi_kerusakan wajib diisi');
   const tanggalMasuk = asDate(body.tanggal_masuk, { field: 'tanggal_masuk' }) || wibDateToday();
+  const hargaModal = body.harga_modal === undefined || body.harga_modal === null || body.harga_modal === ''
+    ? null
+    : asInt(body.harga_modal, { field: 'harga_modal', min: 0 });
   const res = await db.exec(
     `INSERT INTO service_hp
-       (pelanggan_id, nama_device, deskripsi_kerusakan, status, estimasi_biaya, teknisi_id, catatan, foto_masuk, tanggal_masuk)
-     VALUES (?, ?, ?, 'masuk', ?, ?, ?, ?, ?)`,
+       (pelanggan_id, nama_device, deskripsi_kerusakan, status, estimasi_biaya, harga_modal, teknisi_id, catatan, foto_masuk, tanggal_masuk)
+     VALUES (?, ?, ?, 'masuk', ?, ?, ?, ?, ?, ?)`,
     pelangganId, namaDevice, deskripsi,
     body.estimasi_biaya == null || body.estimasi_biaya === '' ? null : asInt(body.estimasi_biaya, { field: 'estimasi_biaya', min: 0 }),
+    hargaModal,
     body.teknisi_id || null, body.catatan || null, body.foto_masuk || null, tanggalMasuk
   );
   await writeAudit(db, { userId: user.id, aksi: 'create', tabel: 'service_hp', recordId: res.lastRowId, dataAfter: { nama_device: namaDevice, pelanggan_id: pelangganId, tanggal_masuk: tanggalMasuk } });
@@ -63,6 +67,7 @@ export async function updateService(db, request, ctx, idStr) {
   }
   if (body.biaya !== undefined) { sets.push('biaya = ?'); vals.push(body.biaya === '' || body.biaya == null ? null : asInt(body.biaya, { field: 'biaya', min: 0 })); }
   if (body.estimasi_biaya !== undefined) { sets.push('estimasi_biaya = ?'); vals.push(body.estimasi_biaya === '' || body.estimasi_biaya == null ? null : asInt(body.estimasi_biaya, { field: 'estimasi_biaya', min: 0 })); }
+  if (body.harga_modal !== undefined) { sets.push('harga_modal = ?'); vals.push(body.harga_modal === '' || body.harga_modal == null ? null : asInt(body.harga_modal, { field: 'harga_modal', min: 0 })); }
   if (body.teknisi_id !== undefined) { sets.push('teknisi_id = ?'); vals.push(body.teknisi_id || null); }
   if (body.catatan !== undefined) { sets.push('catatan = ?'); vals.push(body.catatan || null); }
   if (body.sudah_dihubungi !== undefined) { sets.push('sudah_dihubungi = ?'); vals.push(asBool(body.sudah_dihubungi)); }

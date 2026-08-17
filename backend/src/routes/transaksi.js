@@ -315,7 +315,7 @@ async function writeTransaksiAudit(db, user, tx, aksi = 'create', before = null,
 
 export async function createTransaksi(db, body, ctx, request) {
   const jenis = body.jenis || null;
-  if (jenis === 'topup' || jenis === 'tariktunai') {
+  if (jenis === 'tariktunai' || jenis === 'transfer') {
     return createAdminTransaksi(db, body, ctx, request, jenis);
   }
   return createProductTransaksi(db, body, ctx, request, jenis);
@@ -335,20 +335,22 @@ function insertMutationsStmts(db, sesi, kode, plan, idempotencyKey, now) {
   });
 }
 
-// TOP UP / TARIK TUNAI (R6) — tidak pakai item produk.
-function buildAdminPlan(jenis, adminType, nominal, admin) {
+// TARIK TUNAI / TRANSFER (R6) — tidak pakai item produk.
+// paymentAkun = akun uang dari akun_master (default 'Tunai Laci') yang
+// menerima/mengeluarkan dana; accountName = akun provider (mitra) yang di-mutasi.
+function buildAdminPlan(jenis, adminType, nominal, admin, accountName, paymentAkun = 'Tunai Laci') {
   const plan = [];
-  if (jenis === 'topup') {
-    plan.push({ nama_akun: 'Saldo Akun', jumlah: -nominal, kategori: 'saldo_akun' });
-    plan.push({ nama_akun: 'Tunai Laci', jumlah: nominal + admin, kategori: 'pendapatan' });
+  if (jenis === 'transfer') {
+    plan.push({ nama_akun: accountName, jumlah: -nominal, kategori: 'saldo_akun' });
+    plan.push({ nama_akun: paymentAkun, jumlah: nominal + admin, kategori: 'pendapatan' });
     plan.push({ nama_akun: 'Laba', jumlah: admin, kategori: 'pendapatan_admin' });
   } else {
     if (adminType === 'dalam') {
-      plan.push({ nama_akun: 'Saldo Akun', jumlah: nominal + admin, kategori: 'saldo_akun' });
-      plan.push({ nama_akun: 'Tunai Laci', jumlah: -nominal, kategori: 'pengeluaran' });
+      plan.push({ nama_akun: accountName, jumlah: nominal + admin, kategori: 'saldo_akun' });
+      plan.push({ nama_akun: paymentAkun, jumlah: -nominal, kategori: 'pengeluaran' });
     } else {
-      plan.push({ nama_akun: 'Saldo Akun', jumlah: nominal, kategori: 'saldo_akun' });
-      plan.push({ nama_akun: 'Tunai Laci', jumlah: -(nominal - admin), kategori: 'pengeluaran' });
+      plan.push({ nama_akun: accountName, jumlah: nominal, kategori: 'saldo_akun' });
+      plan.push({ nama_akun: paymentAkun, jumlah: -(nominal - admin), kategori: 'pengeluaran' });
     }
     plan.push({ nama_akun: 'Laba', jumlah: admin, kategori: 'pendapatan_admin' });
   }
@@ -363,15 +365,29 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
   }
   const mitra = normalizeProvider(body.mitra);
   if (!mitra) throw err(400, 'invalid_provider', 'mitra wajib (DANA/BANK/OVO/GOPAY)');
+  const accountName = (await getAccount(db, mitra)).nama_akun;
 
   let adminType = body.admin_type || null;
-  if (jenis === 'topup') {
+  if (jenis === 'transfer') {
     if (adminType && adminType !== 'luar') {
-      throw err(400, 'invalid_admin_type', 'Top Up selalu menggunakan Admin Luar');
+      throw err(400, 'invalid_admin_type', 'Transfer selalu menggunakan Admin Luar');
     }
     adminType = 'luar';
   } else if (adminType !== 'dalam' && adminType !== 'luar') {
     throw err(400, 'invalid_admin_type', 'Tarik Tunai butuh admin_type dalam/luar');
+  }
+
+  // Metode pembayaran = akun uang dari akun_master (default Tunai Laci).
+  let paymentAkun = 'Tunai Laci';
+  if (body.metode_pembayaran) {
+    const acc = await getAccount(db, body.metode_pembayaran);
+    if (acc.tipe === 'lainnya') {
+      throw err(400, 'invalid_payment_account', `${acc.nama_akun} bukan akun uang (tipe ${acc.tipe})`);
+    }
+    paymentAkun = acc.nama_akun;
+  }
+  if (paymentAkun === accountName) {
+    throw err(400, 'invalid_payment_account', 'Akun pembayaran tidak boleh sama dengan akun provider');
   }
 
   const admin = await hitungAdmin(db, mitra, nominal);
@@ -380,9 +396,21 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
   const tanggalTx = resolveTanggalTransaksi(body);
   const kode = await generateTransaksiKode(db, tanggalTx);
   const now = nowIso();
-  const total = jenis === 'topup' ? nominal + admin : nominal;
-  const plan = buildAdminPlan(jenis, adminType, nominal, admin);
+  const total = jenis === 'transfer' ? nominal + admin : nominal;
+  const plan = buildAdminPlan(jenis, adminType, nominal, admin, accountName, paymentAkun);
   await validatedAccountNames(db, plan, body);
+
+  if (idempotencyKey) {
+    const existing = await findExistingByIdempotencyKey(db, idempotencyKey, plan);
+    if (existing) {
+      return {
+        id: existing.kode_transaksi, total: existing.total, status: 'sukses',
+        konfirmasi_pembayaran: existing.konfirmasi_pembayaran, created_at: existing.created_at,
+        duplicate: true, jenis, admin_type: adminType, mitra, admin,
+        preview: { saldo_akun: 0, laci: 0, laba: admin, pembayaran_akun: paymentAkun },
+      };
+    }
+  }
 
   const stmts = [
     db.raw.prepare(
@@ -398,14 +426,38 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
   if (!results.every((r) => r.success)) throw err(500, 'tx_failed', 'Gagal menyimpan transaksi');
 
   const saved = await db.one('SELECT * FROM transaksi WHERE kode_transaksi = ?', kode);
+
+  // Idempotency race: a concurrent twin with the same Idempotency-Key may have
+  // committed first, so its mutation_keys (UNIQUE) caused our mutations to be
+  // OR IGNORE'd -> our transaksi would be a phantom with 0 mutations. Roll it
+  // back and return the twin instead (sequential retries are already caught above).
+  if (idempotencyKey) {
+    const ins = await db.one(
+      "SELECT COUNT(*) AS n FROM mutasi_saldo WHERE sumber_tipe = 'transaksi' AND sumber_id = ?",
+      saved.id
+    );
+    if (Number(ins.n) === 0) {
+      const existing = await findExistingByIdempotencyKey(db, idempotencyKey, plan);
+      if (existing) {
+        await db.exec('DELETE FROM transaksi WHERE id = ?', saved.id);
+        return {
+          id: existing.kode_transaksi, total: existing.total, status: 'sukses',
+          konfirmasi_pembayaran: existing.konfirmasi_pembayaran, created_at: existing.created_at,
+          duplicate: true, jenis, admin_type: adminType, mitra, admin,
+          preview: { saldo_akun: 0, laci: 0, laba: admin, pembayaran_akun: paymentAkun },
+        };
+      }
+    }
+  }
+
   await writeTransaksiAudit(db, user, saved);
-  const saldo = plan.find((p) => p.nama_akun === 'Saldo Akun')?.jumlah ?? 0;
-  const laci = plan.find((p) => p.nama_akun === 'Tunai Laci')?.jumlah ?? 0;
+  const saldo = plan.find((p) => p.nama_akun !== paymentAkun && p.nama_akun !== 'Laba')?.jumlah ?? 0;
+  const laci = plan.find((p) => p.nama_akun === paymentAkun)?.jumlah ?? 0;
   return {
     id: saved.kode_transaksi, total: saved.total, status: 'sukses',
     konfirmasi_pembayaran: saved.konfirmasi_pembayaran, created_at: saved.created_at,
     duplicate: false, jenis, admin_type: adminType, mitra, admin,
-    preview: { saldo_akun: saldo, laci, laba: admin },
+    preview: { saldo_akun: saldo, laci, laba: admin, pembayaran_akun: paymentAkun },
   };
 }
 
@@ -585,8 +637,8 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   const tx = await findTransaksiByRef(db, idStr);
   if (!tx) throw err(404, 'not_found', 'Transaksi tidak ditemukan');
   if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
-  if (tx.jenis === 'topup' || tx.jenis === 'tariktunai') {
-    throw err(400, 'readonly_transaksi', 'Transaksi admin (Top Up / Tarik Tunai) tidak dapat diubah');
+  if (['tariktunai', 'transfer'].includes(tx.jenis)) {
+    throw err(400, 'readonly_transaksi', 'Transaksi admin (Tarik Tunai / Transfer) tidak dapat diubah');
   }
 
   const metodeBayar = tx.metode_bayar;
@@ -659,4 +711,46 @@ export async function updateTransaksi(db, body, ctx, idStr) {
     dataAfter: { total: saved.total, action_key: actionKey },
   });
   return { id: saved.kode_transaksi, total: saved.total, status: 'sukses', action_key: actionKey };
+}
+
+// Ubah status konfirmasi pembayaran (khusus transaksi transfer & kirim uang).
+// Nilai valid: 'tidak_perlu' | 'menunggu' | 'otomatis' | 'manual'. Diubah dari UI dropdown.
+const KONFIRMASI_VALUES = ['tidak_perlu', 'menunggu', 'otomatis', 'manual'];
+
+export async function updateKonfirmasi(db, body, ctx, idStr) {
+  const { user } = ctx.auth;
+  const tx = await findTransaksiByRef(db, idStr);
+  if (!tx) throw err(404, 'not_found', 'Transaksi tidak ditemukan');
+  if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
+  // Berlaku untuk transaksi transfer ATAU kirim uang (item dengan nominal_referensi)
+  // ATAU transaksi admin Transfer/Tarik Tunai (jenis transfer/tariktunai).
+  const kirimUang = await db.one(
+    'SELECT COUNT(*) AS n FROM transaksi_item WHERE transaksi_id = ? AND nominal_referensi IS NOT NULL AND nominal_referensi != 0',
+    tx.id
+  );
+  const isTransferType =
+    tx.metode_bayar === 'transfer' ||
+    tx.jenis === 'transfer' ||
+    tx.jenis === 'tariktunai' ||
+    Number(kirimUang?.n || 0) > 0;
+  if (!isTransferType) {
+    throw err(400, 'not_transfer', 'Hanya transaksi transfer / kirim uang / tarik tunai yang memiliki status konfirmasi');
+  }
+  const next = body.konfirmasi_pembayaran || 'manual';
+  if (!KONFIRMASI_VALUES.includes(next)) {
+    throw err(400, 'invalid_value', 'konfirmasi_pembayaran tidak valid');
+  }
+  if (next === tx.konfirmasi_pembayaran) {
+    return { id: tx.kode_transaksi, status: 'sukses', konfirmasi_pembayaran: next, unchanged: true };
+  }
+  await db.exec(
+    'UPDATE transaksi SET konfirmasi_pembayaran = ?, updated_at = ? WHERE id = ?',
+    next, nowIso(), tx.id
+  );
+  await writeAudit(db, {
+    userId: user.id, aksi: 'update_konfirmasi', tabel: 'transaksi', recordId: tx.id,
+    dataBefore: { kode_transaksi: tx.kode_transaksi, konfirmasi_pembayaran: tx.konfirmasi_pembayaran },
+    dataAfter: { konfirmasi_pembayaran: next },
+  });
+  return { id: tx.kode_transaksi, status: 'sukses', konfirmasi_pembayaran: next };
 }

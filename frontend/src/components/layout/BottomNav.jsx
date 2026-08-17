@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useSiteName } from '../../hooks/useSiteName';
 import { MAIN_NAV_MOBILE } from '../../lib/routes';
 import { NavList } from './Sidebar';
 import { Icon } from '../ui/Icon';
@@ -22,6 +23,7 @@ export function BottomNav() {
 
 export function MobileDrawer({ open, onClose }) {
   const { user, logout } = useAuth();
+  const siteName = useSiteName();
   if (!open) return null;
   return (
     <>
@@ -30,7 +32,7 @@ export function MobileDrawer({ open, onClose }) {
         <header className="drawer-head">
           <div className="flex items-center gap-2">
             <span className="sidebar-logo">IK</span>
-            <span className="sidebar-brand-name">Iirkop Cell</span>
+            <span className="sidebar-brand-name">{siteName}</span>
           </div>
           <button type="button" className="modal-close" onClick={onClose} aria-label="Tutup menu">
             <Icon name="close" size={18} />

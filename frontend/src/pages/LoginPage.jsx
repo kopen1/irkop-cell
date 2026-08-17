@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import { useSiteName } from '../hooks/useSiteName';
 import { useTheme, THEMES } from '../context/ThemeContext';
 import { ApiError } from '../lib/api';
 import { Card } from '../components/ui/Card';
@@ -19,6 +20,7 @@ export default function LoginPage() {
   const [busy, setBusy] = useState(false);
 
   const from = location.state?.from?.pathname || '/';
+  const siteName = useSiteName();
 
   if (!ready) return null;
   if (user) return <Navigate to={from} replace />;
@@ -43,7 +45,7 @@ export default function LoginPage() {
       <Card className="login-card">
         <div style={{ textAlign: 'center', marginBottom: 'var(--space-5)' }}>
           <span className="sidebar-logo" style={{ width: 52, height: 52, fontSize: '1.05rem', margin: '0 auto 12px' }}>IK</span>
-          <h1 className="page-title">Iirkop Cell</h1>
+          <h1 className="page-title">{siteName}</h1>
           <p className="text-sm text-secondary">POS &amp; Buku Kas Digital</p>
         </div>
 

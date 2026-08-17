@@ -49,6 +49,7 @@ describe('Halaman Laporan (smoke)', () => {
     global.fetch = vi.fn().mockImplementation((url) => {
       const s = String(url);
       if (s.includes('/auth/me')) return Promise.resolve(jsonResponse({ user }));
+      if (s.includes('/api/settings')) return Promise.resolve(jsonResponse({ nama_website: 'Iirkop Cell' }));
       if (s.includes('/laporan/bulan')) return Promise.resolve(jsonResponse(report));
       return Promise.resolve(jsonResponse({ error: { code: 'not_found', message: 'unknown' } }, 404));
     });

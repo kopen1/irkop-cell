@@ -1,5 +1,6 @@
 import { NavLink } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
+import { useSiteName } from '../../hooks/useSiteName';
 import { NAV, NAV_SYSTEM, canAccess } from '../../lib/routes';
 import { Icon } from '../ui/Icon';
 
@@ -35,12 +36,13 @@ export function NavList({ onNavigate }) {
 
 export function Sidebar({ onNavigate }) {
   const { user, logout } = useAuth();
+  const siteName = useSiteName();
   return (
     <aside className="sidebar sidebar-desktop">
       <div className="sidebar-brand">
         <span className="sidebar-logo">IK</span>
         <div>
-          <div className="sidebar-brand-name">Iirkop Cell</div>
+          <div className="sidebar-brand-name">{siteName}</div>
           <div className="sidebar-brand-sub">POS & Buku Kas</div>
         </div>
       </div>

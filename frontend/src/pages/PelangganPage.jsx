@@ -17,6 +17,13 @@ import { Icon } from '../components/ui/Icon';
 
 const LIMIT = 100;
 
+// API Kontak (navigator.contacts) hanya tersedia di browser/HTTPS tertentu.
+const contactsAvailable = typeof navigator !== 'undefined' && !!navigator.contacts && typeof navigator.contacts.select === 'function';
+
+function normalizeTel(value) {
+  return String(value || '').replace(/\D/g, '');
+}
+
 export default function PelangganPage() {
   const { can } = useAuth();
   const toast = useToast();
@@ -50,6 +57,12 @@ export default function PelangganPage() {
   const [mergeOpen, setMergeOpen] = useState(false);
   const [mergeSel, setMergeSel] = useState({ a: '', b: '' });
   const [mergeBusy, setMergeBusy] = useState(false);
+
+  const [importOpen, setImportOpen] = useState(false);
+  const [importStep, setImportStep] = useState('pick');
+  const [importForm, setImportForm] = useState({ nama: '', telepon: '' });
+  const [importError, setImportError] = useState(null);
+  const [importBusy, setImportBusy] = useState(false);
 
   const data = state.data || {};
   const rows = (data.items || []).map((p) => ({ ...p, key: p.id }));
@@ -87,6 +100,65 @@ export default function PelangganPage() {
     }
   };
 
+  // Pilih kontak via Contacts API → prefill form (nama/nomor) → edit → simpan.
+  const openImport = async () => {
+    setImportOpen(true);
+    setImportError(null);
+    setImportForm({ nama: '', telepon: '' });
+    if (!contactsAvailable) {
+      setImportStep('unavailable');
+      return;
+    }
+    setImportStep('pick');
+    try {
+      const picked = await navigator.contacts.select(['name', 'tel'], { multiple: false });
+      const c = picked[0] || {};
+      const nama = String(c.name || '').trim();
+      const tel = String(Array.isArray(c.tel) ? c.tel[0] : c.tel || '').trim();
+      setImportForm({ nama, telepon: tel });
+      const existing = rows.find((p) => p.telepon && normalizeTel(p.telepon) === normalizeTel(tel));
+      if (tel && existing) {
+        setImportError(`Nomor "${tel}" sudah terdaftar atas nama "${existing.nama}". Tidak disimpan duplikat — ubah nomor atau gabungkan pelanggan yang ada.`);
+      } else {
+        setImportError(null);
+      }
+      setImportStep('edit');
+    } catch (err) {
+      if (err && err.name === 'NotAllowedError') {
+        setImportError('Izin kontak ditolak. Beri akses kontak di pengaturan browser, atau tambahkan pelanggan secara manual.');
+      } else {
+        setImportError(`Gagal membaca kontak: ${err?.message || 'kesalahan tidak diketahui'}. Tambahkan pelanggan secara manual.`);
+      }
+      setImportStep('edit');
+    }
+  };
+
+  const doImport = async (e) => {
+    e.preventDefault();
+    setImportError(null);
+    if (!importForm.nama.trim()) return setImportError('Nama wajib diisi.');
+    const tel = importForm.telepon.trim();
+    if (tel) {
+      const existing = rows.find((p) => p.telepon && normalizeTel(p.telepon) === normalizeTel(tel));
+      if (existing) {
+        return setImportError(`Nomor "${tel}" sudah terdaftar atas nama "${existing.nama}". Tidak disimpan duplikat.`);
+      }
+    }
+    setImportBusy(true);
+    try {
+      await api.post('/pelanggan', { nama: importForm.nama.trim(), telepon: tel || undefined });
+      toast.success('Pelanggan dari kontak disimpan.');
+      setImportOpen(false);
+      setImportStep('pick');
+      setImportForm({ nama: '', telepon: '' });
+      load().catch(() => {});
+    } catch (err) {
+      setImportError(err.message);
+    } finally {
+      setImportBusy(false);
+    }
+  };
+
   return (
     <div className="page">
       <PageHeader
@@ -97,6 +169,14 @@ export default function PelangganPage() {
             <>
               <Button variant="secondary" onClick={() => setMergeOpen(true)}>
                 <Icon name="eye" size={16} /> Gabungkan
+              </Button>
+              <Button
+                variant="secondary"
+                onClick={openImport}
+                disabled={!contactsAvailable}
+                title={contactsAvailable ? 'Import kontak perangkat (nama & nomor)' : 'Device/browser ini tidak mendukung API Kontak (navigator.contacts). Tambahkan pelanggan secara manual.'}
+              >
+                <Icon name="download" size={16} /> Import Kontak
               </Button>
               <Button onClick={() => setCreateOpen(true)}>
                 <Icon name="plus" size={16} /> Tambah Pelanggan
@@ -212,6 +292,44 @@ export default function PelangganPage() {
             </section>
           </div>
         ) : null}
+      </Modal>
+
+      {/* Import Kontak */}
+      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import Kontak">
+        {importStep === 'unavailable' ? (
+          <div className="flex flex-col gap-3">
+            <p className="text-sm text-secondary">
+              Device/browser ini tidak mendukung API Kontak (<span className="num">navigator.contacts</span>).
+              Kontak hanya bisa diimpor di browser yang mendukung Contacts API (mis. Android Chrome via HTTPS).
+            </p>
+            <p className="text-sm text-secondary">Gunakan tombol "Tambah Pelanggan" untuk mencatat pelanggan secara manual.</p>
+            <div className="flex justify-end">
+              <Button variant="secondary" onClick={() => setImportOpen(false)}>Tutup</Button>
+            </div>
+          </div>
+        ) : importStep === 'pick' ? (
+          <div className="flex items-center gap-3">
+            <Loader />
+            <span className="text-sm text-secondary">Memilih kontak…</span>
+          </div>
+        ) : (
+          <form onSubmit={doImport} className="flex flex-col gap-4">
+            <p className="text-sm text-secondary">
+              Data kontak sudah diisi otomatis. Periksa/edit sebelum disimpan.
+            </p>
+            <Field label="Nama" required>
+              <Input type="text" value={importForm.nama} onChange={(e) => setImportForm((f) => ({ ...f, nama: e.target.value }))} />
+            </Field>
+            <Field label="Telepon / nomor (opsional)">
+              <Input type="tel" value={importForm.telepon} onChange={(e) => setImportForm((f) => ({ ...f, telepon: e.target.value }))} />
+            </Field>
+            {importError && <p className="field-error" role="alert">{importError}</p>}
+            <div className="flex justify-end gap-2">
+              <Button variant="secondary" type="button" onClick={() => setImportOpen(false)}>Batal</Button>
+              <Button type="submit" loading={importBusy}>Simpan</Button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       {/* Merge */}
