@@ -73,7 +73,8 @@ export async function listTransaksi(db, request, ctx) {
   const { where, bind } = buildListWhere(url, url.searchParams);
 
   const count = await db.one(
-    `SELECT COUNT(*) AS total_items, COALESCE(SUM(t.total), 0) AS total_nilai
+    `SELECT COUNT(*) AS total_items, COALESCE(SUM(t.total), 0) AS total_nilai,
+            COALESCE(SUM(t.laba), 0) AS total_laba
        FROM transaksi t WHERE ${where}`,
     ...bind
   );
@@ -122,9 +123,12 @@ export async function listTransaksi(db, request, ctx) {
       manual_entry: r.manual_entry,
       dibuat_oleh: r.dibuat_oleh_nama,
       items: itemMap[r.id] || [],
+      sisa: r.sisa || 0,
+      status_bayar: r.status_bayar || 'lunas',
     })),
     total_items: count.total_items,
     total_nilai: count.total_nilai,
+    total_laba: count.total_laba,
     filter: {
       date: url.searchParams.get('date'),
       date_from: url.searchParams.get('date_from'),
@@ -188,6 +192,8 @@ export async function getTransaksi(db, request, ctx, idStr) {
     items,
     pembayaran,
     mutasi_saldo: mutasi,
+    sisa: t.sisa || 0,
+    status_bayar: t.status_bayar || 'lunas',
   };
 }
 
@@ -214,14 +220,22 @@ export async function generateTransaksiKode(db, date, attempts = 3, excludeId = 
 async function loadProducts(db, items) {
   const out = new Map();
   for (const it of items) {
-    if (!it || !it.produk_id) throw err(400, 'missing_field', 'setiap item wajib punya produk_id');
-    const prod = await db.one(
-      'SELECT p.*, k.nama AS kategori_nama FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id WHERE p.id = ?',
-      it.produk_id
-    );
-    if (!prod) throw err(400, 'invalid_product', `Produk id ${it.produk_id} tidak ditemukan`);
-    if (prod.deleted_at) throw err(400, 'invalid_product', `Produk ${prod.nama} sudah dihapus`);
-    out.set(String(prod.id), prod);
+    if (!it || (!it.produk_id && !it.service_hp_id)) throw err(400, 'missing_field', 'setiap item wajib punya produk_id atau service_hp_id');
+    if (it.produk_id) {
+      const prod = await db.one(
+        'SELECT p.*, k.nama AS kategori_nama FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id WHERE p.id = ?',
+        it.produk_id
+      );
+      if (!prod) throw err(400, 'invalid_product', `Produk id ${it.produk_id} tidak ditemukan`);
+      if (prod.deleted_at) throw err(400, 'invalid_product', `Produk ${prod.nama} sudah dihapus`);
+      out.set(`p:${prod.id}`, prod);
+    }
+    if (it.service_hp_id) {
+      const svc = await db.one('SELECT * FROM service_hp WHERE id = ?', it.service_hp_id);
+      if (!svc) throw err(400, 'invalid_service', `Service HP id ${it.service_hp_id} tidak ditemukan`);
+      if (svc.deleted_at) throw err(400, 'invalid_service', 'Service HP sudah dihapus');
+      out.set(`s:${svc.id}`, svc);
+    }
   }
   return out;
 }
@@ -246,58 +260,96 @@ function mergePlan(plan) {
 
 function computeItems(items, produkMap) {
   let subtotal = 0;
+  let omzet = 0;
   let laba = 0;
   const itemRows = [];
   const effects = { tunai: 0, akun: new Map() };
 
   for (const it of items) {
-    const prod = produkMap.get(String(it.produk_id));
     const qty = Number(it.qty);
-    if (!Number.isInteger(qty) || qty < 1) throw err(400, 'invalid_value', `qty item ${prod.nama} harus integer >= 1`);
-    const harga = Number(prod.harga);
-    const modal = prod.harga_modal == null ? 0 : Number(prod.harga_modal);
-    subtotal += harga * qty;
+    if (!Number.isInteger(qty) || qty < 1) throw err(400, 'invalid_value', `qty item harus integer >= 1`);
+
+    let harga = 0;
+    let modal = 0;
+    let nama = '';
+    let produkId = null;
+    let serviceId = null;
+    let hargaModalSnapshot = null;
+    let nominalRef = null;
+    let akunSumber = null;
+    let isTarik = false;
+
+    if (it.service_hp_id) {
+      // Item Service HP: langsung mereferensikan record service_hp (tanpa produk jasa terpisah).
+      const svc = produkMap.get(`s:${it.service_hp_id}`);
+      const biaya = it.biaya != null ? Number(it.biaya) : svc.biaya != null ? Number(svc.biaya) : null;
+      if (!Number.isInteger(biaya) || biaya < 1) {
+        throw err(400, 'invalid_value', `Biaya service "${svc.nama_device}" wajib diisi (integer >= 1)`);
+      }
+      harga = biaya;
+      modal = svc.harga_modal == null ? 0 : Number(svc.harga_modal);
+      hargaModalSnapshot = svc.harga_modal;
+      nama = `Service: ${svc.nama_device}`;
+      serviceId = svc.id;
+      svc._biayaFinal = biaya;
+    } else {
+      const prod = produkMap.get(`p:${it.produk_id}`);
+      harga = Number(prod.harga);
+      modal = prod.harga_modal == null ? 0 : Number(prod.harga_modal);
+      hargaModalSnapshot = prod.harga_modal;
+      nama = prod.nama;
+      produkId = prod.id;
+      isTarik = TARIK_KATEGORI.test(prod.kategori_nama || '');
+      nominalRef = it.nominal_referensi == null ? null : Number(it.nominal_referensi);
+      akunSumber = it.akun_sumber || null;
+    }
+
+    const fee = harga * qty;
+    subtotal += fee;
     laba += (harga - modal) * qty;
 
-    const nominalRef = it.nominal_referensi == null ? null : Number(it.nominal_referensi);
-    const akunSumber = it.akun_sumber || null;
-    let validatedAkun = null;
+    let itemOmzet = fee;
     if (nominalRef !== null && nominalRef !== 0 && nominalRef !== undefined) {
       if (!Number.isInteger(nominalRef) || nominalRef < 1) {
         throw err(400, 'invalid_value', 'nominal_referensi harus integer >= 1');
       }
       if (!akunSumber) throw err(400, 'missing_field', 'item kirim uang wajib memiliki akun_sumber');
-      validatedAkun = akunSumber;
       // Tarik tunai: delta negatif (laci keluar, saldo akun bertambah);
       // kirim uang/transfer/saldo: delta positif (laci masuk, saldo akun berkurang).
-      const delta = TARIK_KATEGORI.test(prod.kategori_nama || '') ? -nominalRef : nominalRef;
+      // Nominal berlaku per unit: qty 2 dengan nominal 150k = total nominal 300k.
+      const totalNominal = nominalRef * qty;
+      const delta = isTarik ? -totalNominal : totalNominal;
       effects.tunai += delta;
-      effects.akun.set(validatedAkun, (effects.akun.get(validatedAkun) || 0) - delta);
+      effects.akun.set(akunSumber, (effects.akun.get(akunSumber) || 0) - delta);
+      // Omzet: nominal + fee untuk kirim uang; fee saja untuk tarik tunai.
+      if (!isTarik) itemOmzet += totalNominal;
     }
+    omzet += itemOmzet;
 
     itemRows.push({
-      produk_id: prod.id,
-      nama: prod.nama,
+      produk_id: produkId,
+      service_hp_id: serviceId,
+      nama,
       harga,
-      harga_modal: prod.harga_modal,
+      harga_modal: hargaModalSnapshot,
       qty,
-      subtotal: harga * qty,
+      subtotal: fee,
       nominal_referensi: nominalRef,
-      akun_sumber: validatedAkun,
+      akun_sumber: akunSumber,
     });
   }
 
-  return { subtotal, total: subtotal, laba, itemRows, effects };
+  return { subtotal, total: omzet, laba, itemRows, effects };
 }
 
-function planMutations({ metodeBayar, akunPenerima, total, effects }) {
+function planMutations({ metodeBayar, akunPenerima, subtotal, effects }) {
   const list = [];
   if (metodeBayar === 'tunai') {
-    list.push({ nama_akun: 'Tunai Laci', jumlah: total });
+    list.push({ nama_akun: 'Tunai Laci', jumlah: subtotal });
   } else if (metodeBayar === 'cash_tunai') {
-    list.push({ nama_akun: 'Tunai Laci', jumlah: total });
+    list.push({ nama_akun: 'Tunai Laci', jumlah: subtotal });
   } else if (metodeBayar === 'transfer') {
-    list.push({ nama_akun: akunPenerima, jumlah: total });
+    list.push({ nama_akun: akunPenerima, jumlah: subtotal });
   }
   if (effects.tunai !== 0) list.push({ nama_akun: 'Tunai Laci', jumlah: effects.tunai });
   for (const [akun, jml] of effects.akun) {
@@ -503,7 +555,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
 
   const sesi = await requireOpenSession(db);
   const produkMap = await loadProducts(db, body.items);
-  const { total, laba, itemRows, effects } = computeItems(body.items, produkMap);
+  const { subtotal, total, laba, itemRows, effects } = computeItems(body.items, produkMap);
 
   const payments = Array.isArray(body.payments) ? body.payments : [];
   let plan;
@@ -534,8 +586,9 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
         anyTransfer = true;
       }
     }
-    if (sum !== total) {
-      throw err(400, 'payment_mismatch', `Total pembayaran (${sum}) tidak sama dengan total transaksi (${total})`);
+    // Support partial payments (bayar kurang)
+    if (sum > total) {
+      throw err(400, 'payment_mismatch', `Total pembayaran (${sum}) melebihi total transaksi (${total})`);
     }
     if (effects.tunai !== 0) plan.push({ nama_akun: 'Tunai Laci', jumlah: effects.tunai, kategori: 'pendapatan' });
     for (const [akun, jml] of effects.akun) {
@@ -556,7 +609,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
       if (!body.akun_penerima) throw err(400, 'missing_field', 'Metode transfer wajib menyertakan akun_penerima');
       akunPenerima = (await getAccount(db, body.akun_penerima)).nama_akun;
     }
-    plan = planMutations({ metodeBayar, akunPenerima, total, effects });
+    plan = planMutations({ metodeBayar, akunPenerima, subtotal, effects });
     konfirmasi = metodeBayar === 'transfer' ? 'menunggu' : 'tidak_perlu';
   }
 
@@ -574,22 +627,27 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
   const kode = await generateTransaksiKode(db, tanggalTx);
   const now = nowIso();
 
+  // Hitung sisa tagihan
+  const totalBayar = paymentRows.reduce((sum, pr) => sum + pr.nominal, 0);
+  const sisa = total - totalBayar;
+  const statusBayar = sisa <= 0 ? 'lunas' : (totalBayar > 0 ? 'sebagian' : 'belum_bayar');
+
   const stmts = [
     db.raw.prepare(
       `INSERT INTO transaksi
         (kode_transaksi, pelanggan_id, metode_bayar, konfirmasi_pembayaran, subtotal, diskon, total,
-         laba, kasir_sesi_id, dibuat_oleh, manual_entry, jenis, admin_type, mitra, tanggal_transaksi, created_at)
-       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(kode, body.pelanggan_id || null, derivedMetode, konfirmasi, total, total, laba, sesi.id, user.id, body.manual_entry === true || body.manual_entry === 1 ? 1 : 0, jenis || null, null, null, tanggalTx, now),
+         laba, kasir_sesi_id, dibuat_oleh, manual_entry, jenis, admin_type, mitra, tanggal_transaksi, created_at, sisa, status_bayar)
+       VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).bind(kode, body.pelanggan_id || null, derivedMetode, konfirmasi, subtotal, total, laba, sesi.id, user.id, body.manual_entry === true || body.manual_entry === 1 ? 1 : 0, jenis || null, null, null, tanggalTx, now, sisa, statusBayar),
   ];
 
   for (const it of itemRows) {
     stmts.push(
       db.raw.prepare(
         `INSERT INTO transaksi_item
-          (transaksi_id, produk_id, nama_produk_snapshot, harga_snapshot, harga_modal_snapshot, qty, subtotal, nominal_referensi, akun_sumber)
-         VALUES ((SELECT max(id) FROM transaksi), ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(it.produk_id, it.nama, it.harga, it.harga_modal, it.qty, it.subtotal, it.nominal_referensi, it.akun_sumber)
+          (transaksi_id, produk_id, service_hp_id, nama_produk_snapshot, harga_snapshot, harga_modal_snapshot, qty, subtotal, nominal_referensi, akun_sumber)
+         VALUES ((SELECT max(id) FROM transaksi), ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(it.produk_id, it.service_hp_id, it.nama, it.harga, it.harga_modal, it.qty, it.subtotal, it.nominal_referensi, it.akun_sumber)
     );
   }
 
@@ -616,9 +674,28 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
   const { results } = await db.batch(stmts);
   if (!results.every((r) => r.success)) throw err(500, 'tx_failed', 'Gagal menyimpan transaksi');
 
+  // Sinkronkan biaya service HP agar konsisten dengan nominal yang dicatat di transaksi.
+  for (const it of itemRows) {
+    if (it.service_hp_id) {
+      await db.exec(
+        'UPDATE service_hp SET biaya = ? WHERE id = ? AND (biaya IS NULL OR biaya != ?)',
+        it.harga, it.service_hp_id, it.harga
+      );
+    }
+  }
+
   const saved = await db.one('SELECT * FROM transaksi WHERE kode_transaksi = ?', kode);
   await writeTransaksiAudit(db, user, saved);
-  return { id: saved.kode_transaksi, total: saved.total, status: 'sukses', konfirmasi_pembayaran: saved.konfirmasi_pembayaran, created_at: saved.created_at, duplicate: false };
+  return { 
+    id: saved.kode_transaksi, 
+    total: saved.total, 
+    status: 'sukses', 
+    konfirmasi_pembayaran: saved.konfirmasi_pembayaran, 
+    created_at: saved.created_at, 
+    duplicate: false,
+    sisa: saved.sisa || 0,
+    status_bayar: saved.status_bayar || 'lunas',
+  };
 }
 
 export async function softDeleteTransaksi(db, body, ctx, idStr) {
@@ -664,7 +741,7 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   const actionKey = ctx.idempotencyKey || `upd-${tx.id}-${Date.now()}`;
 
   const produkMap = await loadProducts(db, body.items);
-  const { total, laba, itemRows, effects } = computeItems(body.items, produkMap);
+  const { subtotal, total, laba, itemRows, effects } = computeItems(body.items, produkMap);
 
   let akunPenerima = null;
   if (metodeBayar === 'transfer') {
@@ -674,7 +751,7 @@ export async function updateTransaksi(db, body, ctx, idStr) {
 
   await reverseFullSource(db, { sumberTipe: 'transaksi', sumberId: tx.id, kasirSesiId: sesi.id, actionKey });
 
-  const plan = planMutations({ metodeBayar, akunPenerima, total, effects });
+  const plan = planMutations({ metodeBayar, akunPenerima, subtotal, effects });
   await validatedAccountNames(db, plan, body);
 
   const now = nowIso();
@@ -688,16 +765,16 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   const stmts = [
     db.raw.prepare(
       'UPDATE transaksi SET subtotal = ?, total = ?, laba = ?, pelanggan_id = ?, tanggal_transaksi = ?, kode_transaksi = ?, updated_at = ? WHERE id = ?'
-    ).bind(total, total, laba, body.pelanggan_id || null, tanggalTx, kode, now, tx.id),
+    ).bind(subtotal, total, laba, body.pelanggan_id || null, tanggalTx, kode, now, tx.id),
     db.raw.prepare('DELETE FROM transaksi_item WHERE transaksi_id = ?').bind(tx.id),
   ];
   for (const it of itemRows) {
     stmts.push(
       db.raw.prepare(
         `INSERT INTO transaksi_item
-          (transaksi_id, produk_id, nama_produk_snapshot, harga_snapshot, harga_modal_snapshot, qty, subtotal, nominal_referensi, akun_sumber)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      ).bind(tx.id, it.produk_id, it.nama, it.harga, it.harga_modal, it.qty, it.subtotal, it.nominal_referensi, it.akun_sumber)
+          (transaksi_id, produk_id, service_hp_id, nama_produk_snapshot, harga_snapshot, harga_modal_snapshot, qty, subtotal, nominal_referensi, akun_sumber)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).bind(tx.id, it.produk_id, it.service_hp_id, it.nama, it.harga, it.harga_modal, it.qty, it.subtotal, it.nominal_referensi, it.akun_sumber)
     );
   }
   plan.forEach((m, idx) => {
@@ -718,6 +795,15 @@ export async function updateTransaksi(db, body, ctx, idStr) {
     );
   }
   if (!results.every((r) => r.success)) throw err(500, 'tx_update_failed', 'Gagal memperbarui transaksi');
+
+  for (const it of itemRows) {
+    if (it.service_hp_id) {
+      await db.exec(
+        'UPDATE service_hp SET biaya = ? WHERE id = ? AND (biaya IS NULL OR biaya != ?)',
+        it.harga, it.service_hp_id, it.harga
+      );
+    }
+  }
 
   const saved = await db.one('SELECT * FROM transaksi WHERE id = ?', tx.id);
   await writeAudit(db, {

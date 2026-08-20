@@ -76,6 +76,9 @@ export function StrukPreview({ transaksi }) {
               <tr key={i}>
                 <td>
                   {it.nama_produk_snapshot || it.nama_produk || '-'}
+                  {it.service_hp_id ? (
+                    <div className="text-xs text-muted">Service HP #{it.service_hp_id} — biaya jasa</div>
+                  ) : null}
                   {it.nominal_referensi ? (
                     <div className="text-xs text-muted">Kirim uang: {formatRupiah(it.nominal_referensi)} {it.akun_sumber ? `(via ${it.akun_sumber})` : ''}</div>
                   ) : null}
@@ -170,7 +173,7 @@ function MutasiSection({ mutasi, loading }) {
   );
 }
 
-export function TransaksiDetail({ transaksi, onConfirm }) {
+export function TransaksiDetail({ transaksi, onConfirm, onBayarKurang }) {
   // Parent bisa mengirim data ringkasan dari list (tanpa mutasi_saldo).
   // Pastikan kita selalu menampilkan data otoritatif dari backend.
   const [data, setData] = useState(transaksi);
@@ -245,8 +248,33 @@ export function TransaksiDetail({ transaksi, onConfirm }) {
         <div>
           <span className="num" style={{ fontSize: '1.05rem', fontWeight: 800 }}>{data.id}</span>
         </div>
-        <KonfirmasiBadge status={data.konfirmasi_pembayaran} />
+        <div className="flex items-center gap-2">
+          <KonfirmasiBadge status={data.konfirmasi_pembayaran} />
+          {data.status_bayar && data.status_bayar !== 'lunas' && (
+            <span className="badge" style={{ background: 'var(--warning-soft)', color: 'var(--warning)', padding: '2px 8px', borderRadius: 'var(--radius-sm)', fontSize: '0.75rem' }}>
+              {data.status_bayar === 'belum_bayar' ? 'Belum Bayar' : 'Sebagian'}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Info Sisa Tagihan */}
+      {data.sisa > 0 && (
+        <div className="card" style={{ padding: 'var(--space-3)', background: 'var(--warning-soft)', border: '1px solid var(--warning)' }}>
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-sm" style={{ fontWeight: 600 }}>Sisa Tagihan</p>
+              <p className="num" style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--warning)' }}>
+                {formatRupiah(data.sisa)}
+              </p>
+            </div>
+            <Button onClick={() => onBayarKurang?.(data)} size="sm">
+              <Icon name="wallet" size={14} /> Bayar Kurang
+            </Button>
+          </div>
+        </div>
+      )}
+
       {showKonfirmasi && (
         <div className="card" style={{ padding: 'var(--space-3)', background: 'var(--bg-surface-alt)', border: '1px solid var(--border)' }}>
           <p className="text-xs text-muted" style={{ marginBottom: 'var(--space-2)' }}>Status konfirmasi pembayaran (dapat diubah)</p>

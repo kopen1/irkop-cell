@@ -64,6 +64,18 @@ export default function PelangganPage() {
   const [importError, setImportError] = useState(null);
   const [importBusy, setImportBusy] = useState(false);
 
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ nama: '', telepon: '' });
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState(null);
+
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
+  useEffect(() => {
+    if (editTarget) setEditForm({ nama: editTarget.nama || '', telepon: editTarget.telepon || '' });
+  }, [editTarget]);
+
   const data = state.data || {};
   const rows = (data.items || []).map((p) => ({ ...p, key: p.id }));
 
@@ -229,7 +241,18 @@ export default function PelangganPage() {
       </Modal>
 
       {/* Detail */}
-      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} title="Detail Pelanggan">
+      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} title="Detail Pelanggan"
+        footer={detail && !detail._error && can('pelanggan') ? (
+          <>
+            <Button variant="danger" size="sm" onClick={() => { setDeleteTarget(detail); setDetailOpen(false); }}>
+              <Icon name="trash" size={14} /> Hapus
+            </Button>
+            <Button variant="secondary" size="sm" onClick={() => { setEditTarget(detail); setDetailOpen(false); }}>
+              <Icon name="edit" size={14} /> Edit
+            </Button>
+          </>
+        ) : null}
+      >
         {detailLoading ? (
           <Loader />
         ) : detail?._error ? (
@@ -330,6 +353,60 @@ export default function PelangganPage() {
             </div>
           </form>
         )}
+      </Modal>
+
+      {/* Edit Pelanggan */}
+      <Modal open={Boolean(editTarget)} onClose={() => setEditTarget(null)} title="Edit Pelanggan">
+        <form onSubmit={async (e) => {
+          e.preventDefault();
+          setEditError(null);
+          if (!editForm.nama.trim()) return setEditError('Nama wajib diisi.');
+          setEditBusy(true);
+          try {
+            await api.put(`/pelanggan/${editTarget.id}`, { nama: editForm.nama.trim(), telepon: editForm.telepon.trim() || undefined });
+            toast.success('Pelanggan diperbarui.');
+            setEditTarget(null);
+            load().catch(() => {});
+          } catch (err) {
+            setEditError(err.message);
+          } finally {
+            setEditBusy(false);
+          }
+        }} className="flex flex-col gap-4">
+          <Field label="Nama" required>
+            <Input type="text" value={editForm.nama} onChange={(e) => setEditForm((f) => ({ ...f, nama: e.target.value }))} />
+          </Field>
+          <Field label="Telepon">
+            <Input type="tel" value={editForm.telepon} onChange={(e) => setEditForm((f) => ({ ...f, telepon: e.target.value }))} />
+          </Field>
+          {editError && <p className="field-error" role="alert">{editError}</p>}
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" type="button" onClick={() => setEditTarget(null)}>Batal</Button>
+            <Button type="submit" loading={editBusy}>Simpan</Button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Delete Confirm */}
+      <Modal open={Boolean(deleteTarget)} onClose={() => setDeleteTarget(null)} title="Hapus Pelanggan"
+        footer={<>
+          <Button variant="secondary" onClick={() => setDeleteTarget(null)} disabled={deleteBusy}>Batal</Button>
+          <Button variant="danger" onClick={async () => {
+            setDeleteBusy(true);
+            try {
+              await api.del(`/pelanggan/${deleteTarget.id}`);
+              toast.success('Pelanggan dihapus.');
+              setDeleteTarget(null);
+              load().catch(() => {});
+            } catch (err) {
+              toast.error(err.message);
+            } finally {
+              setDeleteBusy(false);
+            }
+          }} loading={deleteBusy}>Hapus</Button>
+        </>}
+      >
+        <p className="text-sm">Hapus pelanggan <b>{deleteTarget?.nama}</b>? Data ini tidak bisa dikembalikan.</p>
       </Modal>
 
       {/* Merge */}

@@ -57,7 +57,8 @@ export async function reportBulanan(db, request, ctx) {
 
   const kategori = await db.many(
     `SELECT k.id AS kategori_id, COALESCE(k.nama, 'Tanpa Kategori') AS nama_kategori,
-            COUNT(*) AS jumlah_item, SUM(ti.qty) AS qty, SUM(ti.subtotal) AS omzet
+            COUNT(*) AS jumlah_item, SUM(ti.qty) AS qty,
+            SUM(ti.subtotal + CASE WHEN k.nama LIKE '%tarik%' THEN 0 ELSE COALESCE(ti.nominal_referensi, 0) * ti.qty END) AS omzet
        FROM transaksi t
        JOIN transaksi_item ti ON ti.transaksi_id = t.id
        LEFT JOIN produk p ON p.id = ti.produk_id
@@ -138,7 +139,8 @@ export async function reportTahunan(db, request, ctx) {
 
   const kategori = await db.many(
     `SELECT k.id AS kategori_id, COALESCE(k.nama, 'Tanpa Kategori') AS nama_kategori,
-            SUM(ti.qty) AS qty, SUM(ti.subtotal) AS omzet
+            SUM(ti.qty) AS qty,
+            SUM(ti.subtotal + CASE WHEN k.nama LIKE '%tarik%' THEN 0 ELSE COALESCE(ti.nominal_referensi, 0) * ti.qty END) AS omzet
        FROM transaksi t
        JOIN transaksi_item ti ON ti.transaksi_id = t.id
        LEFT JOIN produk p ON p.id = ti.produk_id

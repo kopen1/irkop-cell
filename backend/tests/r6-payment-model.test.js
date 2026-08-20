@@ -157,20 +157,40 @@ test('R6 Pulsa dibayar transfer -> mutasi ke DANA, bukan Saldo Akun', async () =
 });
 
 // 7. payment total mismatch -> reject
-test('R6 payment total mismatch -> 400', async () => {
+test('R6 payment total mismatch -> 400 (overpay only)', async () => {
   const { env, token } = await bootstrap();
   const svc = await createService(env, token, 150000, 0);
+  // Overpay: 200000 > 150000 should be rejected
   const r = await call(env, '/api/transaksi', {
     method: 'POST', token,
     body: {
       jenis: 'service',
       items: [{ produk_id: svc, qty: 1 }],
       metode_bayar: 'cash_tunai',
-      payments: [{ metode: 'tunai', nominal: 50000 }, { metode: 'transfer', akun_id: 'DANA', nominal: 90000 }],
+      payments: [{ metode: 'tunai', nominal: 200000 }],
     },
   });
   assert.equal(r.status, 400);
   assert.equal(r.data.error.code, 'payment_mismatch');
+});
+
+// 8b. partial payment allowed (bayar kurang)
+test('R6 partial payment allowed (bayar kurang)', async () => {
+  const { env, token } = await bootstrap();
+  const svc = await createService(env, token, 150000, 0);
+  // Partial: 100000 < 150000 should be allowed
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token,
+    body: {
+      jenis: 'service',
+      items: [{ produk_id: svc, qty: 1 }],
+      metode_bayar: 'cash_tunai',
+      payments: [{ metode: 'tunai', nominal: 100000 }],
+    },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.sisa, 50000);
+  assert.equal(r.data.status_bayar, 'sebagian');
 });
 
 // 8. payment zero/negative -> reject

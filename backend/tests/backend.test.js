@@ -227,6 +227,34 @@ test('Filter transaksi per tanggal (WIB): total_nilai benar', async () => {
   assert.ok(r.data.items.length === 2);
 });
 
+// Omzet arah-aware: kirim uang = nominal + fee, tarik tunai = fee saja.
+// Laba (total_laba) = fee - modal untuk semua item.
+test('List transaksi: total_nilai omzet arah-aware & total_laba', async () => {
+  const { env, adminToken, k2 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const svc = await makeKirimUangSvc(env, k2, 5000);
+  const kt = await createKategoriRaw(env, 'Tarik Tunai', 0);
+  const tarik = await makeKirimUangSvc(env, kt, 5000);
+
+  const kirim = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken,
+    body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: 100000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(kirim.status, 200);
+  const tarikTx = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken,
+    body: { items: [{ produk_id: tarik, qty: 1, nominal_referensi: 100000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(tarikTx.status, 200);
+
+  const todayWib = new Date(new Date().getTime() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+  const r = await call(env, `/api/transaksi?date=${todayWib}`, { token: adminToken });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.total_items, 2);
+  assert.equal(r.data.total_nilai, 105000 + 5000, 'kirim = nominal+fee, tarik = fee');
+  assert.equal(r.data.total_laba, 10000);
+});
+
 test('Kasbon lunas -> 1 mutasi pelunasan', async () => {
   const { env, adminToken, p1 } = await bootstrap();
   await openKasir(env, adminToken);
@@ -354,7 +382,7 @@ test('R2: kirim uang tunai — fee tidak double-count ke Tunai Laci', async () =
     body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: nominal, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
   });
   assert.equal(r.status, 200);
-  assert.equal(r.data.total, fee);
+  assert.equal(r.data.total, fee + nominal);
 
   const rows = await netKirimUangMutasi(env, r.data.id);
   const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
@@ -376,7 +404,7 @@ test('R2: kirim uang cash_tunai — fee tidak double-count', async () => {
     body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: nominal, akun_sumber: 'SeaBank' }], metode_bayar: 'cash_tunai' },
   });
   assert.equal(r.status, 200);
-  assert.equal(r.data.total, fee);
+  assert.equal(r.data.total, fee + nominal);
 
   const rows = await netKirimUangMutasi(env, r.data.id);
   const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
@@ -417,7 +445,7 @@ test('R2: update transaksi kirim uang — fee tidak double-count', async () => {
     body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: 200000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
   });
   assert.equal(u.status, 200);
-  assert.equal(u.data.total, 5000);
+  assert.equal(u.data.total, 200000 + 5000);
 
   const rows = await netKirimUangMutasi(env, r.data.id);
   const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
@@ -459,6 +487,7 @@ test('R2: tarik tunai via produk — saldo akun bertambah, laci berkurang', asyn
     body: { items: [{ produk_id: svc, qty: 1, nominal_referensi: 100000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
   });
   assert.equal(r.status, 200);
+  assert.equal(r.data.total, 5000, 'omzet tarik tunai = fee saja (tanpa nominal)');
 
   const rows = await netKirimUangMutasi(env, r.data.id);
   const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
@@ -467,6 +496,69 @@ test('R2: tarik tunai via produk — saldo akun bertambah, laci berkurang', asyn
   assert.equal(tunai.net, 5000 - 100000); // fee masuk, nominal keluar
   assert.ok(dest, 'akun_sumber harus ada');
   assert.equal(dest.net, 100000); // saldo akun NAMBAH
+});
+
+// qty > 1 pada item kirim uang: nominal dikali qty (1 transaksi, 2 pcs nominal 150k).
+test('R2: kirim uang qty 2 — nominal dikali qty (laci + total akurat)', async () => {
+  const { env, adminToken, k2 } = await bootstrap();
+  await openKasir(env, adminToken);
+  const svc = await makeKirimUangSvc(env, k2, 5000);
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'rk-qty2-001' },
+    body: { items: [{ produk_id: svc, qty: 2, nominal_referensi: 150000, akun_sumber: 'SeaBank' }], metode_bayar: 'tunai' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.total, 310000); // 2*(150000 + 5000)
+
+  const rows = await netKirimUangMutasi(env, r.data.id);
+  const tunai = rows.find((m) => m.nama_akun === 'Tunai Laci');
+  const dest = rows.find((m) => m.nama_akun === 'SeaBank');
+  assert.equal(tunai.net, 310000);
+  assert.equal(dest.net, -300000);
+
+  const tx = await env.DB.prepare('SELECT * FROM transaksi WHERE kode_transaksi = ?').bind(r.data.id).first();
+  assert.equal(Number(tx.laba), 10000, 'laba = 2 x fee');
+});
+
+// Item Service HP langsung direferensikan (tanpa produk jasa terpisah).
+test('R2: transaksi item service_hp_id — biaya sebagai harga, laba = biaya - modal', async () => {
+  const { env, adminToken } = await bootstrap();
+  await openKasir(env, adminToken);
+  const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Andi' } });
+  const svc = await call(env, '/api/service-hp', {
+    method: 'POST', token: adminToken,
+    body: { pelanggan_id: pel.data.id, nama_device: 'Oppo A78', deskripsi_kerusakan: 'Ganti LCD', estimasi_biaya: 150000, harga_modal: 80000 },
+  });
+  assert.equal(svc.status, 200);
+  const upd = await call(env, `/api/service-hp/${svc.data.id}`, {
+    method: 'PUT', token: adminToken, body: { biaya: 150000 },
+  });
+  assert.equal(upd.status, 200);
+
+  const r = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'rk-svc-001' },
+    body: { items: [{ service_hp_id: svc.data.id, qty: 1 }], metode_bayar: 'tunai' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.total, 150000);
+  assert.equal(r.data.status, 'sukses');
+
+  const tx = await env.DB.prepare('SELECT * FROM transaksi WHERE kode_transaksi = ?').bind(r.data.id).first();
+  assert.equal(Number(tx.total), 150000);
+  assert.equal(Number(tx.laba), 70000); // 150000 - 80000
+
+  const item = await env.DB.prepare('SELECT * FROM transaksi_item WHERE transaksi_id = ?').bind(tx.id).all();
+  assert.equal(item.results[0].produk_id, null);
+  assert.equal(item.results[0].service_hp_id, svc.data.id);
+  assert.match(item.results[0].nama_produk_snapshot, /Service: Oppo A78/);
+
+  const mut = await env.DB.prepare("SELECT * FROM mutasi_saldo WHERE sumber_tipe='transaksi' AND sumber_id = ?").bind(tx.id).all();
+  assert.equal(mut.results.length, 1);
+  assert.equal(mut.results[0].nama_akun, 'Tunai Laci');
+  assert.equal(mut.results[0].jumlah, 150000);
+
+  const svcAfter = await env.DB.prepare('SELECT * FROM service_hp WHERE id = ?').bind(svc.data.id).first();
+  assert.equal(Number(svcAfter.biaya), 150000);
 });
 
 async function getKasbonForTx(env, kode) {

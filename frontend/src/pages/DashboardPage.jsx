@@ -55,6 +55,7 @@ export default function DashboardPage() {
 
   const stats = [
     { label: 'Omzet Hari Ini', value: formatRupiah(data.total_nilai || 0), icon: 'money' },
+    { label: 'Laba Hari Ini', value: formatRupiah(data.total_laba || 0), icon: 'money' },
     { label: 'Transaksi Hari Ini', value: String(data.total_items ?? 0), icon: 'transaksi' },
     { label: 'Kasbon Aktif', value: String(kasbonAktif), icon: 'kasbon' },
     { label: 'Status Kasir', value: (kasirData.status && { belum_buka: 'Belum Buka', buka: 'Buka', tutup: 'Tutup' }[kasirData.status]) || '-', icon: 'kasir' },

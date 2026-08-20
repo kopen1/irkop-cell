@@ -198,31 +198,21 @@ export default function KasirPage() {
                 Terdapat {sesiLampau.length} sesi kasir yang masih berstatus <b>buka</b> dari hari sebelum <b>{date}</b>. Klik <b>Edit</b> pada sesi untuk mengoreksi saldo real (klosing) &amp; catatan, lalu simpan untuk menutup sesi tersebut.
               </p>
               {sesiLampau.length > 0 && (
-                <div className="table-wrap" style={{ maxHeight: 160, overflowY: 'auto' }}>
-                  <table className="table">
-                    <thead>
-                      <tr>
-                        <th>Tanggal</th>
-                        <th>Dibuka</th>
-                        <th>Oleh</th>
-                        <th className="col-right">Aksi</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {sesiLampau.map((s) => (
-                        <tr key={s.kasir_sesi_id}>
-                          <td className="num">{s.tanggal}</td>
-                          <td className="text-xs">{formatDateTime(s.dibuka_at)}</td>
-                          <td>{s.dibuka_oleh || '—'}</td>
-                          <td className="row-actions">
-                            <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
-                              <Icon name="edit" size={14} /> Edit
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                <div className="flex flex-col gap-2">
+                  {sesiLampau.map((s) => (
+                    <div key={s.kasir_sesi_id} className="akun-row" style={{ gridTemplateColumns: '1fr auto' }}>
+                      <div>
+                        <div style={{ fontWeight: 600 }}>{s.tanggal}</div>
+                        <div className="text-xs text-secondary">{formatDateTime(s.dibuka_at)}</div>
+                        <div className="text-xs text-secondary">Oleh: {s.dibuka_oleh || '—'}</div>
+                      </div>
+                      <div className="flex items-center">
+                        <Button variant="secondary" size="sm" onClick={() => openEdit(s)}>
+                          <Icon name="edit" size={14} /> Edit
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>

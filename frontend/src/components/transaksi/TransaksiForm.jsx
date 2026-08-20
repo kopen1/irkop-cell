@@ -7,6 +7,7 @@ import { METODE_PEMBAYARAN, formatRupiah, todayWIB, formatRupiahInput, parseRupi
 import { Button } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Field';
 import { Icon } from '../ui/Icon';
+import { Modal } from '../ui/Modal';
 
 // Kategori kirim-uang: produk dari kategori ini otomatis menampilkan input
 // Nominal transfer + Akun sumber (checkbox "Kirim Uang" langsung tercentang).
@@ -23,14 +24,15 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
   const [keranjang, setKeranjang] = useState(() =>
     (initial?.items || []).map((i) => ({
       produk_id: i.produk_id ?? '',
-      kode: i.kode ?? '',
+      service_hp_id: i.service_hp_id ?? '',
+      kode: i.service_hp_id ? 'SRV' : (i.kode ?? ''),
       nama: i.nama_produk_snapshot || i.nama_produk || '',
       harga: i.harga_snapshot ?? i.harga ?? 0,
       qty: i.qty ?? 1,
       isKirimUang: Boolean(i.nominal_referensi),
       nominal_referensi: i.nominal_referensi ?? '',
       akun_sumber: i.akun_sumber ?? '',
-      kategoriNama: '',
+      kategoriNama: i.service_hp_id ? 'Service' : '',
     }))
   );
   const [metodeBayar, setMetodeBayar] = useState(initial?.metode_bayar || 'tunai');
@@ -38,6 +40,8 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
   const [pelangganId, setPelangganId] = useState(initial?.pelanggan_id || '');
   const [search, setSearch] = useState('');
   const [kategoriFilter, setKategoriFilter] = useState('');
+  const [serviceModal, setServiceModal] = useState(false);
+  const [serviceSearch, setServiceSearch] = useState('');
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState(null);
 
@@ -45,6 +49,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
   const kategori = useAsync(() => api.get('/kategori'), { deps: [] });
   const akun = useAsync(() => api.get('/akun'), { deps: [] });
   const pelanggan = useAsync(() => api.get('/pelanggan', { limit: 200 }), { deps: [] });
+  const services = useAsync(() => api.get('/service-hp', { limit: 500 }), { deps: [] });
 
   const allProduk = (produk.data?.items || []).filter((p) => !p.deleted_at);
   const kategoriList = (kategori.data?.items || []).filter((k) => !k.deleted_at);
@@ -75,13 +80,49 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
     setSearch('');
   };
 
+  // Item Service HP: mereferensikan record service_hp (bukan produk jasa terpisah).
+  // Harga default = biaya service (atau estimasi), bisa diubah langsung di keranjang.
+  const onPickService = (s) => {
+    setKeranjang((prev) => {
+      const existing = prev.find((it) => it.service_hp_id && String(it.service_hp_id) === String(s.id));
+      if (existing) {
+        return prev.map((it) => (it === existing ? { ...it, qty: it.qty + 1 } : it));
+      }
+      return [
+        ...prev,
+        {
+          service_hp_id: s.id,
+          produk_id: '',
+          kode: 'SRV',
+          nama: `Service: ${s.nama_device}`,
+          harga: s.biaya || s.estimasi_biaya || '',
+          qty: 1,
+          isService: true,
+          isKirimUang: false,
+          nominal_referensi: '',
+          akun_sumber: '',
+          kategoriNama: 'Service',
+        },
+      ];
+    });
+    setServiceModal(false);
+    setServiceSearch('');
+  };
+
   const updateItem = (idx, patch) => {
     setKeranjang((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   };
 
   const removeItem = (idx) => setKeranjang((prev) => prev.filter((_, i) => i !== idx));
 
-  const subtotal = keranjang.reduce((sum, it) => sum + Number(it.harga) * Number(it.qty), 0);
+  // Total ditampilkan = omzet: nominal + fee untuk kirim uang, fee saja untuk tarik tunai.
+  // Nominal berlaku per unit (qty 2 × nominal 150k = 300k).
+  const totalOmzet = keranjang.reduce((sum, it) => {
+    const fee = Number(it.harga) * Number(it.qty);
+    const isTarik = /tarik/i.test(it.kategoriNama || '');
+    const nominal = it.isKirimUang && !isTarik ? ((parseRupiah(it.nominal_referensi) || 0) * Number(it.qty)) : 0;
+    return sum + fee + nominal;
+  }, 0);
 
   const isEdit = Boolean(initial?.id);
 
@@ -92,21 +133,33 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
       setSubmitError('Keranjang masih kosong. Pilih minimal satu produk.');
       return;
     }
+    if (keranjang.some((it) => it.service_hp_id && !parseRupiah(it.harga))) {
+      setSubmitError('Biaya service masih kosong. Isi biaya service sebelum menyimpan.');
+      return;
+    }
     if (metodeBayar === 'transfer' && !akunPenerima) {
       setSubmitError('Untuk metode Transfer, pilih akun penerima.');
       return;
     }
 
-    const items = keranjang.map((it) => ({
-      produk_id: Number(it.produk_id),
-      qty: Number(it.qty),
-      ...(it.isKirimUang
+    const items = keranjang.map((it) =>
+      it.service_hp_id
         ? {
-            nominal_referensi: parseRupiah(it.nominal_referensi),
-            akun_sumber: it.akun_sumber || undefined,
+            service_hp_id: Number(it.service_hp_id),
+            qty: Number(it.qty),
+            biaya: parseRupiah(it.harga) || undefined,
           }
-        : {}),
-    }));
+        : {
+            produk_id: Number(it.produk_id),
+            qty: Number(it.qty),
+            ...(it.isKirimUang
+              ? {
+                  nominal_referensi: parseRupiah(it.nominal_referensi),
+                  akun_sumber: it.akun_sumber || undefined,
+                }
+              : {}),
+          }
+    );
 
     const body = {
       items,
@@ -180,6 +233,12 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
             autoComplete="off"
           />
         </Field>
+        <div className="flex justify-between items-center">
+          <span className="text-sm text-muted">Atau catat pembayaran jasa service HP langsung dari form Service.</span>
+          <Button type="button" variant="secondary" size="sm" onClick={() => setServiceModal(true)}>
+            Tambah Service
+          </Button>
+        </div>
 
         {hasilProduk && hasilProduk.length > 0 && (
           <div className="card" style={{ padding: 'var(--space-2)', maxHeight: 190, overflowY: 'auto', boxShadow: 'none' }}>
@@ -248,17 +307,19 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
                 </div>
 
                 {/* Opsional: produk jasa kirim uang / tarik tunai (nominal referensi tidak masuk omzet, PRD 5.2.1) */}
-                <label className="cart-item-opt">
-                  <input
-                    type="checkbox"
-                    checked={it.isKirimUang}
-                    onChange={(e) => updateItem(idx, { isKirimUang: e.target.checked })}
-                  />
-                  {isTarik
-                    ? 'Produk jasa Tarik Tunai (isi nominal saldo yang diterima)'
-                    : 'Produk jasa Kirim Uang (isi nominal yang ditransfer)'}
-                </label>
-                {it.isKirimUang && (
+                {!it.service_hp_id && (
+                  <>
+                    <label className="cart-item-opt">
+                      <input
+                        type="checkbox"
+                        checked={it.isKirimUang}
+                        onChange={(e) => updateItem(idx, { isKirimUang: e.target.checked })}
+                      />
+                      {isTarik
+                        ? 'Produk jasa Tarik Tunai (isi nominal saldo yang diterima)'
+                        : 'Produk jasa Kirim Uang (isi nominal yang ditransfer)'}
+                    </label>
+                    {it.isKirimUang && (
                   <div className="card" style={{ padding: 'var(--space-2)', gap: 'var(--space-1)', boxShadow: 'none', background: 'var(--bg-surface-alt)', border: '1px solid var(--border)' }}>
                     <div className="flex items-center gap-2" style={{ padding: '4px 6px' }}>
                       <span className="text-sm" style={{ flexShrink: 0 }}>{isTarik ? 'Nominal diterima' : 'Nominal transfer'}</span>
@@ -284,6 +345,25 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
                             </option>
                           ))}
                         </Select>
+                      </div>
+                    </div>
+                  </div>
+                )}
+                  </>
+                )}
+                {it.service_hp_id && (
+                  <div className="card" style={{ padding: 'var(--space-2)', gap: 'var(--space-1)', boxShadow: 'none', background: 'var(--bg-surface-alt)', border: '1px solid var(--border)' }}>
+                    <div className="flex items-center gap-2" style={{ padding: '4px 6px' }}>
+                      <span className="text-sm" style={{ flexShrink: 0 }}>Biaya service</span>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          value={it.harga ? formatRupiahInput(String(it.harga)) : ''}
+                          onChange={(e) => updateItem(idx, { harga: formatRupiahInput(e.target.value) })}
+                          placeholder="mis. 150.000"
+                          style={{ padding: '6px 8px', fontSize: '.82rem' }}
+                        />
                       </div>
                     </div>
                   </div>
@@ -345,7 +425,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
         <div className="flex justify-between items-center" style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)' }}>
           <div>
             <span className="text-sm text-secondary">Total</span>
-            <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(subtotal)}</div>
+            <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalOmzet)}</div>
           </div>
           {submitError && <p className="field-error" role="alert">{submitError}</p>}
         </div>
@@ -355,6 +435,51 @@ export default function TransaksiForm({ initial, onSaved, onCancel, tanggalTrans
           <Button type="submit" loading={busy}>{isEdit ? 'Simpan Perubahan' : 'Simpan Transaksi'}</Button>
         </div>
       </div>
+
+      <Modal open={serviceModal} onClose={() => setServiceModal(false)} title="Pilih Service HP" ariaLabel="Pilih Service HP">
+        <div className="flex flex-col gap-2">
+          <Input
+            type="search"
+            value={serviceSearch}
+            placeholder="Cari nama device atau pelanggan…"
+            onChange={(e) => setServiceSearch(e.target.value)}
+            autoComplete="off"
+          />
+          <div className="card" style={{ padding: 'var(--space-2)', maxHeight: 300, overflowY: 'auto', boxShadow: 'none' }}>
+            {(services.data?.items || [])
+              .filter((s) => s.status !== 'diambil')
+              .filter((s) => {
+                const q = serviceSearch.trim().toLowerCase();
+                if (!q) return true;
+                return (
+                  (s.nama_device || '').toLowerCase().includes(q) ||
+                  (s.pelanggan_nama || '').toLowerCase().includes(q) ||
+                  String(s.id).includes(q)
+                );
+              })
+              .map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className="flex justify-between items-center w-full"
+                  style={{ background: 'none', border: 'none', padding: '8px 10px', borderRadius: 'var(--radius-sm)', textAlign: 'left' }}
+                  onClick={() => onPickService(s)}
+                  onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                >
+                  <span>
+                    <span className="font-mono text-sm text-muted">#{s.id}</span> — {s.nama_device}
+                    {s.pelanggan_nama ? ` (${s.pelanggan_nama})` : ''}
+                  </span>
+                  <span className="num text-sm">{formatRupiah(s.biaya || s.estimasi_biaya || 0)}</span>
+                </button>
+              ))}
+            {(services.data?.items || []).filter((s) => s.status !== 'diambil').length === 0 && (
+              <p className="text-sm text-muted">Belum ada service. Buat dulu lewat menu Service HP.</p>
+            )}
+          </div>
+        </div>
+      </Modal>
     </form>
   );
 }

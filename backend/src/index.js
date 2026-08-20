@@ -8,6 +8,7 @@ import * as usersRoutes from './routes/users.js';
 import * as kasirRoutes from './routes/kasir.js';
 import * as produkRoutes from './routes/produk.js';
 import * as transaksiRoutes from './routes/transaksi.js';
+import * as paymentsRoutes from './routes/payments.js';
 import * as pengeluaranRoutes from './routes/pengeluaran.js';
 import * as pelangganRoutes from './routes/pelanggan.js';
 import * as kasbonRoutes from './routes/kasbon.js';
@@ -131,6 +132,13 @@ async function dispatch(db, request, ctx, route) {
       break;
     }
 
+    case 'payments': {
+      requirePage(ctx, 'transaksi');
+      if (m === 'GET') return paymentsRoutes.handlePayments(request, ctx.env, ctx);
+      if (m === 'POST') return paymentsRoutes.handlePayments(request, ctx.env, ctx);
+      break;
+    }
+
     case 'pengeluaran': {
       requirePage(ctx, 'pengeluaran');
       if (m === 'GET' && !param) return pengeluaranRoutes.listPengeluaran(db, request, ctx);
@@ -171,6 +179,8 @@ async function dispatch(db, request, ctx, route) {
       if (m === 'GET' && !param) return pelangganRoutes.listPelanggan(db, request, ctx);
       if (m === 'POST' && !param) return pelangganRoutes.createPelanggan(db, request, ctx);
       if (m === 'GET' && param) return pelangganRoutes.getPelanggan(db, request, ctx, param);
+      if (m === 'PUT' && param) return pelangganRoutes.updatePelanggan(db, request, ctx, param);
+      if (m === 'DELETE' && param) return pelangganRoutes.deletePelanggan(db, request, ctx, param);
       break;
 
     case 'merge':

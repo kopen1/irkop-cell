@@ -46,6 +46,28 @@ export async function createPelanggan(db, request, ctx) {
   return { id: res.lastRowId, nama, telepon: body.telepon || null };
 }
 
+export async function updatePelanggan(db, request, ctx, idStr) {
+  const { user } = ctx.auth;
+  const body = await readBody(request);
+  const p = await db.one('SELECT * FROM pelanggan WHERE id = ? AND merged_into_id IS NULL', idStr);
+  if (!p) throw err(404, 'not_found', 'Pelanggan tidak ditemukan');
+  const nama = body.nama != null ? String(body.nama).trim() : p.nama;
+  const telepon = body.telepon != null ? (body.telepon ? String(body.telepon).trim() : null) : p.telepon;
+  if (!nama) throw err(400, 'missing_field', 'nama pelanggan wajib diisi');
+  await db.exec('UPDATE pelanggan SET nama = ?, telepon = ?, updated_at = ? WHERE id = ?', nama, telepon, nowIso(), p.id);
+  await writeAudit(db, { userId: user.id, aksi: 'update', tabel: 'pelanggan', recordId: p.id, dataBefore: { nama: p.nama, telepon: p.telepon }, dataAfter: { nama, telepon } });
+  return { id: p.id, nama, telepon };
+}
+
+export async function deletePelanggan(db, request, ctx, idStr) {
+  const { user } = ctx.auth;
+  const p = await db.one('SELECT * FROM pelanggan WHERE id = ? AND merged_into_id IS NULL', idStr);
+  if (!p) throw err(404, 'not_found', 'Pelanggan tidak ditemukan');
+  await db.exec('DELETE FROM pelanggan WHERE id = ?', p.id);
+  await writeAudit(db, { userId: user.id, aksi: 'delete', tabel: 'pelanggan', recordId: p.id, dataBefore: { nama: p.nama, telepon: p.telepon } });
+  return { deleted: true, id: p.id };
+}
+
 export async function mergePelanggan(db, request, ctx) {
   const { user } = ctx.auth;
   const body = await readBody(request);

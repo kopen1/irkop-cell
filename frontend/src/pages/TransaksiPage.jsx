@@ -21,6 +21,7 @@ import { Pagination } from '../components/ui/Pagination';
 import { Icon } from '../components/ui/Icon';
 import TransaksiForm from '../components/transaksi/TransaksiForm';
 import { TransaksiDetail } from '../components/transaksi/TransaksiDetail';
+import PaymentForm from '../components/transaksi/PaymentForm';
 
 const LIMIT = 50;
 
@@ -93,6 +94,7 @@ export default function TransaksiPage() {
   const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
+  const [bayarKurangTarget, setBayarKurangTarget] = useState(null);
 
   const openCreate = () => {
     setEditItem(null);
@@ -306,7 +308,7 @@ export default function TransaksiPage() {
           )
         }
       >
-        {detailLoading ? <Loader /> : detailData?._error ? <ErrorState error={{ message: detailData._error }} /> : <TransaksiDetail transaksi={detailData} onConfirm={() => load().catch(() => {})} />}
+        {detailLoading ? <Loader /> : detailData?._error ? <ErrorState error={{ message: detailData._error }} /> : <TransaksiDetail transaksi={detailData} onConfirm={() => load().catch(() => {})} onBayarKurang={(tx) => { setBayarKurangTarget(tx); closeDetail(); }} />}
       </Modal>
 
       {/* Create / Edit */}
@@ -346,6 +348,26 @@ export default function TransaksiPage() {
           }
         }}
       />
+
+      {/* Bayar Kurang Modal */}
+      <Modal
+        open={Boolean(bayarKurangTarget)}
+        onClose={() => setBayarKurangTarget(null)}
+        title="Bayar Kurang"
+        size="md"
+      >
+        {bayarKurangTarget && (
+          <PaymentForm
+            transaksi={bayarKurangTarget}
+            onPaid={() => {
+              setBayarKurangTarget(null);
+              toast.success('Pembayaran tercatat.');
+              load().catch(() => {});
+            }}
+            onCancel={() => setBayarKurangTarget(null)}
+          />
+        )}
+      </Modal>
     </div>
   );
 }
