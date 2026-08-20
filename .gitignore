@@ -16,5 +16,13 @@ dist/
 # Logs
 *.log
 
+# Dev scripts (refer to /tmp paths, not portable)
+start-local.sh
+start-preview.sh
+
+# Dev docs & benchmarks (not essential for app)
+backend/bench/
+backend/docs/
+
 # Nested repo artefact (source sudah di-flatten ke root)
 Revisi/
