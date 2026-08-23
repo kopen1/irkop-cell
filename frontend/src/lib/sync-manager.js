@@ -3,7 +3,6 @@
 // Auto sync: detect online/offline, push queue, pull updates.
 // =====================================================================
 
-import { Network } from '@capacitor/network';
 import { getDB, isMobile } from './offline-db.js';
 import {
   getPendingOps,
@@ -20,9 +19,23 @@ let syncInterval = null;
 let isOnline = navigator.onLine;
 let listeners = [];
 
+// Lazy load Capacitor Network plugin
+async function getNetwork() {
+  if (!isMobile()) return null;
+  try {
+    const { Network } = await import('@capacitor/network');
+    return Network;
+  } catch {
+    return null;
+  }
+}
+
 // Listen for network changes
-export function startNetworkListener() {
+export async function startNetworkListener() {
   if (!isMobile()) return;
+
+  const Network = await getNetwork();
+  if (!Network) return;
 
   Network.addListener('networkStatusChange', (status) => {
     const wasOnline = isOnline;

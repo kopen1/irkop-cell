@@ -3,8 +3,8 @@
 // Tampilkan di corner atau navbar
 // =====================================================================
 
-import { useSync } from '../hooks/useSync.js';
-import { isMobile } from '../lib/offline-db.js';
+import { useSync } from '../../hooks/useSync.js';
+import { isMobile } from '../../lib/offline-db.js';
 
 export function SyncStatus() {
   const { isOnline, isMobile: isMobileApp, pendingCount, manualSync } = useSync();

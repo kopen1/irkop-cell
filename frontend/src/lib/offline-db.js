@@ -3,20 +3,36 @@
 // Hanya aktif di mobile (Capacitor). Di web, return null.
 // =====================================================================
 
-import { Capacitor } from '@capacitor/core';
-import { CapacitorSQLite, SQLiteDBConnection } from '@capacitor-community/sqlite';
-
 let db = null;
 let isNative = false;
+let Capacitor = null;
+let CapacitorSQLite = null;
+let SQLiteDBConnection = null;
+
+// Lazy load Capacitor modules
+async function loadCapacitor() {
+  if (Capacitor) return;
+  try {
+    const core = await import('@capacitor/core');
+    const sqlite = await import('@capacitor-community/sqlite');
+    Capacitor = core.Capacitor;
+    CapacitorSQLite = sqlite.CapacitorSQLite;
+    SQLiteDBConnection = sqlite.SQLiteDBConnection;
+  } catch (err) {
+    console.warn('[OfflineDB] Capacitor not available:', err.message);
+  }
+}
 
 // Cek apakah berjalan di Capacitor (mobile)
-export function isMobile() {
-  return Capacitor.isNativePlatform();
+export async function isMobile() {
+  await loadCapacitor();
+  return Capacitor?.isNativePlatform() || false;
 }
 
 // Inisialisasi database lokal
 export async function initLocalDB() {
-  if (!isMobile()) return null;
+  await loadCapacitor();
+  if (!Capacitor?.isNativePlatform()) return null;
 
   try {
     const sqlite = new CapacitorSQLite();
