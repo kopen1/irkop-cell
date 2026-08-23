@@ -2,6 +2,9 @@
 .env
 .env.*
 !.env.example
+# Di-commit: hanya berisi VITE_API_BASE (bukan rahasia), dibutuhkan saat
+# Cloudflare Pages build agar frontend memanggil /api dengan benar.
+!frontend/.env.production
 .dev.vars
 token.md
 token.md.bak
