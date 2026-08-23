@@ -62,6 +62,33 @@ jobs:
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > mobile/konter-release.keystore
 
+      - name: Configure Signing
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          cd mobile/android
+          # Add signing config to app/build.gradle
+          cat >> app/build.gradle << 'GRADLE'
+          
+          android {
+              signingConfigs {
+                  release {
+                      storeFile file("../konter-release.keystore")
+                      storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
+                      keyAlias System.getenv("KEY_ALIAS") ?: ""
+                      keyPassword System.getenv("KEY_PASSWORD") ?: ""
+                  }
+              }
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          GRADLE
+
       - name: Build Release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -69,17 +96,21 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd mobile/android
-          ./gradlew assembleRelease \
-            -PkeystoreFile=../konter-release.keystore \
-            -PkeystorePassword="$KEYSTORE_PASSWORD" \
-            -PkeyAlias="$KEY_ALIAS" \
-            -PkeyPassword="$KEY_PASSWORD"
+          ./gradlew assembleRelease
+
+      - name: Check Build Output
+        if: always()
+        run: |
+          echo "=== Build output ==="
+          find mobile/android -name "*.apk" -type f 2>/dev/null || echo "No APK found"
+          echo "=== Build directory ==="
+          ls -la mobile/android/app/build/outputs/apk/ 2>/dev/null || echo "No build output"
 
       - name: Upload APK (Artifact)
         uses: actions/upload-artifact@v4
         with:
           name: konter-release.apk
-          path: mobile/android/app/build/outputs/apk/release/app-release.apk
+          path: mobile/android/app/build/outputs/apk/release/*.apk
           retention-days: 30
 
       - name: Cleanup Keystore
