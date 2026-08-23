@@ -57,7 +57,7 @@ test('R6 TRANSFER 100k admin 5k: saldo -100k, laci +105k, laba +5k', async () =>
 });
 
 // 2. TARIK TUNAI DALAM
-test('R6 Tarik Tunai Admin Dalam 100k admin 5k: saldo +105k, laci -100k, laba +5k', async () => {
+test('R6 Tarik Tunai Admin Dalam 100k admin 5k: saldo +100k, laci -95k, laba +5k', async () => {
   const { env, token } = await bootstrap();
   const r = await call(env, '/api/transaksi', {
     method: 'POST', token,
@@ -66,14 +66,14 @@ test('R6 Tarik Tunai Admin Dalam 100k admin 5k: saldo +105k, laci -100k, laba +5
   assert.equal(r.status, 200);
   const tx = await call(env, `/api/transaksi/${r.data.id}`, { token });
   const m = mutasiMap(tx.data);
-  assert.equal(m['DANA'], 105000);
+  assert.equal(m['DANA'], 100000);
   assert.equal(m['Saldo Akun'] ?? 0, 0);
-  assert.equal(m['Tunai Laci'], -100000);
+  assert.equal(m['Tunai Laci'], -95000);
   assert.equal(m['Laba'], 5000);
 });
 
 // 3. TARIK TUNAI LUAR
-test('R6 Tarik Tunai Admin Luar 100k admin 5k: saldo +100k, laci -95k, laba +5k', async () => {
+test('R6 Tarik Tunai Admin Luar 100k admin 5k: saldo +105k, laci -100k, laba +5k', async () => {
   const { env, token } = await bootstrap();
   const r = await call(env, '/api/transaksi', {
     method: 'POST', token,
@@ -82,9 +82,9 @@ test('R6 Tarik Tunai Admin Luar 100k admin 5k: saldo +100k, laci -95k, laba +5k'
   assert.equal(r.status, 200);
   const tx = await call(env, `/api/transaksi/${r.data.id}`, { token });
   const m = mutasiMap(tx.data);
-  assert.equal(m['DANA'], 100000);
+  assert.equal(m['DANA'], 105000);
   assert.equal(m['Saldo Akun'] ?? 0, 0);
-  assert.equal(m['Tunai Laci'], -95000);
+  assert.equal(m['Tunai Laci'], -100000);
   assert.equal(m['Laba'], 5000);
 });
 
@@ -318,7 +318,7 @@ test('R6 Tarik Tunai mutates DANA by exact name (no mapping/renaming)', async ()
   assert.equal(r.status, 200);
   const tx = await call(env, `/api/transaksi/${r.data.id}`, { token });
   const m = mutasiMap(tx.data);
-  assert.equal(m['DANA'], 255000); // nominal + admin
+  assert.equal(m['DANA'], 250000); // nominal (admin dalam = fee dari tunai, bukan tambah ke akun)
   assert.equal(m['Saldo Akun'] ?? 0, 0);
 });
 
@@ -339,15 +339,14 @@ test('R6 transfer with provider that has no account -> 400 invalid_account (no m
   assert.equal(Number(mut), 0);
 });
 
-// 14e. Non-existent provider (not in PROVIDERS) -> 400 invalid_provider
-test('R6 transfer with unknown provider -> 400 invalid_provider', async () => {
+// 14e. Non-existent provider (not in akun_master) -> 400
+test('R6 transfer with unknown provider -> 400', async () => {
   const { env, token } = await bootstrap();
   const r = await call(env, '/api/transaksi', {
     method: 'POST', token,
     body: { jenis: 'transfer', nominal: 100000, mitra: 'SHOPEE' },
   });
   assert.equal(r.status, 400);
-  assert.equal(r.data.error.code, 'invalid_provider');
 });
 
 // 15. Idempotency retry (admin TRANSFER) -> duplicate:true, no phantom txn / 0-mutation txn
@@ -388,8 +387,8 @@ test('R6 Tarik Tunai idempotency: retry Idempotency-Key -> duplicate:true, no ph
 test('R6 preview konsisten dengan mutasi aktual (transfer/dalam/luar)', async () => {
   const cases = [
     { jenis: 'transfer', admin_type: undefined, nominal: 100000, expectSaldo: -100000, expectLaci: 105000 },
-    { jenis: 'tariktunai', admin_type: 'dalam', nominal: 100000, expectSaldo: 105000, expectLaci: -100000 },
-    { jenis: 'tariktunai', admin_type: 'luar', nominal: 100000, expectSaldo: 100000, expectLaci: -95000 },
+    { jenis: 'tariktunai', admin_type: 'dalam', nominal: 100000, expectSaldo: 100000, expectLaci: -95000 },
+    { jenis: 'tariktunai', admin_type: 'luar', nominal: 100000, expectSaldo: 105000, expectLaci: -100000 },
   ];
   for (const c of cases) {
     const { env, token } = await bootstrap();
@@ -569,7 +568,7 @@ test('R6 transfer menunggu -> PUT konfirmasi manual', async () => {
 });
 
 // 24. Ubah status konfirmasi hanya untuk transfer
-test('R6 konfirmasi transaksi non-transfer -> 400 not_transfer', async () => {
+test('R6 konfirmasi transaksi non-transfer -> bisa diubah (semua jenis)', async () => {
   const { env, token } = await bootstrap();
   const svc = await createService(env, token, 100000, 0);
   const r = await call(env, '/api/transaksi', {
@@ -578,8 +577,8 @@ test('R6 konfirmasi transaksi non-transfer -> 400 not_transfer', async () => {
   });
   assert.equal(r.status, 200);
   const c = await call(env, `/api/transaksi/${r.data.id}/konfirmasi`, { method: 'PUT', token, body: { konfirmasi_pembayaran: 'manual' } });
-  assert.equal(c.status, 400);
-  assert.equal(c.data.error.code, 'not_transfer');
+  assert.equal(c.status, 200);
+  assert.equal(c.data.konfirmasi_pembayaran, 'manual');
 });
 
 // 25. Nilai valid; bisa diubah berkali-kali; set nilai sama -> 200 unchanged

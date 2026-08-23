@@ -45,5 +45,11 @@ export async function hitungAdmin(db, providerRaw, nominalRaw) {
   const besar = hitungBesar(nominal);
   if (besar !== null) return besar;
 
+  // Fallback: untuk OVO/GOPAY nominal > max bracket tapi < 900k → pakai rate BANK (5000)
+  // Ini menyamakan dengan DANA 95k-900k = 5000.
+  if ((provider === 'OVO' || provider === 'GOPAY') && nominal >= 95000 && nominal <= 900000) {
+    return 5000;
+  }
+
   throw err(400, 'no_tarif', `Tidak ada tarif admin untuk ${provider} nominal ${nominal}`);
 }

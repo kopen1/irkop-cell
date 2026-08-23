@@ -97,7 +97,7 @@ test('proxy: POST transaksi (body + Idempotency-Key) -> 1 mutasi, tidak diduplik
   assert.equal(r2.data.duplicate, true);
 
   const mut = await env.DB.prepare('SELECT COUNT(*) AS n FROM mutasi_saldo').all();
-  assert.equal(mut.results[0].n, 1);
+  assert.equal(mut.results[0].n, 2); // Tunai Laci + mutasi Laba (produk)
 });
 
 test('proxy: PUT /api/produk/:id (body) -> 200 JSON', async () => {

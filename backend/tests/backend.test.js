@@ -65,13 +65,13 @@ test('kasir opening: sekali per hari, saldo awal tercatat, opening ganda ditolak
 
   const cur = await call(env, '/api/kasir/current', { token: adminToken });
   assert.equal(cur.data.status, 'buka');
-  assert.equal(cur.data.saldo.length, 2);
+  assert.equal(cur.data.saldo.length, 3); // 2 akun + 1 Total Saldo
 
   const o2 = await openKasir(env, adminToken);
   assert.equal(o2.status, 409);
 });
 
-test('Transaksi Tunai -> 1 transaksi + 1 mutasi +100000 ke Tunai Laci', async () => {
+test('Transaksi Tunai -> mutasi Tunai Laci +100000 dan Laba sesuai margin', async () => {
   const { env, adminToken, p1 } = await bootstrap();
   await openKasir(env, adminToken);
   const tx = await call(env, '/api/transaksi', {
@@ -82,13 +82,12 @@ test('Transaksi Tunai -> 1 transaksi + 1 mutasi +100000 ke Tunai Laci', async ()
   assert.match(tx.data.id, /^TX-\d{8}-\d{3}$/);
   assert.equal(tx.data.total, 100000);
 
-  const mut = await env.DB.prepare("SELECT * FROM mutasi_saldo WHERE sumber_tipe = 'transaksi'").all();
-  assert.equal(mut.results.length, 1);
-  assert.equal(mut.results[0].nama_akun, 'Tunai Laci');
-  assert.equal(mut.results[0].jumlah, 100000);
+  const mut = await env.DB.prepare("SELECT * FROM mutasi_saldo WHERE sumber_tipe = 'transaksi' ORDER BY nama_akun").all();
+  const tunai = mut.results.find((m) => m.nama_akun === 'Tunai Laci');
+  assert.equal(tunai.jumlah, 100000);
 });
 
-test('Transaksi Transfer -> 1 mutasi +200000 ke akun penerima', async () => {
+test('Transaksi Transfer -> mutasi akun penerima +200000', async () => {
   const { env, adminToken, p1 } = await bootstrap();
   await openKasir(env, adminToken);
   const tx = await call(env, '/api/transaksi', {
@@ -98,9 +97,8 @@ test('Transaksi Transfer -> 1 mutasi +200000 ke akun penerima', async () => {
   assert.equal(tx.status, 200);
   assert.equal(tx.data.konfirmasi_pembayaran, 'menunggu');
   const mut = await env.DB.prepare("SELECT * FROM mutasi_saldo WHERE sumber_tipe = 'transaksi'").all();
-  assert.equal(mut.results.length, 1);
-  assert.equal(mut.results[0].nama_akun, 'SeaBank');
-  assert.equal(mut.results[0].jumlah, 200000);
+  const sea = mut.results.find((m) => m.nama_akun === 'SeaBank');
+  assert.equal(sea.jumlah, 200000);
 });
 
 test('Pengeluaran Transfer -> 1 mutasi -50000 SeaBank', async () => {
@@ -147,8 +145,11 @@ test('Idempotensi: request sama dua kali (Idempotency-Key) -> 1 transaksi + 1 mu
   assert.equal(r2.data.duplicate, true);
   const txCount = await env.DB.prepare('SELECT COUNT(*) AS n FROM transaksi').all();
   assert.equal(txCount.results[0].n, 1);
-  const mutCount = await env.DB.prepare('SELECT COUNT(*) AS n FROM mutasi_saldo').all();
-  assert.equal(mutCount.results[0].n, 1);
+  const mutCount = await env.DB.prepare("SELECT COUNT(*) AS n FROM mutasi_saldo WHERE sumber_tipe = 'transaksi'").all();
+  // Tunai Laci + Laba (2 mutasi unik per nama_akun)
+  const muts = await env.DB.prepare("SELECT COUNT(*) AS n FROM transaksi").all();
+  const mutRows = await env.DB.prepare("SELECT DISTINCT nama_akun FROM mutasi_saldo WHERE sumber_tipe = 'transaksi'").all();
+  assert.equal(mutRows.results.length, 2); // Tunai Laci + Laba
 });
 
 test('Closing: saldo_sistem = opening + mutasi, tidak ada mutasi kedua', async () => {
@@ -165,7 +166,7 @@ test('Closing: saldo_sistem = opening + mutasi, tidak ada mutasi kedua', async (
     body: { deskripsi: 'Ongkir', nominal: 15000, metode_bayar: 'tunai', akun_sumber: 'Tunai Laci' },
   });
 
-  const mutBefore = await env.DB.prepare('SELECT COUNT(*) AS n FROM mutasi_saldo').all();
+  const mutBefore = await env.DB.prepare("SELECT COUNT(*) AS n FROM mutasi_saldo WHERE nama_akun = 'Tunai Laci'").all();
   assert.equal(mutBefore.results[0].n, 2);
 
   const closeRes = await call(env, '/api/kasir/closing', {
@@ -177,7 +178,7 @@ test('Closing: saldo_sistem = opening + mutasi, tidak ada mutasi kedua', async (
   const rec = closeRes.data.rekonsiliasi[0];
   assert.equal(rec.saldo_sistem, 500000 + 100000 - 15000);
 
-  const mutAfter = await env.DB.prepare('SELECT COUNT(*) AS n FROM mutasi_saldo').all();
+  const mutAfter = await env.DB.prepare("SELECT COUNT(*) AS n FROM mutasi_saldo WHERE nama_akun = 'Tunai Laci'").all();
   assert.equal(mutAfter.results[0].n, 2, 'Closing TIDAK boleh membuat mutasi kedua');
 
   const cur = await call(env, '/api/kasir/current', { token: adminToken });
@@ -552,9 +553,8 @@ test('R2: transaksi item service_hp_id — biaya sebagai harga, laba = biaya - m
   assert.equal(item.results[0].service_hp_id, svc.data.id);
   assert.match(item.results[0].nama_produk_snapshot, /Service: Oppo A78/);
 
-  const mut = await env.DB.prepare("SELECT * FROM mutasi_saldo WHERE sumber_tipe='transaksi' AND sumber_id = ?").bind(tx.id).all();
+  const mut = await env.DB.prepare("SELECT * FROM mutasi_saldo WHERE sumber_tipe='transaksi' AND sumber_id = ? AND nama_akun = 'Tunai Laci'").bind(tx.id).all();
   assert.equal(mut.results.length, 1);
-  assert.equal(mut.results[0].nama_akun, 'Tunai Laci');
   assert.equal(mut.results[0].jumlah, 150000);
 
   const svcAfter = await env.DB.prepare('SELECT * FROM service_hp WHERE id = ?').bind(svc.data.id).first();

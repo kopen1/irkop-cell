@@ -36,7 +36,7 @@ export async function updateSettings(db, request, ctx) {
   const admin = requireAdmin(ctx);
   const body = await readBody(request);
   if (body && typeof body === 'object') {
-    const allowed = new Set(['app_timezone', 'default_theme', 'nama_website', 'notifhook_auto_input', 'theme']);
+      const allowed = new Set(['app_timezone', 'default_theme', 'nama_website', 'notifhook_auto_input', 'theme', 'struk_header', 'struk_alamat', 'struk_footer']);
     for (const [k, v] of Object.entries(body)) {
       if (!allowed.has(k)) throw err(400, 'invalid_setting', `Setting '${k}' tidak diizinkan`);
       const val = typeof v === 'boolean' ? (v ? '1' : '0') : String(v);

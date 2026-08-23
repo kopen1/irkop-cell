@@ -1,6 +1,8 @@
 import { err } from '../lib/errors.js';
 import { nowIso } from '../lib/time.js';
 import { writeAudit } from '../lib/audit.js';
+import { createTransaksi } from './transaksi.js';
+import { requireOpenSession } from '../financial/kasir.js';
 
 function loadSettings(rows) {
   const conf = {};
@@ -39,6 +41,7 @@ export async function webhookNotifHook(db, request, env) {
   let errorMessage = null;
 
   if (autoInput && payload.transaksi_kode && typeof payload.transaksi_kode === 'string') {
+    // --- Konfirmasi transaksi transfer yang sudah dibuat ---
     const tx = await db.one(
       'SELECT * FROM transaksi WHERE kode_transaksi = ? AND deleted_at IS NULL',
       payload.transaksi_kode
@@ -63,6 +66,53 @@ export async function webhookNotifHook(db, request, env) {
       });
       status = 'diproses';
       transaksiId = tx.id;
+    }
+  } else if (autoInput && payload.amount != null && Number(payload.amount) >= 1) {
+    // --- Auto-input: buat transaksi transfer baru dari notifikasi ---
+    try {
+      const nominal = Number(payload.amount);
+      const sesi = await requireOpenSession(db);
+      const src = await db.one(
+        `SELECT * FROM notifhook_source
+          WHERE enabled = 1 AND (lower(source_name) = lower(?) OR lower(matcher_value) = lower(?))`,
+        payload.source_app || '', payload.source_app || ''
+      );
+      if (!src) {
+        status = 'gagal';
+        errorMessage = `Sumber notifikasi tidak dikenali: ${payload.source_app || '-'}`;
+      } else {
+        const userId = sesi.user_id
+          ?? (await db.one('SELECT id FROM users ORDER BY id LIMIT 1'))?.id;
+        const ctx = { auth: { user: { id: userId } }, env };
+        const fakeReq = {
+          headers: {
+            get: (h) => (String(h).toLowerCase() === 'idempotency-key' ? idempotencyKey : null),
+          },
+        };
+        const res = await createTransaksi(
+          db,
+          { jenis: 'transfer', mitra: src.source_name, nominal, source_app: payload.source_app },
+          ctx,
+          fakeReq
+        );
+        if (res.duplicate) {
+          status = 'diabaikan';
+        } else {
+          status = 'diproses';
+        }
+        const row = await db.one('SELECT id FROM transaksi WHERE kode_transaksi = ?', res.id);
+        transaksiId = row ? row.id : null;
+        if (transaksiId) {
+          // Tandai sebagai konfirmasi otomatis dari webhook (tidak ubah skema DB).
+          await db.exec(
+            "UPDATE transaksi SET konfirmasi_pembayaran = 'otomatis', updated_at = ? WHERE id = ?",
+            nowIso(), transaksiId
+          );
+        }
+      }
+    } catch (e) {
+      status = 'gagal';
+      errorMessage = e.message || 'Gagal membuat transaksi dari notifikasi';
     }
   }
 

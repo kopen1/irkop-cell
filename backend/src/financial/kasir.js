@@ -228,12 +228,18 @@ export async function sessionStatus(db, { date = wibDateToday(), kasirSesiId = n
     if (!accountRows[m.nama_akun]) accountRows[m.nama_akun] = { nama_akun: m.nama_akun, saldo_opening: 0 };
     accountRows[m.nama_akun].mutasi = Number(m.total);
   }
-  const saldo = Object.values(accountRows).map((r) => ({
-    nama_akun: r.nama_akun,
-    saldo_opening: r.saldo_opening,
-    mutasi: r.mutasi ?? 0,
-    saldo_sistem: r.saldo_opening + (r.mutasi ?? 0),
-  }));
+  const saldo = Object.values(accountRows)
+    .filter((r) => r.nama_akun !== 'Saldo Akun')
+    .map((r) => ({
+      nama_akun: r.nama_akun,
+      saldo_opening: r.saldo_opening,
+      mutasi: r.mutasi ?? 0,
+      saldo_sistem: r.saldo_opening + (r.mutasi ?? 0),
+    }));
+
+  // Total Saldo — jumlah semua saldo_sistem (read-only, bukan akun transaksi)
+  const totalSaldo = saldo.reduce((s, r) => s + r.saldo_sistem, 0);
+  saldo.push({ nama_akun: 'Total Saldo', saldo_opening: saldo.reduce((s, r) => s + r.saldo_opening, 0), mutasi: totalSaldo - saldo.reduce((s, r) => s + r.saldo_opening, 0), saldo_sistem: totalSaldo });
 
   let closingRows = [];
   if (sesi.status === 'tutup') {

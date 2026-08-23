@@ -16,6 +16,8 @@ vi.mock('../../context/ToastContext', () => ({
 }));
 vi.mock('../../hooks/useSiteName', () => ({
   useSiteName: () => 'Iirkop Cell',
+  useStrukTemplate: () => ({}),
+  refreshSettings: async () => ({}),
 }));
 
 import { TransaksiDetail } from '../transaksi/TransaksiDetail';

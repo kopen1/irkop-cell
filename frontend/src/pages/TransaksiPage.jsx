@@ -260,16 +260,23 @@ export default function TransaksiPage() {
         <>
           <Table
             columns={[
-              { key: 'id', header: 'ID', render: (r) => <span className="num">{r.id}</span> },
               { key: 'created_at', header: 'Tanggal/Jam (WIB)', render: (r) => <span className="text-sm">{formatDateTime(r.created_at)}</span> },
-              { key: 'pelanggan_nama', header: 'Pelanggan', render: (r) => r.pelanggan_nama || <span className="text-muted">Umum</span> },
               {
                 key: 'items',
                 header: 'Item',
-                render: (r) => <span className="text-sm">{((r.items || []).map((i) => i.nama_produk_snapshot || i.nama_produk).slice(0, 2).join(', '))}{(r.items || []).length > 2 ? '…' : ''}</span>,
+                render: (r) => {
+                  const items = r.items || [];
+                  if (items.length > 0) {
+                    return <span className="text-sm">{items.map((i) => i.nama_produk_snapshot || i.nama_produk).slice(0, 2).join(', ')}{items.length > 2 ? '…' : ''}</span>;
+                  }
+                  if (r.jenis === 'tariktunai') return <span className="text-sm text-muted">Tarik Tunai</span>;
+                  if (r.jenis === 'transfer') return <span className="text-sm text-muted">Transfer</span>;
+                  if (r.jenis === 'produkdigital') return <span className="text-sm text-muted">Produk Digital</span>;
+                  if (r.jenis === 'service') return <span className="text-sm text-muted">Service HP</span>;
+                  return <span className="text-sm text-muted">-</span>;
+                },
               },
-              { key: 'metode_bayar', header: 'Bayar', render: (r) => <Badge tone="info">{labelMetode(r.metode_bayar)}</Badge> },
-              { key: 'konfirmasi_pembayaran', header: 'Konfirmasi', render: (r) => <KonfirmasiBadge status={r.konfirmasi_pembayaran} /> },
+              { key: 'konfirmasi_pembayaran', header: 'Status', render: (r) => <KonfirmasiBadge status={r.konfirmasi_pembayaran} /> },
               { key: 'total', header: 'Total', align: 'right', render: (r) => <span className="num">{formatRupiah(r.total)}</span> },
             ]}
             rows={rows}

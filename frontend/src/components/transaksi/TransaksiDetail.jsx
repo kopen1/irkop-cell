@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { api } from '../../lib/api';
 import { useToast } from '../../context/ToastContext';
-import { useSiteName } from '../../hooks/useSiteName';
+import { useStrukTemplate } from '../../hooks/useSiteName';
 import { formatDateTime, formatRupiah, formatSignedRupiah, labelMetode, labelKonfirmasi } from '../../lib/format';
 import { Button } from '../ui/Button';
 import { Select } from '../ui/Field';
+import { Icon } from '../ui/Icon';
 import { KonfirmasiBadge } from '../ui/Badge';
 
 const KONFIRMASI_OPTIONS = [
@@ -16,17 +17,44 @@ const KONFIRMASI_OPTIONS = [
   { value: 'manual', label: 'Manual' },
 ];
 
-function buildStruk(t, konterNama) {
+// Transaksi admin (Tarik Tunai / Transfer) tidak menyimpan baris item di DB.
+// Bangun baris tampilan agar detail & struk tetap lengkap.
+function displayItems(t) {
+  const items = t.items || [];
+  if (items.length > 0) return items;
+  if (t.jenis === 'tariktunai') {
+    return [{
+      nama_produk_snapshot: `Tarik Tunai ${t.mitra || ''} (${t.admin_type === 'dalam' ? 'Admin Dalam' : 'Admin Luar'})`,
+      qty: 1,
+      harga_snapshot: t.subtotal,
+      subtotal: t.subtotal,
+    }];
+  }
+  if (t.jenis === 'transfer') {
+    return [{
+      nama_produk_snapshot: `Transfer ${t.mitra || ''}`,
+      qty: 1,
+      harga_snapshot: t.subtotal,
+      subtotal: t.subtotal,
+    }];
+  }
+  return items;
+}
+
+function buildStruk(t, tpl) {
   const lines = [];
-  lines.push((konterNama || 'Iirkop Cell').toUpperCase());
-  lines.push('Jl. Kasir — PPOB & Service HP');
+  lines.push((tpl.siteName || 'Iirkop Cell').toUpperCase());
+  if (tpl.header) lines.push(tpl.header);
+  if (tpl.alamat) lines.push(tpl.alamat);
   lines.push('================================');
   lines.push(`No: ${t.id}`);
   lines.push(`Jam: ${formatDateTime(t.created_at)}`);
   lines.push(`${labelMetode(t.metode_bayar)} — ${labelKonfirmasi(t.konfirmasi_pembayaran)}`);
   lines.push('--------------------------------');
-  (t.items || []).forEach((it) => {
+  displayItems(t).forEach((it) => {
     lines.push(`${it.nama_produk_snapshot || it.nama_produk || '-'}`);
+    if (it.service_hp_id && it.svc_nama_device) lines.push(`  Device: ${it.svc_nama_device}`);
+    if (it.service_hp_id && it.svc_kerusakan) lines.push(`  Kerusakan: ${it.svc_kerusakan}`);
     lines.push(
       `  ${it.qty} x ${formatRupiah(it.harga_snapshot ?? it.harga ?? 0)}${it.nominal_referensi ? `\n  Kirim: ${formatRupiah(it.nominal_referensi)}` : ''}`
     );
@@ -35,13 +63,13 @@ function buildStruk(t, konterNama) {
   lines.push('--------------------------------');
   lines.push(`TOTAL   ${formatRupiah(t.total)}`);
   lines.push('================================');
-  lines.push('Terima kasih');
+  lines.push(tpl.footer || 'Terima kasih');
   return lines.join('\n');
 }
 
 export function StrukPreview({ transaksi }) {
-  const siteName = useSiteName();
-  const struk = useMemo(() => (transaksi ? buildStruk(transaksi, siteName) : ''), [transaksi, siteName]);
+  const tpl = useStrukTemplate();
+  const struk = useMemo(() => (transaksi ? buildStruk(transaksi, tpl) : ''), [transaksi, tpl]);
   if (!transaksi) return null;
 
   const print = () => {
@@ -72,12 +100,20 @@ export function StrukPreview({ transaksi }) {
             </tr>
           </thead>
           <tbody>
-            {(transaksi.items || []).map((it, i) => (
+            {displayItems(transaksi).map((it, i) => (
               <tr key={i}>
                 <td>
                   {it.nama_produk_snapshot || it.nama_produk || '-'}
                   {it.service_hp_id ? (
-                    <div className="text-xs text-muted">Service HP #{it.service_hp_id} — biaya jasa</div>
+                    <div className="text-xs text-muted">
+                      Service HP #{it.service_hp_id}{it.svc_nama_device ? ` — ${it.svc_nama_device}` : ''}
+                    </div>
+                  ) : null}
+                  {it.service_hp_id && it.svc_kerusakan ? (
+                    <div className="text-xs text-muted">Kerusakan: {it.svc_kerusakan}</div>
+                  ) : null}
+                  {it.service_hp_id && it.svc_harga_modal != null ? (
+                    <div className="text-xs text-muted">Modal: {formatRupiah(it.svc_harga_modal)}</div>
                   ) : null}
                   {it.nominal_referensi ? (
                     <div className="text-xs text-muted">Kirim uang: {formatRupiah(it.nominal_referensi)} {it.akun_sumber ? `(via ${it.akun_sumber})` : ''}</div>
@@ -225,7 +261,7 @@ export function TransaksiDetail({ transaksi, onConfirm, onBayarKurang }) {
 
   const hasKirimUang = (data?.items || []).some((it) => Number(it.nominal_referensi || 0) > 0);
   const isAdminTx = data?.jenis === 'transfer' || data?.jenis === 'tariktunai';
-  const showKonfirmasi = data?.metode_bayar === 'transfer' || hasKirimUang || isAdminTx;
+  const showKonfirmasi = true; // Tampilkan untuk semua jenis transaksi
 
   const saveKonfirmasi = async () => {
     if (!data?.id || confirmBusy) return;
@@ -311,6 +347,18 @@ export function TransaksiDetail({ transaksi, onConfirm, onBayarKurang }) {
           <p className="text-xs text-muted">Sumber</p>
           <p className="text-sm">{data.manual_entry ? 'Input manual (Laporan)' : 'Transaksi'}</p>
         </div>
+        {data.mitra ? (
+          <div>
+            <p className="text-xs text-muted">Mitra / Provider</p>
+            <p className="text-sm">{data.mitra}{data.admin_type ? ` (${data.admin_type === 'dalam' ? 'Admin Dalam' : 'Admin Luar'})` : ''}</p>
+          </div>
+        ) : null}
+        {data.jenis ? (
+          <div>
+            <p className="text-xs text-muted">Jenis</p>
+            <p className="text-sm" style={{ textTransform: 'capitalize' }}>{data.jenis}</p>
+          </div>
+        ) : null}
       </div>
       {data.laba !== undefined && data.laba !== null && (
         <div>

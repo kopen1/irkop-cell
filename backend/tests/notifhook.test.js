@@ -98,3 +98,84 @@ test('NotifHook: transaksi non-transfer / tidak ditemukan → gagal, tidak mengu
   assert.equal(r2.data.status, 'gagal');
   assert.match(r2.data.error_message, /tidak ditemukan/);
 });
+
+async function addSource(env, sourceName, matcherValue) {
+  await env.DB.prepare(
+    `INSERT INTO notifhook_source (source_name, enabled, matcher_type, matcher_value, created_at)
+     VALUES (?, 1, 'package_name', ?, ?)`
+  ).bind(sourceName, matcherValue, new Date().toISOString()).run();
+}
+
+async function dbOne(env, sql, id) {
+  return env.DB.prepare(sql).bind(id).first();
+}
+
+async function dbCount(env, sql) {
+  const r = await env.DB.prepare(sql).all();
+  return Number(r.results ? r.results[0].n : r[0].n);
+}
+
+test('NotifHook: auto-input buat transaksi transfer baru dari notifikasi', async () => {
+  const { env, token } = await bootstrapNotif();
+  // SeaBank sudah ada sebagai akun (dibuka di bootstrap). Daftarkan sebagai sumber.
+  await addSource(env, 'SeaBank', 'com.seabank');
+
+  const res = await webhook(env, { idempotency_key: 'auto-1', source_app: 'SeaBank', amount: 150000 });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.status, "diproses");
+  assert.equal(res.data.duplicate, false);
+  assert.ok(res.data.transaksi_id, 'transaksi harus terbuat');
+
+  const tx = await dbOne(env, 'SELECT * FROM transaksi WHERE id = ?', res.data.transaksi_id);
+  assert.equal(tx.jenis, 'transfer');
+  assert.equal(tx.mitra, 'BANK'); // provider kategori (SeaBank = bank)
+  assert.equal(tx.konfirmasi_pembayaran, 'otomatis');
+  assert.ok(Number(tx.total) >= 150000, 'total = nominal + admin fee');
+  assert.ok(Number(tx.laba) > 0, 'ada admin fee (laba)');
+
+  // Mutasi: saldo akun SeaBank bertambah
+  const mut = await dbOne(env, "SELECT * FROM mutasi_saldo WHERE sumber_id = ? AND nama_akun = 'SeaBank'", res.data.transaksi_id);
+  assert.equal(Number(mut.jumlah), -150000); // transfer: akun provider keluar (lihat plan)
+
+  // Idempotensi webhook: panggil lagi dengan key sama -> diabaikan (tidak bikin tx baru)
+  const before = await dbCount(env, 'SELECT COUNT(*) AS n FROM transaksi');
+  const dup = await webhook(env, { idempotency_key: 'auto-1', source_app: 'SeaBank', amount: 150000 });
+  assert.equal(dup.data.status, 'diabaikan');
+  assert.equal(dup.data.duplicate, true);
+  const after = await dbCount(env, 'SELECT COUNT(*) AS n FROM transaksi');
+  assert.equal(after, before);
+});
+
+test('NotifHook: auto-input sumber tidak dikenali -> gagal', async () => {
+  const { env } = await bootstrapNotif();
+  const res = await webhook(env, { idempotency_key: 'auto-2', source_app: 'UnknownApp', amount: 50000 });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.status, 'gagal');
+  assert.match(res.data.error_message, /tidak dikenali/);
+});
+
+test('NotifHook: auto-input tanpa sesi kasir aktif -> gagal', async () => {
+  const { env } = setupEnv();
+  await createUserRaw(env, { nama: 'Admin', username: 'admin', password: 'admin1234', role: 'admin' });
+  await setSetting(env, 'notifhook_auto_input', '1');
+  await setSetting(env, 'notifhook_api_key_raw', 'irk_test_secret_123');
+  await addSource(env, 'SeaBank', 'com.seabank');
+  // TIDAK membuka kasir -> requireOpenSession gagal
+  const res = await webhook(env, { idempotency_key: 'auto-3', source_app: 'SeaBank', amount: 50000 });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.status, 'gagal');
+  assert.match(res.data.error_message, /sesi|kasir/i);
+});
+
+test('NotifHook: auto-input OFF -> tidak membuat transaksi', async () => {
+  const { env } = await bootstrapNotif();
+  await env.DB.prepare("UPDATE settings SET value = '0' WHERE key = 'notifhook_auto_input'").run();
+  await addSource(env, 'SeaBank', 'com.seabank');
+  const before = await dbCount(env, 'SELECT COUNT(*) AS n FROM transaksi');
+  const res = await webhook(env, { idempotency_key: 'auto-4', source_app: 'SeaBank', amount: 50000 });
+  assert.equal(res.status, 200);
+  assert.equal(res.data.status, 'diterima'); // diterima tapi tidak diproses
+  assert.equal(res.data.transaksi_id, null);
+  const after = await dbCount(env, 'SELECT COUNT(*) AS n FROM transaksi');
+  assert.equal(after, before);
+});

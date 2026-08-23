@@ -61,3 +61,46 @@ export function useSiteName() {
   }, []);
   return name;
 }
+
+// Template struk (header/alamat/footer) dari setting, dipakai TransaksiDetail.
+// Menggunakan cache GET /settings yang sama dengan useSiteName (tidak fetch ulang).
+let settingsCache = null;
+const settingsListeners = new Set();
+
+function notifySettings() {
+  for (const fn of settingsListeners) fn(settingsCache);
+}
+
+async function loadSettingsFull() {
+  const name = await loadSiteName();
+  try {
+    const s = await api.get('/settings');
+    settingsCache = s || {};
+  } catch {
+    settingsCache = {};
+  }
+  notifySettings();
+  return settingsCache;
+}
+
+export function useStrukTemplate() {
+  const [tpl, setTpl] = useState(settingsCache || {});
+  useEffect(() => {
+    const update = (s) => setTpl(s || {});
+    settingsListeners.add(update);
+    if (!settingsCache) loadSettingsFull().then(update);
+    else update(settingsCache);
+    return () => settingsListeners.delete(update);
+  }, []);
+  return {
+    siteName: tpl.nama_website || DEFAULT_SITE_NAME,
+    header: tpl.struk_header || '',
+    alamat: tpl.struk_alamat || '',
+    footer: tpl.struk_footer || '',
+  };
+}
+
+export async function refreshSettings() {
+  settingsCache = null;
+  return loadSettingsFull();
+}

@@ -161,7 +161,15 @@ export async function getTransaksi(db, request, ctx, idStr) {
       WHERE tt.id = ?`,
     t.id
   );
-  const items = await db.many('SELECT * FROM transaksi_item WHERE transaksi_id = ? ORDER BY id', t.id);
+  const items = await db.many(
+    `SELECT ti.*,
+            s.nama_device AS svc_nama_device, s.deskripsi_kerusakan AS svc_kerusakan,
+            s.harga_modal AS svc_harga_modal, s.status AS svc_status
+       FROM transaksi_item ti
+       LEFT JOIN service_hp s ON s.id = ti.service_hp_id
+      WHERE ti.transaksi_id = ? ORDER BY ti.id`,
+    t.id
+  );
   const mutasi = await db.many(
     "SELECT id, nama_akun, jumlah, sumber_tipe, mutation_key, kategori, created_at FROM mutasi_saldo WHERE sumber_tipe = 'transaksi' AND sumber_id = ?",
     t.id
@@ -419,16 +427,22 @@ function insertMutationsStmts(db, sesi, kode, plan, idempotencyKey, now) {
 function buildAdminPlan(jenis, adminType, nominal, admin, accountName, paymentAkun = 'Tunai Laci') {
   const plan = [];
   if (jenis === 'transfer') {
+    // Pelanggan bayar → akun provider keluar → laci masuk + admin
     plan.push({ nama_akun: accountName, jumlah: -nominal, kategori: 'saldo_akun' });
     plan.push({ nama_akun: paymentAkun, jumlah: nominal + admin, kategori: 'pendapatan' });
     plan.push({ nama_akun: 'Laba', jumlah: admin, kategori: 'pendapatan_admin' });
   } else {
+    // Tarik Tunai:
+    // admin dalam = fee dipotong dari tunai yang dikeluarkan toko
+    //   pelanggan kirim 100k → bank +100k, laci -(100k-5k) = -95k, laba +5k
+    // admin luar = fee ditambahkan ke jumlah yang dikirim pelanggan
+    //   pelanggan kirim 105k → bank +105k, laci -100k, laba +5k
     if (adminType === 'dalam') {
-      plan.push({ nama_akun: accountName, jumlah: nominal + admin, kategori: 'saldo_akun' });
-      plan.push({ nama_akun: paymentAkun, jumlah: -nominal, kategori: 'pengeluaran' });
-    } else {
       plan.push({ nama_akun: accountName, jumlah: nominal, kategori: 'saldo_akun' });
       plan.push({ nama_akun: paymentAkun, jumlah: -(nominal - admin), kategori: 'pengeluaran' });
+    } else {
+      plan.push({ nama_akun: accountName, jumlah: nominal + admin, kategori: 'saldo_akun' });
+      plan.push({ nama_akun: paymentAkun, jumlah: -nominal, kategori: 'pengeluaran' });
     }
     plan.push({ nama_akun: 'Laba', jumlah: admin, kategori: 'pendapatan_admin' });
   }
@@ -441,9 +455,17 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
   if (!Number.isInteger(nominal) || nominal < 1) {
     throw err(400, 'invalid_value', 'nominal wajib integer >= 1');
   }
-  const mitra = normalizeProvider(body.mitra);
-  if (!mitra) throw err(400, 'invalid_provider', 'mitra wajib (DANA/BANK/OVO/GOPAY)');
-  const accountName = (await getAccount(db, mitra)).nama_akun;
+
+  // mitra = nama akun di akun_master (mis. 'SeaBank', 'DANA')
+  // Provider untuk tarif di-normalize dari nama akun.
+  const rawMitra = String(body.mitra || '').trim();
+  if (!rawMitra) throw err(400, 'missing_field', 'mitra wajib (nama akun provider)');
+  const accountObj = await getAccount(db, rawMitra);
+  const accountName = accountObj.nama_akun;
+
+  // Normalize provider untuk tarif_admin: SeaBank/BCA/BRI → DANA → DANA
+  const tipeToProvider = { bank: 'BANK', e_wallet: 'DANA', digital: 'GOPAY' };
+  const mitra = tipeToProvider[accountObj.tipe] || 'BANK';
 
   let adminType = body.admin_type || null;
   if (jenis === 'transfer') {
@@ -468,7 +490,8 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
     throw err(400, 'invalid_payment_account', 'Akun pembayaran tidak boleh sama dengan akun provider');
   }
 
-  const admin = await hitungAdmin(db, mitra, nominal);
+  // Admin fee: gunakan dari body jika diisi manual, jika tidak hitung dari tarif_admin
+  const admin = (body.admin != null && Number(body.admin) >= 0) ? Number(body.admin) : await hitungAdmin(db, mitra, nominal);
   const sesi = await requireOpenSession(db);
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
   const tanggalTx = resolveTanggalTransaksi(body);
@@ -541,7 +564,8 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
 
 async function createProductTransaksi(db, body, ctx, request, jenis) {
   const { user } = ctx.auth;
-  if (!Array.isArray(body.items) || body.items.length === 0) {
+  // Service HP tidak butuh items — nanti dibuat otomatis dari body.service
+  if (!body.service && (!Array.isArray(body.items) || body.items.length === 0)) {
     throw err(400, 'missing_field', 'items wajib diisi minimal 1 produk');
   }
   const metodeBayar = body.metode_bayar;
@@ -553,9 +577,86 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     if (!p) throw err(400, 'invalid_pelanggan', 'Pelanggan tidak ditemukan');
   }
 
+  // Pelanggan auto-create dari datalist input
+  let pelangganId = body.pelanggan_id || null;
+  if (!pelangganId && body.pelanggan_nama && body.pelanggan_nama !== 'Umum / Tanpa Pelanggan') {
+    const existing = await db.one('SELECT id FROM pelanggan WHERE nama = ?', body.pelanggan_nama);
+    if (existing) {
+      pelangganId = existing.id;
+    } else {
+      const now = nowIso();
+      const res = await db.exec(
+        'INSERT INTO pelanggan (nama, created_at) VALUES (?, ?)',
+        body.pelanggan_nama, now
+      );
+      pelangganId = res.lastRowId;
+    }
+  }
+
   const sesi = await requireOpenSession(db);
+
+  // Service HP: create service_hp record lalu masukkan sebagai item
+  if (body.service) {
+    const svc = body.service;
+    const svcNow = nowIso();
+    // service_hp.pelanggan_id NOT NULL → pakai pelangganId atau auto-create "Umum"
+    let svcPelangganId = pelangganId;
+    if (!svcPelangganId) {
+      const umum = await db.one("SELECT id FROM pelanggan WHERE nama = 'Umum'");
+      svcPelangganId = umum
+        ? umum.id
+        : (await db.exec("INSERT INTO pelanggan (nama, created_at) VALUES ('Umum', ?)", svcNow)).lastRowId;
+    }
+    const svcResult = await db.exec(
+      `INSERT INTO service_hp (pelanggan_id, nama_device, deskripsi_kerusakan, biaya, harga_modal, tanggal_masuk, catatan, status)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      svcPelangganId,
+      svc.nama_device,
+      svc.deskripsi_kerusakan || null,
+      svc.biaya != null ? svc.biaya : null,
+      svc.harga_modal != null ? svc.harga_modal : null,
+      svc.tanggal_masuk || svcNow,
+      svc.catatan || null,
+      'selesai'
+    );
+    // Replace body.items with a single item referencing the new service_hp
+    body.items = [{ service_hp_id: svcResult.lastRowId, qty: 1, biaya: svc.biaya, harga_modal: svc.harga_modal }];
+  }
+
   const produkMap = await loadProducts(db, body.items);
-  const { subtotal, total, laba, itemRows, effects } = computeItems(body.items, produkMap);
+  let { subtotal, total, laba, itemRows, effects } = computeItems(body.items, produkMap);
+
+  // Produk Digital: override harga dari items jika disediakan
+  const digitalHarga = itemRows[0]?.harga && body.items[0]?.harga_jual ? Number(body.items[0].harga_jual) : null;
+  if (digitalHarga && Number.isInteger(digitalHarga) && digitalHarga >= 1) {
+    for (const it of itemRows) {
+      if (it.produk_id) {
+        it.harga = digitalHarga;
+        it.subtotal = digitalHarga * it.qty;
+      }
+    }
+    subtotal = itemRows.reduce((s, it) => s + it.subtotal, 0);
+    total = subtotal;
+  }
+
+  // Produk Digital: laba = admin_fee dari body
+  if (body.admin_fee != null && body.admin_fee !== '') {
+    laba = Number(body.admin_fee);
+  }
+
+  // Produk Digital: potong modal dari akun sumber
+  if (body.akun_sumber && jenis === 'produkdigital') {
+    let totalModalCost = 0;
+    for (const it of itemRows) {
+      if (it.produk_id && it.harga_modal != null) {
+        totalModalCost += Number(it.harga_modal) * it.qty;
+      }
+    }
+    if (totalModalCost > 0) {
+      const validAkunSumber = (await getAccount(db, body.akun_sumber)).nama_akun;
+      effects.akun.set(validAkunSumber, (effects.akun.get(validAkunSumber) || 0) - totalModalCost);
+    }
+  }
 
   const payments = Array.isArray(body.payments) ? body.payments : [];
   let plan;
@@ -611,6 +712,21 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     }
     plan = planMutations({ metodeBayar, akunPenerima, subtotal, effects });
     konfirmasi = metodeBayar === 'transfer' ? 'menunggu' : 'tidak_perlu';
+    // Catat pembayaran penuh untuk metode sederhana (tunai/transfer/e-wallet = lunas).
+    // bon -> tetap belum_bayar (dibayar lewat kasbon); cash_tunai -> path split (punya payments[]).
+    if (['tunai', 'transfer', 'gopay', 'ovo', 'dana'].includes(metodeBayar)) {
+      paymentRows = [{
+        metode: metodeBayar,
+        akun_id: metodeBayar === 'transfer' ? akunPenerima : null,
+        nominal: total,
+      }];
+    }
+  }
+
+  // Semua transaksi: mutasi laba ke akun Laba agar konsisten dengan transaksi.laba
+  // (Dashboard baca transaksi.laba, Kasir baca saldo akun Laba — harus sama)
+  if (laba !== 0) {
+    plan.push({ nama_akun: 'Laba', jumlah: laba, kategori: 'pendapatan_laba' });
   }
 
   await validatedAccountNames(db, plan, body);
@@ -638,7 +754,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
         (kode_transaksi, pelanggan_id, metode_bayar, konfirmasi_pembayaran, subtotal, diskon, total,
          laba, kasir_sesi_id, dibuat_oleh, manual_entry, jenis, admin_type, mitra, tanggal_transaksi, created_at, sisa, status_bayar)
        VALUES (?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).bind(kode, body.pelanggan_id || null, derivedMetode, konfirmasi, subtotal, total, laba, sesi.id, user.id, body.manual_entry === true || body.manual_entry === 1 ? 1 : 0, jenis || null, null, null, tanggalTx, now, sisa, statusBayar),
+    ).bind(kode, pelangganId, derivedMetode, konfirmasi, subtotal, total, laba, sesi.id, user.id, body.manual_entry === true || body.manual_entry === 1 ? 1 : 0, jenis || null, null, null, tanggalTx, now, sisa, statusBayar),
   ];
 
   for (const it of itemRows) {
@@ -667,7 +783,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
       db.raw.prepare(
         `INSERT INTO kasbon (pelanggan_id, transaksi_id, nominal, status, tanggal, dicatat_oleh)
          VALUES (?, (SELECT max(id) FROM transaksi), ?, 'belum_lunas', ?, ?)`
-      ).bind(body.pelanggan_id || null, total, tanggalTx, user.id)
+      ).bind(pelangganId, total, tanggalTx, user.id)
     );
   }
 
@@ -823,20 +939,7 @@ export async function updateKonfirmasi(db, body, ctx, idStr) {
   const tx = await findTransaksiByRef(db, idStr);
   if (!tx) throw err(404, 'not_found', 'Transaksi tidak ditemukan');
   if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
-  // Berlaku untuk transaksi transfer ATAU kirim uang (item dengan nominal_referensi)
-  // ATAU transaksi admin Transfer/Tarik Tunai (jenis transfer/tariktunai).
-  const kirimUang = await db.one(
-    'SELECT COUNT(*) AS n FROM transaksi_item WHERE transaksi_id = ? AND nominal_referensi IS NOT NULL AND nominal_referensi != 0',
-    tx.id
-  );
-  const isTransferType =
-    tx.metode_bayar === 'transfer' ||
-    tx.jenis === 'transfer' ||
-    tx.jenis === 'tariktunai' ||
-    Number(kirimUang?.n || 0) > 0;
-  if (!isTransferType) {
-    throw err(400, 'not_transfer', 'Hanya transaksi transfer / kirim uang / tarik tunai yang memiliki status konfirmasi');
-  }
+  // Semua transaksi bisa ubah status konfirmasi
   const next = body.konfirmasi_pembayaran || 'manual';
   if (!KONFIRMASI_VALUES.includes(next)) {
     throw err(400, 'invalid_value', 'konfirmasi_pembayaran tidak valid');

@@ -5,7 +5,7 @@ import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useTheme, THEMES } from '../context/ThemeContext';
 import { formatDateTime, HALAMAN_PERMISSION } from '../lib/format';
-import { setSiteNameCache } from '../hooks/useSiteName';
+import { setSiteNameCache, refreshSettings } from '../hooks/useSiteName';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -50,12 +50,18 @@ function UmumTab() {
   const toast = useToast();
   const { theme, setTheme } = useTheme();
   const [nama, setNama] = useState('');
+  const [strukHeader, setStrukHeader] = useState('');
+  const [strukAlamat, setStrukAlamat] = useState('');
+  const [strukFooter, setStrukFooter] = useState('');
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     api.get('/settings').then((s) => {
       setNama(s.nama_website || '');
+      setStrukHeader(s.struk_header || '');
+      setStrukAlamat(s.struk_alamat || '');
+      setStrukFooter(s.struk_footer || '');
       if (s.default_theme) setTheme(s.default_theme);
     }).catch(() => {}).finally(() => setLoaded(true));
   }, [setTheme]);
@@ -65,8 +71,15 @@ function UmumTab() {
   const save = async () => {
     setBusy(true);
     try {
-      await api.put('/settings', { nama_website: nama.trim(), default_theme: theme });
+      await api.put('/settings', {
+        nama_website: nama.trim(),
+        default_theme: theme,
+        struk_header: strukHeader,
+        struk_alamat: strukAlamat,
+        struk_footer: strukFooter,
+      });
       setSiteNameCache(nama.trim());
+      await refreshSettings();
       toast.success('Pengaturan umum disimpan.');
     } catch (err) {
       toast.error(err.message);
@@ -94,6 +107,19 @@ function UmumTab() {
             ))}
           </div>
         </Field>
+        <Card title="Template Struk" hint="Teks di struk cetak. Header/alamat menggantikan baris default, footer menggantikan 'Terima kasih'.">
+          <div className="flex flex-col gap-4">
+            <Field label="Header struk (baris ke-2)" hint="Mis. slogan atau cabang. Kosongkan untuk default.">
+              <Input type="text" value={strukHeader} onChange={(e) => setStrukHeader(e.target.value)} />
+            </Field>
+            <Field label="Alamat toko" hint="Ditampilkan di bawah header.">
+              <Input type="text" value={strukAlamat} onChange={(e) => setStrukAlamat(e.target.value)} />
+            </Field>
+            <Field label="Footer struk" hint="Mis. 'Terima kasih, sampai jumpa'. Kosongkan untuk default.">
+              <Input type="text" value={strukFooter} onChange={(e) => setStrukFooter(e.target.value)} />
+            </Field>
+          </div>
+        </Card>
         <div>
           <Button onClick={save} loading={busy}>Simpan</Button>
         </div>

@@ -1,7 +1,6 @@
 // Halaman Daftar Barang (PRD 5.5).
 // - CRUD produk (POST/PUT/DELETE /api/produk).
-// - Kategori: GET/POST (contract Team 1 belum menyediakan PUT/DELETE kategori;
-//   sesuai aturan, UI tidak menawarkan tombol tanpa endpoint backend).
+// - Kategori: GET/POST/PUT/DELETE /api/kategori/:id (CRUD lengkap).
 // - Kategori non-stok (lacak_stok=0) → produk tidak punya field stok (PRD 5.5).
 // - stok_minimum → alert stok <= ambang.
 import { useEffect, useMemo, useState } from 'react';
@@ -55,6 +54,9 @@ export default function DaftarBarangPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [kategoriOpen, setKategoriOpen] = useState(false);
+  const [editKategori, setEditKategori] = useState(null);
+  const [deleteKategori, setDeleteKategori] = useState(null);
+  const [deleteKategoriBusy, setDeleteKategoriBusy] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState(null);
@@ -302,8 +304,8 @@ export default function DaftarBarangPage() {
         />
       )}
 
-      {/* Form kategori (GET/POST saja sesuai contract) */}
-      <Modal open={kategoriOpen} onClose={() => setKategoriOpen(false)} title="Kategori Produk">
+      {/* Form kategori (CRUD lengkap: GET/POST/PUT/DELETE) */}
+      <Modal open={kategoriOpen} onClose={() => { setKategoriOpen(false); setEditKategori(null); }} title="Kategori Produk">
         <div className="flex flex-col gap-4">
           <div className="table-wrap">
             <table className="table" style={{ minWidth: 0 }}>
@@ -311,6 +313,7 @@ export default function DaftarBarangPage() {
                 <tr>
                   <th>Nama</th>
                   <th>Lacak Stok</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -318,21 +321,43 @@ export default function DaftarBarangPage() {
                   <tr key={k.id}>
                     <td>{k.nama}</td>
                     <td>{k.lacak_stok ? <Badge tone="success">Ya</Badge> : <Badge tone="neutral">Tidak</Badge>}</td>
+                    <td>
+                      <div className="row-actions">
+                        <Button variant="ghost" size="sm" aria-label={`Edit ${k.nama}`} onClick={() => setEditKategori(k)}>
+                          <Icon name="edit" size={15} />
+                        </Button>
+                        <Button variant="ghost" size="sm" aria-label={`Hapus ${k.nama}`} onClick={() => setDeleteKategori(k)}>
+                          <Icon name="trash" size={15} />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
                 {kategoriList.length === 0 && (
-                  <tr><td colSpan={2} className="text-muted">Belum ada kategori.</td></tr>
+                  <tr><td colSpan={3} className="text-muted">Belum ada kategori.</td></tr>
                 )}
               </tbody>
             </table>
           </div>
-          <KategoriForm
-            onSaved={() => {
-              setKategoriOpen(false);
-              kategori.run();
-              toast.success('Kategori ditambahkan.');
-            }}
-          />
+          {editKategori ? (
+            <KategoriEditForm
+              initial={editKategori}
+              onSaved={() => {
+                setEditKategori(null);
+                kategori.run();
+                toast.success('Kategori diperbarui.');
+              }}
+              onCancel={() => setEditKategori(null)}
+            />
+          ) : (
+            <KategoriForm
+              onSaved={() => {
+                setKategoriOpen(false);
+                kategori.run();
+                toast.success('Kategori ditambahkan.');
+              }}
+            />
+          )}
         </div>
       </Modal>
 
@@ -433,6 +458,29 @@ export default function DaftarBarangPage() {
           }
         }}
       />
+
+      <ConfirmDialog
+        open={Boolean(deleteKategori)}
+        title="Hapus Kategori"
+        message={`Kategori "${deleteKategori?.nama}" akan dihapus permanen. Lanjutkan?`}
+        confirmLabel="Hapus"
+        loading={deleteKategoriBusy}
+        onCancel={() => setDeleteKategori(null)}
+        onConfirm={async () => {
+          setDeleteKategoriBusy(true);
+          try {
+            await api.del(`/kategori/${deleteKategori.id}`);
+            setDeleteKategori(null);
+            toast.success('Kategori dihapus.');
+            kategori.run();
+            load().catch(() => {});
+          } catch (err) {
+            toast.error(err.message);
+          } finally {
+            setDeleteKategoriBusy(false);
+          }
+        }}
+      />
     </div>
   );
 }
@@ -471,6 +519,47 @@ function KategoriForm({ onSaved }) {
         {error && <p className="field-error" role="alert">{error}</p>}
       </div>
       <Button type="submit" loading={busy}>Tambah</Button>
+    </form>
+  );
+}
+
+function KategoriEditForm({ initial, onSaved, onCancel }) {
+  const [nama, setNama] = useState(initial.nama || '');
+  const [lacakStok, setLacakStok] = useState(Boolean(initial.lacak_stok));
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const submit = async (e) => {
+    e.preventDefault();
+    setError(null);
+    if (!nama.trim()) return setError('Nama kategori wajib diisi.');
+    setBusy(true);
+    try {
+      await api.put(`/kategori/${initial.id}`, { nama: nama.trim(), lacak_stok: lacakStok ? 1 : 0 });
+      onSaved();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="flex gap-2" style={{ alignItems: 'flex-end' }}>
+      <div style={{ flex: 1 }}>
+        <Field label="Nama kategori" required>
+          <Input type="text" value={nama} placeholder="mis. Pulsa & Saldo" onChange={(e) => setNama(e.target.value)} />
+        </Field>
+        <label className="mt-3 flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={lacakStok} onChange={(e) => setLacakStok(e.target.checked)} />
+          Lacak stok (nonaktif untuk kategori saldo/digital seperti pulsa, token)
+        </label>
+        {error && <p className="field-error" role="alert">{error}</p>}
+      </div>
+      <div className="flex gap-2">
+        <Button variant="secondary" type="button" onClick={onCancel}>Batal</Button>
+        <Button type="submit" loading={busy}>Simpan</Button>
+      </div>
     </form>
   );
 }
