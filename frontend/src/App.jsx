@@ -1,6 +1,8 @@
+import { useEffect } from 'react';
 import { Routes, Route } from 'react-router-dom';
 import { AppShell } from './components/layout/AppShell';
 import { RequireAuth, RequirePermission, AdminOnly } from './components/layout/Guard';
+import { initOfflineSystem } from './lib/offline-init.js';
 import LoginPage from './pages/LoginPage';
 import DashboardPage from './pages/DashboardPage';
 import TransaksiPage from './pages/TransaksiPage';
@@ -28,6 +30,11 @@ function NotFound() {
 }
 
 export default function App() {
+  // Inisialisasi offline system (hanya di mobile)
+  useEffect(() => {
+    initOfflineSystem();
+  }, []);
+
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />

@@ -1,0 +1,19 @@
+{
+  "name": "konter-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Iirkop Cell - POS & Buku Kas Digital (Mobile)",
+  "scripts": {
+    "sync": "bash sync.sh",
+    "android": "npx cap open android",
+    "build:android": "cd android && ./gradlew assembleRelease"
+  },
+  "dependencies": {
+    "@capacitor/android": "^6.0.0",
+    "@capacitor/cli": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
+    "@capacitor-community/sqlite": "^6.0.0",
+    "@capacitor/network": "^6.0.0",
+    "@capacitor/local-notifications": "^6.0.0"
+  }
+}

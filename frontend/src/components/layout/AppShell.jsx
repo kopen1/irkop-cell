@@ -6,6 +6,7 @@ import { useSiteName } from '../../hooks/useSiteName';
 import { Sidebar } from './Sidebar';
 import { Topbar } from './Topbar';
 import { BottomNav, MobileDrawer } from './BottomNav';
+import { SyncStatus } from '../ui/SyncStatus';
 
 export function AppShell() {
   const { ready } = useAuth();
@@ -29,6 +30,7 @@ export function AppShell() {
       </div>
       <BottomNav />
       <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+      <SyncStatus />
     </div>
   );
 }

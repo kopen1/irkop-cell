@@ -10,6 +10,7 @@ token.md
 token.md.bak
 *.pem
 *.key
+*.keystore
 
 # Dependencies & build artifacts
 node_modules/
