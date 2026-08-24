@@ -10,7 +10,10 @@
 //    retry-safe (POST transaksi, POST pengeluaran, dll).
 // =====================================================================
 
-const BASE = import.meta.env.VITE_API_BASE || '';
+const _envBase = import.meta.env.VITE_API_BASE || '';
+const isCapacitor = typeof window !== 'undefined' && window.Capacitor;
+const BACKEND_ORIGIN = 'https://konter.irkop.workers.dev';
+const BASE = isCapacitor && _envBase.startsWith('/') ? BACKEND_ORIGIN + _envBase : _envBase;
 const TOKEN_KEY = 'irkop_cell_token';
 
 export class ApiError extends Error {

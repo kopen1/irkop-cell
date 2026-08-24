@@ -9,17 +9,17 @@ export class ApiError extends Error {
 
 export const err = (status, code, message) => new ApiError(status, code, message);
 
-export function json(data, status = 200) {
+export function json(data, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(data), {
     status,
-    headers: { 'content-type': 'application/json; charset=utf-8' },
+    headers: { 'content-type': 'application/json; charset=utf-8', ...extraHeaders },
   });
 }
 
-export function handleError(e) {
+export function handleError(e, extraHeaders = {}) {
   if (e instanceof ApiError) {
-    return json({ error: { code: e.code, message: e.message } }, e.status);
+    return json({ error: { code: e.code, message: e.message } }, e.status, extraHeaders);
   }
   console.error('UNHANDLED ERROR', e);
-  return json({ error: { code: 'internal', message: 'Internal server error' } }, 500);
+  return json({ error: { code: 'internal', message: 'Internal server error' } }, 500, extraHeaders);
 }

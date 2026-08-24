@@ -254,36 +254,59 @@ async function dispatch(db, request, ctx, route) {
   return json({ error: { code: 'not_found', message: 'Endpoint tidak ditemukan' } }, 404);
 }
 
+function corsHeaders(origin) {
+  const allowed = [
+    'https://konter.irkop.eu.org',
+    'https://irkop-cell.pages.dev',
+    'https://localhost',
+    'capacitor://localhost',
+  ];
+  const o = origin || '';
+  const allow = allowed.some(a => o.startsWith(a)) ? o : allowed[0];
+  return {
+    'Access-Control-Allow-Origin': allow,
+    'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization, Idempotency-Key',
+    'Access-Control-Max-Age': '86400',
+  };
+}
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    const origin = request.headers.get('Origin') || '';
+
+    if (method(request) === 'OPTIONS') {
+      return new Response(null, { status: 204, headers: corsHeaders(origin) });
+    }
+
     const db = createDb(env);
     const ctx = buildCtx(db, env);
     try {
       if (method(request) === 'POST' && url.pathname === '/api/auth/login') {
         const result = await authRoutes.login(db, request, env);
-        return json(result);
+        return json(result, 200, corsHeaders(origin));
       }
 
       if (method(request) === 'POST' && url.pathname === '/api/auth/bootstrap') {
         const result = await authRoutes.bootstrapFirstAdmin(db, request, env);
-        return json(result);
+        return json(result, 200, corsHeaders(origin));
       }
 
       const route = match(url.pathname);
       if (!route) {
-        return json({ error: { code: 'not_found', message: 'Route tidak ditemukan' } }, 404);
+        return json({ error: { code: 'not_found', message: 'Route tidak ditemukan' } }, 404, corsHeaders(origin));
       }
 
       if (route.name === 'notifhook') {
-        return json(await dispatch(db, request, ctx, route));
+        return json(await dispatch(db, request, ctx, route), 200, corsHeaders(origin));
       }
 
       ctx.auth = await authenticate(db, request, env);
       const result = await dispatch(db, request, ctx, route);
-      return result instanceof Response ? result : json(result);
+      return result instanceof Response ? result : json(result, 200, corsHeaders(origin));
     } catch (e) {
-      return handleError(e);
+      return handleError(e, corsHeaders(origin));
     }
   },
 };
