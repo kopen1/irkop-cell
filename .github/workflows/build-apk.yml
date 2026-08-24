@@ -30,16 +30,19 @@ jobs:
         run: |
           cd frontend
           npm ci
+
       - name: Build Frontend
         env:
           VITE_API_BASE: /api
         run: |
           cd frontend
           npm run build
+
       - name: Setup Mobile Dependencies
         run: |
           cd mobile
           npm install
+
       - name: Init Capacitor (if needed)
         run: |
           cd mobile
@@ -47,15 +50,18 @@ jobs:
             npx cap init "Iirkop Cell" "id.co.irkop.cell" --web-dir "../frontend/dist"
             npx cap add android
           fi
+
       - name: Sync Capacitor
         run: |
           cd mobile
           npx cap sync android
+
       - name: Decode Keystore
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
           echo "$KEYSTORE_BASE64" | base64 -d > mobile/konter-release.keystore
+
       - name: Configure Signing
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -63,14 +69,9 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           cd mobile/android
-          python3 - << 'PYEOF'
-          import re
-
-          with open("app/build.gradle", "r") as f:
-              content = f.read()
-
-          # Sisipkan signingConfigs sebelum buildTypes { yang sudah ada
-          signing_block = '''
+          cat >> app/build.gradle << 'GRADLE'
+          
+          android {
               signingConfigs {
                   release {
                       storeFile file("../konter-release.keystore")
@@ -79,28 +80,14 @@ jobs:
                       keyPassword System.getenv("KEY_PASSWORD") ?: ""
                   }
               }
-          '''
+              buildTypes {
+                  release {
+                      signingConfig signingConfigs.release
+                  }
+              }
+          }
+          GRADLE
 
-          if "signingConfigs {" in content:
-              print("signingConfigs sudah ada di file, skip penyisipan blok.")
-          else:
-              content = content.replace("buildTypes {", signing_block + "    buildTypes {", 1)
-
-          # Tambahkan signingConfig ke buildType release yang sudah ada
-          if "signingConfig signingConfigs.release" not in content:
-              content = re.sub(
-                  r"(release\s*\{)",
-                  r"\1\n            signingConfig signingConfigs.release",
-                  content,
-                  count=1
-              )
-
-          with open("app/build.gradle", "w") as f:
-              f.write(content)
-          PYEOF
-
-          echo "=== Hasil app/build.gradle ==="
-          cat app/build.gradle
       - name: Build Release APK
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -109,13 +96,13 @@ jobs:
         run: |
           cd mobile/android
           ./gradlew assembleRelease
+
       - name: Check Build Output
         if: always()
         run: |
           echo "=== Build output ==="
           find mobile/android -name "*.apk" -type f 2>/dev/null || echo "No APK found"
-          echo "=== Build directory ==="
-          ls -la mobile/android/app/build/outputs/apk/ 2>/dev/null || echo "No build output"
+
       - name: Upload APK (Artifact)
         uses: actions/upload-artifact@v4
         with:
