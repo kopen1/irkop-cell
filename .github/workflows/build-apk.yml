@@ -60,7 +60,7 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > mobile/konter-release.keystore
+          echo "$KEYSTORE_BASE64" | base64 -d > mobile/android/konter-release.keystore
 
       - name: Configure Signing
         env:
@@ -74,7 +74,7 @@ jobs:
           android {
               signingConfigs {
                   release {
-                      storeFile file("../konter-release.keystore")
+                      storeFile file("konter-release.keystore")
                       storePassword System.getenv("KEYSTORE_PASSWORD") ?: ""
                       keyAlias System.getenv("KEY_ALIAS") ?: ""
                       keyPassword System.getenv("KEY_PASSWORD") ?: ""
@@ -112,4 +112,4 @@ jobs:
 
       - name: Cleanup Keystore
         if: always()
-        run: rm -f mobile/konter-release.keystore
+        run: rm -f mobile/android/konter-release.keystore
