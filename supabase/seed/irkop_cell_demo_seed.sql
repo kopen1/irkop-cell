@@ -6,7 +6,7 @@ for i in 1..30 loop insert into public.irkop_cell_products(business_id,name,cate
 for i in 1..20 loop insert into public.irkop_cell_customers(business_id,name,phone) values(b,'Pelanggan Demo '||i,'0812'||lpad((1000000+i)::text,7,'0')); end loop;
 for i in 1..150 loop
 select id into c from public.irkop_cell_customers where business_id=b order by random() limit 1;
-insert into public.irkop_cell_transactions(business_id,outlet_id,customer_id,transaction_no,payment_method,status,total,transaction_at) values(b,o,c,'DEMO-'||i,methods[1+floor(random()*4)::int],'completed',(50000+random()*950000)::numeric(14,2),now()-((150-i)||' hours')::interval) returning id,total into t;
+insert into public.irkop_cell_transactions(business_id,outlet_id,customer_id,transaction_no,payment_method,status,total,transaction_at) values(b,o,c,'DEMO-'||i,methods[1+floor(random()*4)::int],'completed',(50000+random()*950000)::numeric(14,2),now()-((150-i)||' hours')::interval) returning id into t;
 select id into p from public.irkop_cell_products where business_id=b order by random() limit 1;
 insert into public.irkop_cell_transaction_items(transaction_id,product_id,product_name,qty,unit_price,subtotal) select t,id,name,1,sell_price,sell_price from public.irkop_cell_products where id=p;
 insert into public.irkop_cell_cash_mutations(business_id,outlet_id,transaction_id,mutation_type,amount,description) select b,o,t,'in',total,'Random demo transaction' from public.irkop_cell_transactions where id=t;
