@@ -34,17 +34,13 @@ export async function createService(db, request, ctx) {
   if (!namaDevice) throw err(400, 'missing_field', 'nama_device wajib diisi');
   if (!deskripsi) throw err(400, 'missing_field', 'deskripsi_kerusakan wajib diisi');
   const tanggalMasuk = asDate(body.tanggal_masuk, { field: 'tanggal_masuk' }) || wibDateToday();
-  const hargaModal = body.harga_modal === undefined || body.harga_modal === null || body.harga_modal === ''
-    ? null
-    : asInt(body.harga_modal, { field: 'harga_modal', min: 0 });
+  const hargaModal = body.harga_modal === undefined || body.harga_modal === null || body.harga_modal === '' ? null : asInt(body.harga_modal, { field: 'harga_modal', min: 0 });
   const res = await db.exec(
-    `INSERT INTO service_hp
-       (pelanggan_id, nama_device, deskripsi_kerusakan, status, estimasi_biaya, harga_modal, teknisi_id, catatan, foto_masuk, tanggal_masuk)
+    `INSERT INTO service_hp (pelanggan_id, nama_device, deskripsi_kerusakan, status, estimasi_biaya, harga_modal, teknisi_id, catatan, foto_masuk, tanggal_masuk)
      VALUES (?, ?, ?, 'masuk', ?, ?, ?, ?, ?, ?)`,
     pelangganId, namaDevice, deskripsi,
     body.estimasi_biaya == null || body.estimasi_biaya === '' ? null : asInt(body.estimasi_biaya, { field: 'estimasi_biaya', min: 0 }),
-    hargaModal,
-    body.teknisi_id || null, body.catatan || null, body.foto_masuk || null, tanggalMasuk
+    hargaModal, body.teknisi_id || null, body.catatan || null, body.foto_masuk || null, tanggalMasuk
   );
   await writeAudit(db, { userId: user.id, aksi: 'create', tabel: 'service_hp', recordId: res.lastRowId, dataAfter: { nama_device: namaDevice, pelanggan_id: pelangganId, tanggal_masuk: tanggalMasuk } });
   return { id: res.lastRowId, nama_device: namaDevice, status: 'masuk' };
@@ -56,7 +52,6 @@ export async function updateService(db, request, ctx, idStr) {
   const body = await readBody(request);
   const old = await db.one('SELECT * FROM service_hp WHERE id = ? AND deleted_at IS NULL', id);
   if (!old) throw err(404, 'not_found', 'Service HP tidak ditemukan');
-
   const sets = [];
   const vals = [];
   if (body.status !== undefined) {
@@ -80,4 +75,17 @@ export async function updateService(db, request, ctx, idStr) {
   const after = await db.one('SELECT * FROM service_hp WHERE id = ?', id);
   await writeAudit(db, { userId: user.id, aksi: 'update', tabel: 'service_hp', recordId: id, dataBefore: old, dataAfter: after });
   return { id, message: 'Service HP diperbarui', data: after };
+}
+
+export async function deleteService(db, request, ctx, idStr) {
+  const { user } = ctx.auth;
+  const id = asInt(idStr, { required: true, field: 'id' });
+  const old = await db.one('SELECT * FROM service_hp WHERE id = ? AND deleted_at IS NULL', id);
+  if (!old) throw err(404, 'not_found', 'Service HP tidak ditemukan');
+  const linked = await db.one('SELECT id FROM transaksi_item WHERE service_hp_id = ? LIMIT 1', id);
+  if (linked) throw err(409, 'linked_transaction', 'Service HP sudah masuk transaksi dan tidak dapat dihapus');
+  const deletedAt = nowIso();
+  await db.exec('UPDATE service_hp SET deleted_at = ? WHERE id = ?', deletedAt, id);
+  await writeAudit(db, { userId: user.id, aksi: 'delete', tabel: 'service_hp', recordId: id, dataBefore: old, dataAfter: { ...old, deleted_at: deletedAt } });
+  return { id, message: 'Service HP dihapus' };
 }
