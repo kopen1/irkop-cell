@@ -590,33 +590,24 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
             </Field>
             <Field label={`Pelanggan${metodeBayar === 'bon' ? ' (Wajib untuk Bon)' : ''}`}>
               <div className="input-group">
-                <input
-                  className="input"
-                  type="text"
-                  list="pelanggan-list-transaksi"
-                  value={pelangganInput}
-                  onChange={(e) => handlePelangganInput(e.target.value)}
-                  placeholder="Ketik nama atau pilih..."
-                  style={{ flex: 1 }}
-                  required={metodeBayar === 'bon'}
-                />
+                <Select value={pelangganId} onChange={(e) => {
+                  const val = e.target.value;
+                  setPelangganId(val);
+                  const found = pelangganList.find((p) => String(p.id) === val);
+                  setPelangganInput(found ? found.nama : (val ? '' : 'Umum / Tanpa Pelanggan'));
+                }} style={{ flex: 1 }} required={metodeBayar === 'bon'}>
+                  <option value="">Umum / Tanpa Pelanggan</option>
+                  {pelangganList.map((p) => (
+                    <option key={p.id} value={p.id}>{p.nama}{p.telepon ? ` (${p.telepon})` : ''}</option>
+                  ))}
+                </Select>
                 <Button type="button" variant="secondary" onClick={() => {
-                  setNewPelangganNama(pelangganInput === 'Umum / Tanpa Pelanggan' ? '' : pelangganInput);
+                  setNewPelangganNama('');
                   setShowPelangganForm(true);
-                }} style={{ flexShrink: 0 }}>
+                }} style={{ flexShrink: 0 }} title="Tambah pelanggan baru">
                   <Icon name="plus" size={14} />
                 </Button>
               </div>
-              <datalist id="pelanggan-list-transaksi">
-                {pelangganOptions.map((p) => (
-                  <option key={p.id} value={p.nama} />
-                ))}
-              </datalist>
-              {metodeBayar === 'bon' && !pelangganId && pelangganInput && pelangganInput !== 'Umum / Tanpa Pelanggan' && (
-                <div style={{ marginTop: 6, padding: '8px 10px', background: 'var(--warning-soft)', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', color: 'var(--warning)' }}>
-                  Pelanggan "{pelangganInput}" belum terdaftar. Klik <b>+</b> untuk buat baru, atau pilih dari daftar.
-                </div>
-              )}
               {showPelangganForm && (
                 <div style={{ marginTop: 8, padding: 10, background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
                   <div className="text-xs font-bold mb-2">Tambah Pelanggan Baru</div>
@@ -711,27 +702,20 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
                   }}
                 >
                   {keranjang.map((it, idx) => (
-                    <div key={idx} className="cart-item">
-                      <div className="cart-item-nameline">
-                        <span className="cart-item-nama">{it.nama}</span>
-                      </div>
-                      <div className="cart-item-side">
-                        <div className="cart-item-stepper">
-                          <button type="button" className="btn"
-                            onClick={() => updateItem(idx, { qty: Math.max(1, Number(it.qty) - 1) })}>
-                            -
-                          </button>
-                          <span className="cart-item-qty">{it.qty}</span>
-                          <button type="button" className="btn"
-                            onClick={() => updateItem(idx, { qty: Number(it.qty) + 1 })}>
-                            +
-                          </button>
-                        </div>
-                        <span className="cart-item-price">{formatRupiah((Number(it.harga) || 0) * it.qty)}</span>
-                        <button type="button" className="cart-item-trash"
-                          onClick={() => removeItem(idx)}>
+                    <div key={idx} className="cart-item" style={{ flexDirection: 'column', alignItems: 'stretch', gap: 4 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <span style={{ fontWeight: 600, fontSize: '0.9rem' }}>{it.nama}</span>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeItem(idx)} style={{ color: 'var(--text-muted)', padding: '2px 6px' }}>
                           <Icon name="trash" size={14} />
                         </button>
+                      </div>
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div className="cart-item-stepper">
+                          <button type="button" className="btn" onClick={() => updateItem(idx, { qty: Math.max(1, Number(it.qty) - 1) })}>-</button>
+                          <span className="cart-item-qty">{it.qty}</span>
+                          <button type="button" className="btn" onClick={() => updateItem(idx, { qty: Number(it.qty) + 1 })}>+</button>
+                        </div>
+                        <span className="num" style={{ fontWeight: 600, fontSize: '0.9rem' }}>{formatRupiah((Number(it.harga) || 0) * it.qty)}</span>
                       </div>
                     </div>
                   ))}
@@ -820,16 +804,15 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
             )}
 
             <div
-              className="flex justify-between items-center"
               style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}
             >
-              <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
                 <span className="text-sm text-secondary">Total</span>
-                <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalKeranjang)}</div>
+                <span className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalKeranjang)}</span>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
-                <Button type="submit" loading={busy}>Simpan Transaksi</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel} style={{ flex: 1 }}>Batal</Button>
+                <Button type="submit" loading={busy} style={{ flex: 1 }}>Simpan Transaksi</Button>
               </div>
             </div>
           </div>
@@ -1045,16 +1028,15 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
             </div>
 
             <div
-              className="flex justify-between items-center"
               style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}
             >
-              <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
                 <span className="text-sm text-secondary">Total</span>
-                <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalDigital)}</div>
+                <span className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalDigital)}</span>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
-                <Button type="submit" loading={busy}>Simpan Transaksi</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel} style={{ flex: 1 }}>Batal</Button>
+                <Button type="submit" loading={busy} style={{ flex: 1 }}>Simpan Transaksi</Button>
               </div>
             </div>
           </div>
@@ -1182,16 +1164,15 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
             </div>
 
             <div
-              className="flex justify-between items-center"
               style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}
             >
-              <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
                 <span className="text-sm text-secondary">Total</span>
-                <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalTarik)}</div>
+                <span className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalTarik)}</span>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
-                <Button type="submit" loading={busy}>Simpan Transaksi</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel} style={{ flex: 1 }}>Batal</Button>
+                <Button type="submit" loading={busy} style={{ flex: 1 }}>Simpan Transaksi</Button>
               </div>
             </div>
           </div>
@@ -1324,16 +1305,15 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
             </div>
 
             <div
-              className="flex justify-between items-center"
               style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}
             >
-              <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 'var(--space-3)' }}>
                 <span className="text-sm text-secondary">Total</span>
-                <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(biayaServiceNum)}</div>
+                <span className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(biayaServiceNum)}</span>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
-                <Button type="submit" loading={busy}>Simpan Transaksi</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel} style={{ flex: 1 }}>Batal</Button>
+                <Button type="submit" loading={busy} style={{ flex: 1 }}>Simpan Transaksi</Button>
               </div>
             </div>
           </div>
