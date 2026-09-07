@@ -99,3 +99,14 @@ export async function upsertNotifhookSource(db, request, ctx) {
   await writeAudit(db, { userId: admin.id, aksi: 'update', tabel: 'notifhook_source', recordId: sourceName, dataAfter: { source_name: sourceName, matcher_type: matcherType, matcher_value: matcherValue, enabled } });
   return { source_name: sourceName, enabled, matcher_type: matcherType, matcher_value: matcherValue };
 }
+
+export async function deleteNotifhookSource(db, request, ctx, sourceName) {
+  const admin = requireAdmin(ctx);
+  const name = String(sourceName || '').trim();
+  if (!name) throw err(400, 'missing_field', 'source_name wajib diisi');
+  const existing = await db.one('SELECT id FROM notifhook_source WHERE source_name = ?', name);
+  if (!existing) throw err(404, 'not_found', 'Sumber tidak ditemukan');
+  await db.exec('DELETE FROM notifhook_source WHERE source_name = ?', name);
+  await writeAudit(db, { userId: admin.id, aksi: 'delete', tabel: 'notifhook_source', recordId: name });
+  return { message: 'Sumber dihapus' };
+}

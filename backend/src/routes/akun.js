@@ -68,3 +68,14 @@ export async function deleteAkun(db, request, ctx, idStr) {
   await writeAudit(db, { userId: user.id, aksi: 'delete', tabel: 'akun_master', recordId: id, dataBefore: old, dataAfter: { ...old, aktif: 0 } });
   return { id, message: 'Akun dinonaktifkan' };
 }
+
+export async function hardDeleteAkun(db, request, ctx, idStr) {
+  const { user } = ctx.auth;
+  if (user.role !== 'admin') throw err(403, 'forbidden', 'Admin only');
+  const id = asInt(idStr, { required: true, field: 'id' });
+  const old = await db.one('SELECT * FROM akun_master WHERE id = ?', id);
+  if (!old) throw err(404, 'not_found', 'Akun tidak ditemukan');
+  await db.exec('DELETE FROM akun_master WHERE id = ?', id);
+  await writeAudit(db, { userId: user.id, aksi: 'hard_delete', tabel: 'akun_master', recordId: id, dataBefore: old });
+  return { id, message: 'Akun dihapus permanen' };
+}

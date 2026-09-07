@@ -134,6 +134,7 @@ function NotifHookTab() {
   const [cfg, setCfg] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [showKey, setShowKey] = useState(false);
   const [formSource, setFormSource] = useState({ source_name: '', matcher_type: 'package_name', matcher_value: '', enabled: 1 });
 
   const load = async () => {
@@ -185,8 +186,22 @@ function NotifHookTab() {
     setBusy(true);
     try {
       await api.post('/settings/notifhook-source', formSource);
-      toast.success('Sumber notifikasi ditambahkan.');
+      toast.success('Sumber notifikasi disimpan.');
       setFormSource({ source_name: '', matcher_type: 'package_name', matcher_value: '', enabled: 1 });
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deleteSource = async (sourceName) => {
+    if (!window.confirm(`Hapus sumber "${sourceName}"?`)) return;
+    setBusy(true);
+    try {
+      await api.del(`/settings/notifhook-source/${encodeURIComponent(sourceName)}`);
+      toast.success('Sumber dihapus.');
       load();
     } catch (err) {
       toast.error(err.message);
@@ -208,11 +223,19 @@ function NotifHookTab() {
           <Field label="Endpoint Worker">
             <Input readOnly value={nh.endpoint || 'belum dikonfigurasi'} />
           </Field>
-          <Field label="API key" hint="Jangan dibagikan. Generate untuk membuat key baru (webhook lama tidak berlaku).">
+          <Field label="API key" hint="Klik mata untuk melihat. Generate untuk buat key baru (webhook lama tidak berlaku).">
             <div className="input-group">
-              <Input readOnly value={nh.api_key ? '••••••••••••' : 'belum ada'} />
-              <Button variant="secondary" onClick={regenerate} loading={busy}>Generate Ulang</Button>
+              <Input readOnly value={nh.api_key ? (showKey ? nh.api_key : '••••••••••••••••••••') : 'belum ada'} style={{ flex: 1 }} />
+              <button type="button" className="btn btn-ghost btn-icon" onClick={() => setShowKey((v) => !v)} aria-label={showKey ? 'Sembunyikan key' : 'Tampilkan key'}>
+                <Icon name={showKey ? 'eyeOff' : 'eye'} size={18} />
+              </button>
+              <Button variant="secondary" onClick={regenerate} loading={busy}>Generate</Button>
             </div>
+            {showKey && nh.api_key && (
+              <div style={{ marginTop: 6, padding: '8px 10px', background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', wordBreak: 'break-all', fontFamily: 'var(--font-mono)', color: 'var(--text-secondary)' }}>
+                {nh.api_key}
+              </div>
+            )}
           </Field>
           <div className="flex items-center gap-2">
             <Badge tone={nh.health?.terakhir_menerima_notif ? 'success' : 'warning'}>
@@ -232,6 +255,7 @@ function NotifHookTab() {
                   <th>Type</th>
                   <th>Value</th>
                   <th>Status</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -241,6 +265,16 @@ function NotifHookTab() {
                     <td><code className="text-sm">{s.matcher_type}</code></td>
                     <td><code className="text-sm">{s.matcher_value}</code></td>
                     <td>{s.enabled ? <Badge tone="success">Aktif</Badge> : <Badge tone="neutral">Nonaktif</Badge>}</td>
+                    <td>
+                      <div className="row-actions">
+                        <Button variant="ghost" size="sm" onClick={() => { setFormSource({ source_name: s.source_name, matcher_type: s.matcher_type, matcher_value: s.matcher_value, enabled: s.enabled }); }}>
+                          <Icon name="edit" size={15} />
+                        </Button>
+                        <Button variant="ghost" size="sm" onClick={() => deleteSource(s.source_name)}>
+                          <Icon name="trash" size={15} />
+                        </Button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -263,7 +297,7 @@ function NotifHookTab() {
             <Input value={formSource.matcher_value} placeholder={formSource.matcher_type === 'package_name' ? 'com.dana…' : 'rule…'} onChange={(e) => setFormSource((f) => ({ ...f, matcher_value: e.target.value }))} />
           </Field>
           <div style={{ alignSelf: 'flex-end' }}>
-            <Button onClick={addSource} loading={busy}>Tambah Sumber</Button>
+            <Button onClick={addSource} loading={busy}>{formSource.source_name && sources.find((s) => s.source_name === formSource.source_name) ? 'Update' : 'Tambah'}</Button>
           </div>
         </div>
       </Card>
@@ -531,6 +565,17 @@ function AkunTab() {
     }
   };
 
+  const hardDeleteAkun = async (akun) => {
+    if (!window.confirm(`Hapus permanen "${akun.nama_akun}"? Tindakan ini tidak dapat dibatalkan.`)) return;
+    try {
+      await api.del(`/akun/${akun.id}/hard`);
+      toast.success(`${akun.nama_akun} dihapus permanen.`);
+      load();
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   return (
     <Card title="Master Akun Uang" subtitle="Daftar akun seed bukan daftar permanen; Admin bebas menambah/mengelola (PRD 12.7).">
       <div className="mb-4">
@@ -560,6 +605,9 @@ function AkunTab() {
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setToggleTarget(r)}>
                     {r.aktif ? 'Nonaktifkan' : 'Aktifkan'}
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => hardDeleteAkun(r)} style={{ color: 'var(--danger)' }}>
+                    <Icon name="trash" size={15} />
                   </Button>
                 </div>
               ),

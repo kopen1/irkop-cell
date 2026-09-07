@@ -90,7 +90,7 @@ export default function TransaksiPage() {
   const detailParam = params.get('detail');
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [createOpen, setCreateOpen] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -98,15 +98,15 @@ export default function TransaksiPage() {
 
   const openCreate = () => {
     setEditItem(null);
-    setCreateOpen(true);
+    setShowForm(true);
   };
-  const closeModal = () => {
-    setCreateOpen(false);
+  const closeForm = () => {
+    setShowForm(false);
     setEditItem(null);
   };
   const handleSaved = () => {
     const wasEdit = Boolean(editItem);
-    closeModal();
+    closeForm();
     toast.success(wasEdit ? 'Transaksi diperbarui.' : 'Transaksi berhasil dicatat.');
     load().catch(() => {});
   };
@@ -305,7 +305,7 @@ export default function TransaksiPage() {
                   api.get(`/transaksi/${encodeURIComponent(detailData.id)}`).then((r) => {
                     const d = r.transaksi || r;
                     setEditItem({ ...d, items: d.items || [], akun_penerima: d.pembayaran?.[0]?.akun_id || '' });
-                    setCreateOpen(true);
+                    setShowForm(true);
                   });
                 }}
               >
@@ -318,20 +318,23 @@ export default function TransaksiPage() {
         {detailLoading ? <Loader /> : detailData?._error ? <ErrorState error={{ message: detailData._error }} /> : <TransaksiDetail transaksi={detailData} onConfirm={() => load().catch(() => {})} onBayarKurang={(tx) => { setBayarKurangTarget(tx); closeDetail(); }} />}
       </Modal>
 
-      {/* Create / Edit */}
-      <Modal
-        open={createOpen}
-        onClose={closeModal}
-        title={editItem ? 'Edit Transaksi' : 'Transaksi Baru'}
-        size="lg"
-      >
-        <TransaksiForm
-          key={editItem ? String(editItem.id) : 'baru'}
-          initial={editItem || undefined}
-          onCancel={closeModal}
-          onSaved={handleSaved}
-        />
-      </Modal>
+      {/* Create / Edit — Inline */}
+      {showForm && (
+        <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
+          <div className="flex items-center justify-between mb-3">
+            <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>{editItem ? 'Edit Transaksi' : 'Transaksi Baru'}</h3>
+            <Button variant="ghost" size="sm" onClick={closeForm}>
+              <Icon name="close" size={16} />
+            </Button>
+          </div>
+          <TransaksiForm
+            key={editItem ? String(editItem.id) : 'baru'}
+            initial={editItem || undefined}
+            onCancel={closeForm}
+            onSaved={handleSaved}
+          />
+        </div>
+      )}
 
       {/* Delete confirm (soft-delete + reversal di sisi backend) */}
       <ConfirmDialog

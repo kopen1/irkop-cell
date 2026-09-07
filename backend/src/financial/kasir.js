@@ -229,7 +229,7 @@ export async function sessionStatus(db, { date = wibDateToday(), kasirSesiId = n
     accountRows[m.nama_akun].mutasi = Number(m.total);
   }
   const saldo = Object.values(accountRows)
-    .filter((r) => r.nama_akun !== 'Saldo Akun')
+    .filter((r) => r.nama_akun !== 'Saldo Akun' && r.nama_akun !== 'Total Saldo')
     .map((r) => ({
       nama_akun: r.nama_akun,
       saldo_opening: r.saldo_opening,
