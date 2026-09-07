@@ -17,7 +17,7 @@ export async function listUsers(db, request, ctx) {
     SELECT u.id, u.nama, u.username, u.role, u.aktif, u.last_login_at, u.created_at,
            (SELECT GROUP_CONCAT(halaman, ',') FROM user_permissions p WHERE p.user_id = u.id) AS permissions
     FROM users u ORDER BY u.id`);
-  return rows.map((r) => ({
+  return { items: rows.map((r) => ({
     id: r.id,
     nama: r.nama,
     username: r.username,
@@ -26,7 +26,7 @@ export async function listUsers(db, request, ctx) {
     last_login_at: r.last_login_at,
     created_at: r.created_at,
     permissions: r.permissions ? r.permissions.split(',') : [],
-  }));
+  })) };
 }
 
 export async function createUser(db, request, ctx) {

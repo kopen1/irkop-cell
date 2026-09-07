@@ -100,7 +100,7 @@ export default function PelangganPage() {
     }
     setMergeBusy(true);
     try {
-      await api.post('/pelanggan/merge', { dari_id: Number(mergeSel.a), ke_id: Number(mergeSel.b) });
+      await api.post('/pelanggan/merge', { id_gabung: Number(mergeSel.a), id_utama: Number(mergeSel.b) });
       toast.success('Pelanggan digabung (history tetap tersimpan).');
       setMergeOpen(false);
       setMergeSel({ a: '', b: '' });
@@ -413,25 +413,28 @@ export default function PelangganPage() {
       <Modal open={mergeOpen} onClose={() => setMergeOpen(false)} title="Gabungkan Pelanggan" footer={
         <>
           <Button variant="secondary" onClick={() => setMergeOpen(false)}>Batal</Button>
-          <Button onClick={doMerge} loading={mergeBusy}>Gabungkan</Button>
+          <Button onClick={doMerge} loading={mergeBusy} disabled={!mergeSel.a || !mergeSel.b || mergeSel.a === mergeSel.b}>Gabungkan</Button>
         </>
       }>
         <p className="text-sm text-secondary mb-4">
-          Data dari pelanggan pertama akan diarahkan ke pelanggan kedua. Riwayat gabungan (alias) tetap tersimpan, tidak menimpa data lama (PRD 5.8).
+          Data dari pelanggan <b>sumber</b> akan diarahkan ke pelanggan <b>tujuan</b>. Riwayat gabungan (alias) tetap tersimpan.
         </p>
         <div className="flex flex-col gap-3">
-          <Field label="Pelanggan sumber (digabungkan ke yang lain)">
+          <Field label="Pelanggan Sumber (akan dihapus, digabung ke tujuan)" required>
             <Select value={mergeSel.a} onChange={(e) => setMergeSel((s) => ({ ...s, a: e.target.value }))}>
-              <option value="">Pilih pelanggan…</option>
-              {rows.map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
+              <option value="">Pilih sumber…</option>
+              {rows.filter((p) => p.id !== mergeSel.b).map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
             </Select>
           </Field>
-          <Field label="Pelanggan tujuan (data ini dipertahankan)">
+          <Field label="Pelanggan Tujuan (data ini dipertahankan)" required>
             <Select value={mergeSel.b} onChange={(e) => setMergeSel((s) => ({ ...s, b: e.target.value }))}>
-              <option value="">Pilih pelanggan…</option>
-              {rows.map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
+              <option value="">Pilih tujuan…</option>
+              {rows.filter((p) => p.id !== mergeSel.a).map((p) => <option key={p.id} value={p.id}>{p.nama}</option>)}
             </Select>
           </Field>
+          {mergeSel.a && mergeSel.b && mergeSel.a === mergeSel.b && (
+            <p className="field-error">Sumber dan tujuan tidak boleh sama!</p>
+          )}
         </div>
       </Modal>
     </div>

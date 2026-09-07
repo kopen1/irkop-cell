@@ -150,6 +150,17 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
   const [metodeBayar, setMetodeBayar] = useState(initial?.metode_bayar || 'tunai');
   const [akunPenerima, setAkunPenerima] = useState(initial?.akun_penerima || '');
 
+  const [splitPayments, setSplitPayments] = useState(() => {
+    if (initial?.pembayaran?.length) {
+      return initial.pembayaran.map((p) => ({
+        metode: p.metode || 'tunai',
+        nominal: p.nominal || 0,
+        akun_id: p.akun_id || '',
+      }));
+    }
+    return [{ metode: 'tunai', nominal: 0, akun_id: '' }];
+  });
+
   const [keranjang, setKeranjang] = useState(() =>
     (initial?.items || []).map((i) => ({
       produk_id: i.produk_id ?? '',
@@ -233,6 +244,23 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     } finally {
       setBusyPelanggan(false);
     }
+  };
+
+  const isSplit = metodeBayar === 'cash_tunai';
+  const totalSplit = splitPayments.reduce((s, p) => s + (Number(p.nominal) || 0), 0);
+  const totalTransaksi = jenis === 'penjualan' ? totalKeranjang : totalDigital || totalTarik || biayaServiceNum || 0;
+  const sisaSplit = totalTransaksi - totalSplit;
+
+  const addSplitPayment = () => {
+    setSplitPayments((prev) => [...prev, { metode: 'tunai', nominal: 0, akun_id: '' }]);
+  };
+
+  const updateSplitPayment = (idx, field, value) => {
+    setSplitPayments((prev) => prev.map((p, i) => (i === idx ? { ...p, [field]: value } : p)));
+  };
+
+  const removeSplitPayment = (idx) => {
+    setSplitPayments((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== idx) : prev));
   };
 
   const predikat = (item, q) => {
@@ -348,7 +376,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     if (subJenis === 'transfer') {
       return `Toko kirim saldo ${formatRupiah(hargaJualNum)} ke pelanggan via ${akunBankDigital || '-'}.`;
     }
-    return `Pelanggan bayar ${formatRupiah(hargaJualNum + adminFeeDigitalNum)}, toko beli ${formatRupiah(modalDigitalNum)} via ${akunBankDigital || '-'}.`;
+    return `Pelanggan bayar ${formatRupiah(hargaJualNum)}, toko beli ${formatRupiah(modalDigitalNum)} via ${akunBankDigital || '-'}.`;
   }, [subJenis, hargaJualNum, adminFeeDigitalNum, modalDigitalNum, akunBankDigital]);
 
   const tarikDesc = `Pelanggan kirim ${formatRupiah(nominalTarikNum)} ke ${akunBankTarik || '-'}, toko berikan tunai ${formatRupiah(tunaiDikeluarkan)}.`;
@@ -407,6 +435,26 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
       if (metodeBayar === 'transfer' && !akunPenerima) {
         setSubmitError('Transfer wajib memilih akun penerima!');
         return;
+      }
+      if (metodeBayar === 'cash_tunai') {
+        if (splitPayments.length < 2) {
+          setSubmitError('Split minimal 2 metode pembayaran!');
+          return;
+        }
+        const invalidSplit = splitPayments.find((p) => !p.nominal || p.nominal <= 0);
+        if (invalidSplit) {
+          setSubmitError('Semua nominal split harus diisi dan > 0!');
+          return;
+        }
+        const splitTransfer = splitPayments.find((p) => p.metode === 'transfer' && !p.akun_id);
+        if (splitTransfer) {
+          setSubmitError('Split transfer wajib memilih akun penerima!');
+          return;
+        }
+        if (sisaSplit !== 0) {
+          setSubmitError(`Total split (${formatRupiah(totalSplit)}) harus sama dengan total transaksi (${formatRupiah(totalTransaksi)})!`);
+          return;
+        }
       }
     } else if (jenis === 'produkdigital') {
       if (!selectedDigitalProduk) {
@@ -507,7 +555,17 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
       if (isEdit) {
         await api.put(`/transaksi/${initial.id}`, body);
       } else {
-        await api.post('/transaksi', body, newIdempotencyKey());
+        const res = await api.post('/transaksi', body, newIdempotencyKey());
+        if (metodeBayar === 'cash_tunai' && res?.id) {
+          for (const sp of splitPayments) {
+            await api.post('/payments', {
+              transaksi_id: res.id,
+              metode: sp.metode,
+              nominal: Number(sp.nominal),
+              akun_id: sp.akun_id || undefined,
+            });
+          }
+        }
       }
       onSaved();
     } catch (err) {
@@ -706,6 +764,60 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
               )}
             </div>
 
+            {isSplit && (
+              <div style={{ marginTop: 12 }}>
+                <div className="field-label" style={{ marginBottom: 6 }}>Split Payment</div>
+                {splitPayments.map((sp, idx) => (
+                  <div key={idx} className="flex gap-2 mb-2" style={{ alignItems: 'flex-end' }}>
+                    <Field label={`#${idx + 1}`} style={{ flex: 1 }}>
+                      <Select value={sp.metode} onChange={(e) => updateSplitPayment(idx, 'metode', e.target.value)}>
+                        <option value="tunai">Tunai</option>
+                        <option value="transfer">Transfer</option>
+                      </Select>
+                    </Field>
+                    <Field label="Nominal" style={{ flex: 1 }}>
+                      <Input
+                        type="text"
+                        inputMode="numeric"
+                        value={sp.nominal ? formatRupiahInput(String(sp.nominal)) : ''}
+                        onChange={(e) => updateSplitPayment(idx, 'nominal', Number(formatRupiahInput(e.target.value).replace(/\./g, '')) || 0)}
+                        placeholder="0"
+                      />
+                    </Field>
+                    {sp.metode === 'transfer' && (
+                      <Field label="Akun" style={{ flex: 1 }}>
+                        <Select value={sp.akun_id} onChange={(e) => updateSplitPayment(idx, 'akun_id', e.target.value)}>
+                          <option value="">Pilih...</option>
+                          {bankAkun.map((a) => (
+                            <option key={a.id} value={a.nama_akun}>{a.nama_akun}</option>
+                          ))}
+                        </Select>
+                      </Field>
+                    )}
+                    {splitPayments.length > 1 && (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeSplitPayment(idx)} style={{ color: 'var(--danger)', marginBottom: 2 }}>
+                        <Icon name="trash" size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                <Button type="button" variant="secondary" size="sm" onClick={addSplitPayment}>
+                  <Icon name="plus" size={14} /> Tambah Bayaran
+                </Button>
+                <div className="flex justify-between items-center mt-2" style={{ padding: '8px 0', fontSize: '0.85rem' }}>
+                  <span className="text-muted">Total Split</span>
+                  <span className="num" style={{ fontWeight: 700, color: sisaSplit === 0 ? 'var(--success)' : 'var(--danger)' }}>
+                    {formatRupiah(totalSplit)} / {formatRupiah(totalTransaksi)}
+                  </span>
+                </div>
+                {sisaSplit !== 0 && (
+                  <div style={{ fontSize: '0.78rem', color: 'var(--danger)', textAlign: 'right' }}>
+                    Sisa: {formatRupiah(Math.abs(sisaSplit))}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div
               className="flex justify-between items-center"
               style={{ borderTop: '1px solid var(--border)', paddingTop: 'var(--space-3)', marginTop: 'var(--space-3)' }}
@@ -896,7 +1008,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
                 </span>
               )}
             </div>
-
+            
             <div
               style={{
                 background: 'var(--info-soft)',

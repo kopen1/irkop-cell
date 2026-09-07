@@ -266,6 +266,10 @@ function KasbonForm({ onCancel, onSaved }) {
   const [form, setForm] = useState({ pelanggan_id: '', nominal: '', tanggal: todayWIB(), jatuh_tempo: '', catatan: '' });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [showPelangganForm, setShowPelangganForm] = useState(false);
+  const [newPelangganNama, setNewPelangganNama] = useState('');
+  const [newPelangganTelepon, setNewPelangganTelepon] = useState('');
+  const [busyPelanggan, setBusyPelanggan] = useState(false);
 
   useEffect(() => {
     api.get('/pelanggan', { limit: 200 }).then((r) => setPelanggan(r.items || [])).catch(() => {});
@@ -273,6 +277,23 @@ function KasbonForm({ onCancel, onSaved }) {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
   const setNominal = (k) => (e) => setForm((f) => ({ ...f, [k]: formatRupiahInput(e.target.value) }));
+
+  const handleCreatePelanggan = async () => {
+    if (!newPelangganNama.trim()) return;
+    setBusyPelanggan(true);
+    try {
+      const res = await api.post('/pelanggan', { nama: newPelangganNama.trim(), telepon: newPelangganTelepon.trim() || undefined });
+      setPelanggan((prev) => [...prev, { id: res.id, nama: newPelangganNama.trim() }]);
+      setForm((f) => ({ ...f, pelanggan_id: String(res.id) }));
+      setShowPelangganForm(false);
+      setNewPelangganNama('');
+      setNewPelangganTelepon('');
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusyPelanggan(false);
+    }
+  };
 
   const submit = async (e) => {
     e.preventDefault();
@@ -300,12 +321,30 @@ function KasbonForm({ onCancel, onSaved }) {
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <Field label="Pelanggan" required>
-        <Select value={form.pelanggan_id} onChange={set('pelanggan_id')}>
-          <option value="">Pilih pelanggan…</option>
-          {pelanggan.map((p) => (
-            <option key={p.id} value={p.id}>{p.nama}</option>
-          ))}
-        </Select>
+        <div className="input-group">
+          <Select value={form.pelanggan_id} onChange={set('pelanggan_id')} style={{ flex: 1 }}>
+            <option value="">Pilih pelanggan…</option>
+            {pelanggan.map((p) => (
+              <option key={p.id} value={p.id}>{p.nama}</option>
+            ))}
+          </Select>
+          <Button type="button" variant="secondary" onClick={() => setShowPelangganForm(true)} style={{ flexShrink: 0 }}>
+            <Icon name="plus" size={14} />
+          </Button>
+        </div>
+        {showPelangganForm && (
+          <div style={{ marginTop: 8, padding: 10, background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+            <div className="text-xs font-bold mb-2">Tambah Pelanggan Baru</div>
+            <div className="flex gap-2 mb-2">
+              <Input placeholder="Nama *" value={newPelangganNama} onChange={(e) => setNewPelangganNama(e.target.value)} style={{ flex: 1 }} />
+              <Input placeholder="Telepon" value={newPelangganTelepon} onChange={(e) => setNewPelangganTelepon(e.target.value)} style={{ flex: 1 }} />
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="secondary" size="sm" onClick={() => setShowPelangganForm(false)}>Batal</Button>
+              <Button type="button" size="sm" onClick={handleCreatePelanggan} loading={busyPelanggan} disabled={!newPelangganNama.trim()}>Simpan</Button>
+            </div>
+          </div>
+        )}
       </Field>
       <div className="grid-2">
         <Field label="Nominal (Rp)" required>
