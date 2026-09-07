@@ -14,6 +14,7 @@ import KasbonPage from './pages/KasbonPage';
 import PelangganPage from './pages/PelangganPage';
 import PengeluaranPage from './pages/PengeluaranPage';
 import GajiPage from './pages/GajiPage';
+import HargaServerPage from './pages/HargaServerPage';
 import PengaturanPage from './pages/PengaturanPage';
 import { Icon } from './components/ui/Icon';
 
@@ -56,6 +57,7 @@ export default function App() {
         <Route path="/pelanggan" element={<RequirePermission permission="pelanggan"><PelangganPage /></RequirePermission>} />
         <Route path="/pengeluaran" element={<RequirePermission permission="pengeluaran"><PengeluaranPage /></RequirePermission>} />
         <Route path="/gaji" element={<AdminOnly><GajiPage /></AdminOnly>} />
+        <Route path="/harga-server" element={<AdminOnly><HargaServerPage /></AdminOnly>} />
         <Route path="/pengaturan" element={<AdminOnly permission="pengaturan"><PengaturanPage /></AdminOnly>} />
         <Route path="*" element={<NotFound />} />
       </Route>

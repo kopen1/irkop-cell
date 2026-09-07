@@ -17,6 +17,7 @@ export const NAV = [
 
 export const NAV_SYSTEM = [
   { key: 'gaji_karyawan', label: 'Gaji Karyawan', icon: 'gaji', path: '/gaji', main: false, section: 'Sistem', adminOnly: true },
+  { key: 'harga_server', label: 'Harga Server', icon: 'wallet', path: '/harga-server', main: false, section: 'Sistem', adminOnly: true },
   { key: 'pengaturan', label: 'Pengaturan', icon: 'settings', path: '/pengaturan', main: false, section: 'Sistem', adminOnly: true },
 ];
 
