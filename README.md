@@ -1,4 +1,4 @@
-# IRKOP CELL — POS & Buku Kas Digital
+# Irkop Cell — POS & Buku Kas Digital
 
 Aplikasi Point of Sale (POS) dan buku kas digital untuk usaha retail kecil-menengah (warung, konter PPOB, service HP). Mengelola transaksi penjualan, kasbon, pengeluaran, service HP, payroll karyawan, serta laporan keuangan bulanan dan tahunan.
 

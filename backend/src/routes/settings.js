@@ -37,7 +37,16 @@ export async function updateSettings(db, request, ctx) {
   const body = await readBody(request);
   if (body && typeof body === 'object') {
       const allowed = new Set(['app_timezone', 'default_theme', 'nama_website', 'notifhook_auto_input', 'theme', 'struk_header', 'struk_alamat', 'struk_footer']);
-    for (const [k, v] of Object.entries(body)) {
+    // Terima format flat: { notifhook_auto_input: true }
+    // Atau format object: { notifhook: { auto_input: true } }
+    const flat = { ...body };
+    if (body.notifhook && typeof body.notifhook === 'object') {
+      if (body.notifhook.auto_input !== undefined) {
+        flat.notifhook_auto_input = body.notifhook.auto_input;
+      }
+      delete flat.notifhook;
+    }
+    for (const [k, v] of Object.entries(flat)) {
       if (!allowed.has(k)) throw err(400, 'invalid_setting', `Setting '${k}' tidak diizinkan`);
       const val = typeof v === 'boolean' ? (v ? '1' : '0') : String(v);
       await db.exec(

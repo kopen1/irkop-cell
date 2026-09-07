@@ -7,6 +7,7 @@ import { ApiError } from '../lib/api';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Field, Input } from '../components/ui/Field';
+import { Icon } from '../components/ui/Icon';
 
 export default function LoginPage() {
   const { user, login, ready } = useAuth();
@@ -16,6 +17,7 @@ export default function LoginPage() {
 
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [showPass, setShowPass] = useState(false);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
 
@@ -63,14 +65,26 @@ export default function LoginPage() {
               />
             </Field>
             <Field label="Password" required>
-              <Input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="current-password"
-                placeholder="••••••••"
-                required
-              />
+              <div className="input-group">
+                <Input
+                  type={showPass ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  autoComplete="current-password"
+                  placeholder="••••••••"
+                  required
+                  style={{ flex: 1 }}
+                />
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-icon"
+                  onClick={() => setShowPass((v) => !v)}
+                  tabIndex={-1}
+                  aria-label={showPass ? 'Sembunyikan password' : 'Tampilkan password'}
+                >
+                  <Icon name={showPass ? 'eyeOff' : 'eye'} size={18} />
+                </button>
+              </div>
             </Field>
             {error && (
               <p className="field-error" role="alert" style={{ fontSize: '0.88rem' }}>

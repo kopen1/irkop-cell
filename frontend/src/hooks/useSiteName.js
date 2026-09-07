@@ -6,7 +6,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 
-export const DEFAULT_SITE_NAME = 'Iirkop Cell';
+export const DEFAULT_SITE_NAME = 'Irkop Cell';
 
 let cache = null;
 let inflight = null;

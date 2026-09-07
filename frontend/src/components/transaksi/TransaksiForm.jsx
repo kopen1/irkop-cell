@@ -578,41 +578,48 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
             )}
 
             {keranjang.length > 0 && (
-              <fieldset
-                style={{
-                  border: '1px solid var(--border)',
-                  borderRadius: 'var(--radius-md)',
-                  padding: 'var(--space-2)',
-                  marginTop: 12,
-                }}
-              >
-                <legend className="field-label" style={{ marginLeft: 'var(--space-2)' }}>Keranjang</legend>
-                {keranjang.map((it, idx) => (
-                  <div key={idx} className="cart-item">
-                    <div className="cart-item-nameline">
-                      <span className="cart-item-nama">{it.nama}</span>
+              <div style={{ marginTop: 12 }}>
+                <div className="field-label" style={{ marginBottom: 6, paddingLeft: 4 }}>Keranjang ({keranjang.length} item)</div>
+                <div
+                  style={{
+                    border: '1px solid var(--border)',
+                    borderRadius: 'var(--radius-sm)',
+                    overflow: 'hidden',
+                  }}
+                >
+                  {keranjang.map((it, idx) => (
+                    <div key={idx} className="cart-item">
+                      <div className="cart-item-nameline">
+                        <span className="cart-item-nama">{it.nama}</span>
+                      </div>
                       <div className="cart-item-side">
                         <div className="cart-item-stepper">
-                          <button type="button" className="btn btn-secondary btn-sm"
+                          <button type="button" className="btn"
                             onClick={() => updateItem(idx, { qty: Math.max(1, Number(it.qty) - 1) })}>
                             -
                           </button>
-                          <span className="num cart-item-qty">{it.qty}</span>
-                          <button type="button" className="btn btn-secondary btn-sm"
+                          <span className="cart-item-qty">{it.qty}</span>
+                          <button type="button" className="btn"
                             onClick={() => updateItem(idx, { qty: Number(it.qty) + 1 })}>
                             +
                           </button>
                         </div>
-                        <span className="num cart-item-price">{formatRupiah((Number(it.harga) || 0) * it.qty)}</span>
-                        <button type="button" className="btn btn-ghost btn-sm cart-item-trash"
+                        <span className="cart-item-price">{formatRupiah((Number(it.harga) || 0) * it.qty)}</span>
+                        <button type="button" className="cart-item-trash"
                           onClick={() => removeItem(idx)}>
-                          <Icon name="trash" size={15} />
+                          <Icon name="trash" size={14} />
                         </button>
                       </div>
                     </div>
-                  </div>
-                ))}
-              </fieldset>
+                  ))}
+                </div>
+              </div>
+            )}
+            {keranjang.length === 0 && (
+              <div className="cart-empty" style={{ marginTop: 12 }}>
+                <Icon name="cart" size={20} style={{ opacity: 0.4, marginRight: 6 }} />
+                Keranjang kosong — cari produk untuk menambah
+              </div>
             )}
 
             <div className="grid-2" style={{ marginTop: 12 }}>

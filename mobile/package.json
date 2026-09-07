@@ -2,7 +2,7 @@
   "name": "konter-mobile",
   "version": "1.0.0",
   "private": true,
-  "description": "Iirkop Cell - POS & Buku Kas Digital (Mobile)",
+  "description": "Irkop Cell - POS & Buku Kas Digital (Mobile)",
   "scripts": {
     "sync": "bash sync.sh",
     "android": "npx cap open android",

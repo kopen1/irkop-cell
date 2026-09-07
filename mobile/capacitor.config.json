@@ -1,6 +1,6 @@
 {
   "appId": "id.co.irkop.cell",
-  "appName": "Iirkop Cell",
+  "appName": "Irkop Cell",
   "webDir": "../frontend/dist",
   "server": {
     "androidScheme": "https"

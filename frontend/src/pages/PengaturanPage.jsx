@@ -154,7 +154,7 @@ function NotifHookTab() {
   const toggleAuto = async (enabled) => {
     setBusy(true);
     try {
-      await api.put('/settings', { notifhook: { ...nh, auto_input: enabled } });
+      await api.put('/settings', { notifhook_auto_input: enabled });
       toast.success(enabled ? 'Auto-input NotifHook aktif.' : 'Auto-input NotifHook nonaktif.');
       load();
     } catch (err) {
