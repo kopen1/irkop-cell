@@ -91,7 +91,7 @@ function LabaDisplay({ value }) {
   );
 }
 
-export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel }) {
+export default function TransaksiForm({ initial, onSaved, onCancel }) {
   const today = todayWIB();
   const maxBackdate = (() => {
     const d = new Date();
@@ -140,6 +140,10 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
   const [tanggal, setTanggal] = useState(() => initial?.tanggal_transaksi || today);
   const [pelangganInput, setPelangganInput] = useState(() => initial?.pelanggan_nama || 'Umum / Tanpa Pelanggan');
   const [pelangganId, setPelangganId] = useState(() => initial?.pelanggan_id || '');
+  const [showPelangganForm, setShowPelangganForm] = useState(false);
+  const [newPelangganNama, setNewPelangganNama] = useState('');
+  const [newPelangganTelepon, setNewPelangganTelepon] = useState('');
+  const [busyPelanggan, setBusyPelanggan] = useState(false);
   const [busy, setBusy] = useState(false);
   const [submitError, setSubmitError] = useState(null);
 
@@ -212,6 +216,23 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
     setPelangganInput(val);
     const match = pelangganList.find((p) => p.nama === val);
     setPelangganId(match ? match.id : '');
+  };
+
+  const handleCreatePelanggan = async () => {
+    if (!newPelangganNama.trim()) return;
+    setBusyPelanggan(true);
+    try {
+      const res = await api.post('/pelanggan', { nama: newPelangganNama.trim(), telepon: newPelangganTelepon.trim() || undefined });
+      setPelangganInput(newPelangganNama.trim());
+      setPelangganId(res.id);
+      setShowPelangganForm(false);
+      setNewPelangganNama('');
+      setNewPelangganTelepon('');
+    } catch (err) {
+      setSubmitError(err.message);
+    } finally {
+      setBusyPelanggan(false);
+    }
   };
 
   const predikat = (item, q) => {
@@ -361,6 +382,10 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
     setSubmitError(null);
   };
 
+  const handleCancel = () => {
+    if (onCancel) onCancel();
+  };
+
   const onSubmit = async (e) => {
     e.preventDefault();
     setSubmitError(null);
@@ -373,6 +398,14 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
     if (jenis === 'penjualan') {
       if (keranjang.length === 0) {
         setSubmitError('Keranjang kosong!');
+        return;
+      }
+      if (metodeBayar === 'bon' && !pelangganId) {
+        setSubmitError('Bon wajib memilih pelanggan yang sudah terdaftar!');
+        return;
+      }
+      if (metodeBayar === 'transfer' && !akunPenerima) {
+        setSubmitError('Transfer wajib memilih akun penerima!');
         return;
       }
     } else if (jenis === 'produkdigital') {
@@ -400,6 +433,10 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
       }
       if (!biayaServiceNum) {
         setSubmitError('Biaya service harus diisi!');
+        return;
+      }
+      if (metodeBayarService === 'transfer' && !akunPenerima) {
+        setSubmitError('Transfer wajib memilih akun penerima!');
         return;
       }
     }
@@ -492,21 +529,48 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
                 ))}
               </Select>
             </Field>
-            <Field label="Pelanggan">
-              <input
-                className="input"
-                type="text"
-                list="pelanggan-list-transaksi"
-                value={pelangganInput}
-                onChange={(e) => handlePelangganInput(e.target.value)}
-                placeholder="Ketik nama atau pilih..."
-              />
+            <Field label={`Pelanggan${metodeBayar === 'bon' ? ' (Wajib untuk Bon)' : ''}`}>
+              <div className="input-group">
+                <input
+                  className="input"
+                  type="text"
+                  list="pelanggan-list-transaksi"
+                  value={pelangganInput}
+                  onChange={(e) => handlePelangganInput(e.target.value)}
+                  placeholder="Ketik nama atau pilih..."
+                  style={{ flex: 1 }}
+                  required={metodeBayar === 'bon'}
+                />
+                <Button type="button" variant="secondary" onClick={() => {
+                  setNewPelangganNama(pelangganInput === 'Umum / Tanpa Pelanggan' ? '' : pelangganInput);
+                  setShowPelangganForm(true);
+                }} style={{ flexShrink: 0 }}>
+                  <Icon name="plus" size={14} />
+                </Button>
+              </div>
               <datalist id="pelanggan-list-transaksi">
                 {pelangganOptions.map((p) => (
                   <option key={p.id} value={p.nama} />
                 ))}
               </datalist>
-              <span className="field-hint">Ketik nama baru atau pilih dari daftar</span>
+              {metodeBayar === 'bon' && !pelangganId && pelangganInput && pelangganInput !== 'Umum / Tanpa Pelanggan' && (
+                <div style={{ marginTop: 6, padding: '8px 10px', background: 'var(--warning-soft)', borderRadius: 'var(--radius-sm)', fontSize: '0.78rem', color: 'var(--warning)' }}>
+                  Pelanggan "{pelangganInput}" belum terdaftar. Klik <b>+</b> untuk buat baru, atau pilih dari daftar.
+                </div>
+              )}
+              {showPelangganForm && (
+                <div style={{ marginTop: 8, padding: 10, background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+                  <div className="text-xs font-bold mb-2">Tambah Pelanggan Baru</div>
+                  <div className="flex gap-2 mb-2">
+                    <Input placeholder="Nama *" value={newPelangganNama} onChange={(e) => setNewPelangganNama(e.target.value)} style={{ flex: 1 }} />
+                    <Input placeholder="Telepon" value={newPelangganTelepon} onChange={(e) => setNewPelangganTelepon(e.target.value)} style={{ flex: 1 }} />
+                  </div>
+                  <div className="flex gap-2">
+                    <Button type="button" variant="secondary" size="sm" onClick={() => setShowPelangganForm(false)}>Batal</Button>
+                    <Button type="button" size="sm" onClick={handleCreatePelanggan} loading={busyPelanggan} disabled={!newPelangganNama.trim()}>Simpan</Button>
+                  </div>
+                </div>
+              )}
             </Field>
             <Field label="Tanggal">
               <Input
@@ -651,7 +715,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
                 <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalKeranjang)}</div>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleReset}>Batal</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
                 <Button type="submit" loading={busy}>Simpan Transaksi</Button>
               </div>
             </div>
@@ -876,7 +940,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
                 <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalDigital)}</div>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleReset}>Batal</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
                 <Button type="submit" loading={busy}>Simpan Transaksi</Button>
               </div>
             </div>
@@ -1013,7 +1077,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
                 <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(totalTarik)}</div>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleReset}>Batal</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
                 <Button type="submit" loading={busy}>Simpan Transaksi</Button>
               </div>
             </div>
@@ -1120,6 +1184,16 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
                   ))}
                 </Select>
               </Field>
+              {metodeBayarService === 'transfer' && (
+                <Field label="Akun Penerima Transfer" required>
+                  <Select value={akunPenerima} onChange={(e) => setAkunPenerima(e.target.value)}>
+                    <option value="">Pilih akun...</option>
+                    {bankAkun.map((a) => (
+                      <option key={a.id} value={a.nama_akun}>{a.nama_akun}</option>
+                    ))}
+                  </Select>
+                </Field>
+              )}
             </div>
 
             <div
@@ -1145,7 +1219,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel: _onCancel })
                 <div className="num" style={{ fontSize: '1.3rem', fontWeight: 800 }}>{formatRupiah(biayaServiceNum)}</div>
               </div>
               <div className="flex gap-2">
-                <Button variant="secondary" type="button" onClick={handleReset}>Batal</Button>
+                <Button variant="secondary" type="button" onClick={handleCancel}>Batal</Button>
                 <Button type="submit" loading={busy}>Simpan Transaksi</Button>
               </div>
             </div>

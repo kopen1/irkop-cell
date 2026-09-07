@@ -101,7 +101,7 @@ const metodeLabel = {
   tunai: 'Tunai',
   transfer: 'Transfer',
   bon: 'Bon',
-  cash_tunai: 'Cash & Tunai',
+  cash_tunai: 'Split',
 };
 
 export function labelMetode(value) {
@@ -123,7 +123,7 @@ export const METODE_PEMBAYARAN = [
   { value: 'tunai', label: 'Tunai' },
   { value: 'transfer', label: 'Transfer' },
   { value: 'bon', label: 'Bon' },
-  { value: 'cash_tunai', label: 'Cash & Tunai' },
+  { value: 'cash_tunai', label: 'Split' },
 ];
 
 // Halaman yang valid (sinkron dengan user_permissions.halaman pada schema)
