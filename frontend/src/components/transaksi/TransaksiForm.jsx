@@ -247,9 +247,6 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
   };
 
   const isSplit = metodeBayar === 'cash_tunai';
-  const totalSplit = splitPayments.reduce((s, p) => s + (Number(p.nominal) || 0), 0);
-  const totalTransaksi = jenis === 'penjualan' ? totalKeranjang : totalDigital || totalTarik || biayaServiceNum || 0;
-  const sisaSplit = totalTransaksi - totalSplit;
 
   const addSplitPayment = () => {
     setSplitPayments((prev) => [...prev, { metode: 'tunai', nominal: 0, akun_id: '' }]);
@@ -371,6 +368,10 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
   const labaService = biayaServiceNum - modalServiceNum;
 
   const isTransfer = metodeBayar === 'transfer';
+
+  const totalSplit = splitPayments.reduce((s, p) => s + (Number(p.nominal) || 0), 0);
+  const totalTransaksi = jenis === 'penjualan' ? totalKeranjang : jenis === 'produkdigital' ? totalDigital : jenis === 'tariktunai' ? totalTarik : biayaServiceNum || 0;
+  const sisaSplit = totalTransaksi - totalSplit;
 
   const digitalDesc = useMemo(() => {
     if (subJenis === 'transfer') {
