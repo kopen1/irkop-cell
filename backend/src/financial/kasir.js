@@ -237,9 +237,16 @@ export async function sessionStatus(db, { date = wibDateToday(), kasirSesiId = n
       saldo_sistem: r.saldo_opening + (r.mutasi ?? 0),
     }));
 
-  // Total Saldo — jumlah semua saldo_sistem (read-only, bukan akun transaksi)
-  const totalSaldo = saldo.reduce((s, r) => s + r.saldo_sistem, 0);
-  saldo.push({ nama_akun: 'Total Saldo', saldo_opening: saldo.reduce((s, r) => s + r.saldo_opening, 0), mutasi: totalSaldo - saldo.reduce((s, r) => s + r.saldo_opening, 0), saldo_sistem: totalSaldo });
+  // Total Saldo — jumlah semua saldo_sistem (KECUALI Tunai Laci)
+  const totalSaldo = saldo
+    .filter((r) => !r.nama_akun.toLowerCase().includes('tunai laci'))
+    .reduce((s, r) => s + r.saldo_sistem, 0);
+  saldo.push({
+    nama_akun: 'Total Saldo',
+    saldo_opening: saldo.filter((r) => !r.nama_akun.toLowerCase().includes('tunai laci')).reduce((s, r) => s + r.saldo_opening, 0),
+    mutasi: totalSaldo - saldo.filter((r) => !r.nama_akun.toLowerCase().includes('tunai laci')).reduce((s, r) => s + r.saldo_opening, 0),
+    saldo_sistem: totalSaldo
+  });
 
   let closingRows = [];
   if (sesi.status === 'tutup') {

@@ -154,6 +154,29 @@ export default function TransaksiPage() {
   const data = state.data || {};
   const rows = (data.items || []).map((t) => ({ ...t, key: t.id }));
 
+  // Full-page form mode
+  if (showForm) {
+    return (
+      <div className="page">
+        <PageHeader
+          title={editItem ? 'Edit Transaksi' : 'Transaksi Baru'}
+          subtitle={editItem ? `Edit transaksi #${editItem.id}` : 'Isi form untuk mencatat transaksi baru.'}
+          actions={
+            <Button variant="secondary" onClick={closeForm}>
+              <Icon name="close" size={16} /> Kembali
+            </Button>
+          }
+        />
+        <TransaksiForm
+          key={editItem ? String(editItem.id) : 'baru'}
+          initial={editItem || undefined}
+          onCancel={closeForm}
+          onSaved={handleSaved}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <PageHeader
@@ -317,24 +340,6 @@ export default function TransaksiPage() {
       >
         {detailLoading ? <Loader /> : detailData?._error ? <ErrorState error={{ message: detailData._error }} /> : <TransaksiDetail transaksi={detailData} onConfirm={() => load().catch(() => {})} onBayarKurang={(tx) => { setBayarKurangTarget(tx); closeDetail(); }} />}
       </Modal>
-
-      {/* Create / Edit — Inline */}
-      {showForm && (
-        <div className="card" style={{ marginBottom: 'var(--space-4)' }}>
-          <div className="flex items-center justify-between mb-3">
-            <h3 style={{ fontSize: '1rem', fontWeight: 700 }}>{editItem ? 'Edit Transaksi' : 'Transaksi Baru'}</h3>
-            <Button variant="ghost" size="sm" onClick={closeForm}>
-              <Icon name="close" size={16} />
-            </Button>
-          </div>
-          <TransaksiForm
-            key={editItem ? String(editItem.id) : 'baru'}
-            initial={editItem || undefined}
-            onCancel={closeForm}
-            onSaved={handleSaved}
-          />
-        </div>
-      )}
 
       {/* Delete confirm (soft-delete + reversal di sisi backend) */}
       <ConfirmDialog
