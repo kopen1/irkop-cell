@@ -2,7 +2,7 @@
 // Alur: Browser -> Pages Function -> Worker Backend (konter.irkop.workers.dev) -> D1
 // Same-origin proxy sehingga VITE_API_BASE kosong bekerja di production tanpa CORS di Worker.
 // Spesifikasi: backend/docs/PAGES_FUNCTION_COMPAT.md (Team 1).
-const BACKEND_BASE = 'https://konter.irkop.workers.dev';
+const BACKEND_BASE = 'https://konter.irkop.workers.dev/api';
 
 const FORWARD_REQUEST_HEADERS = [
   'authorization',
