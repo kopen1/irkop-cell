@@ -4,6 +4,10 @@ export async function listActiveAccounts(db) {
   return db.many('SELECT id, nama_akun, tipe, aktif FROM akun_master WHERE aktif = 1 ORDER BY id');
 }
 
+export async function listAllAccounts(db) {
+  return db.many('SELECT id, nama_akun, tipe, aktif FROM akun_master ORDER BY aktif DESC, id');
+}
+
 export async function getAccount(db, namaAkun) {
   if (!namaAkun) throw err(400, 'missing_account', 'nama_akun wajib diisi');
   const acc = await db.one('SELECT * FROM akun_master WHERE nama_akun = ?', namaAkun);

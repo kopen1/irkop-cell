@@ -23,8 +23,13 @@ async function loadCapacitor() {
   }
 }
 
-// Cek apakah berjalan di Capacitor (mobile)
-export async function isMobile() {
+// Cek apakah berjalan di Capacitor (mobile) — synchronous, aman untuk React state
+export function isMobile() {
+  return typeof window !== 'undefined' && Boolean(window.Capacitor?.isNativePlatform());
+}
+
+// Cek async — load Capacitor modules dulu (untuk init)
+export async function isMobileAsync() {
   await loadCapacitor();
   return Capacitor?.isNativePlatform() || false;
 }

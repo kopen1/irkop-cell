@@ -2,10 +2,12 @@ import { err } from '../lib/errors.js';
 import { readBody, asInt } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { nowIso } from '../lib/time.js';
-import { listActiveAccounts } from '../financial/akun.js';
+import { listActiveAccounts, listAllAccounts } from '../financial/akun.js';
 
 export async function listAkun(db, request, ctx) {
-  const rows = await listActiveAccounts(db);
+  const url = new URL(request.url);
+  const includeInactive = url.searchParams.get('include_inactive') === 'true';
+  const rows = includeInactive ? await listAllAccounts(db) : await listActiveAccounts(db);
   return { items: rows };
 }
 

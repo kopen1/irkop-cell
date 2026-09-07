@@ -498,7 +498,7 @@ function AkunTab() {
     () => async () => {
       setState((s) => ({ ...s, status: 'loading' }));
       try {
-        const data = await api.get('/akun');
+        const data = await api.get('/akun', { include_inactive: 'true' });
         setState({ status: 'success', data, error: null });
       } catch (err) {
         setState({ status: 'error', data: null, error: err });
@@ -511,6 +511,7 @@ function AkunTab() {
   }, [load]);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [editTarget, setEditTarget] = useState(null);
   const [toggleTarget, setToggleTarget] = useState(null);
   const [toggleBusy, setToggleBusy] = useState(false);
 
@@ -554,6 +555,9 @@ function AkunTab() {
               header: '',
               render: (r) => (
                 <div className="row-actions">
+                  <Button variant="ghost" size="sm" onClick={() => setEditTarget(r)}>
+                    <Icon name="edit" size={15} />
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => setToggleTarget(r)}>
                     {r.aktif ? 'Nonaktifkan' : 'Aktifkan'}
                   </Button>
@@ -576,6 +580,18 @@ function AkunTab() {
         />
       </Modal>
 
+      <Modal open={Boolean(editTarget)} onClose={() => setEditTarget(null)} title="Edit Akun Uang">
+        <AkunForm
+          akun={editTarget}
+          onCancel={() => setEditTarget(null)}
+          onSaved={() => {
+            setEditTarget(null);
+            toast.success('Akun diperbarui.');
+            load();
+          }}
+        />
+      </Modal>
+
       <ConfirmDialog
         open={Boolean(toggleTarget)}
         title="Ubah Status Akun"
@@ -590,10 +606,11 @@ function AkunTab() {
   );
 }
 
-function AkunForm({ onCancel, onSaved }) {
-  const [form, setForm] = useState({ nama_akun: '', tipe: 'bank' });
+function AkunForm({ akun, onCancel, onSaved }) {
+  const [form, setForm] = useState({ nama_akun: akun?.nama_akun || '', tipe: akun?.tipe || 'bank' });
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false);
+  const isEdit = Boolean(akun?.id);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -601,7 +618,11 @@ function AkunForm({ onCancel, onSaved }) {
     if (!form.nama_akun.trim()) return setError('Nama akun wajib diisi.');
     setBusy(true);
     try {
-      await api.post('/akun', { nama_akun: form.nama_akun.trim(), tipe: form.tipe });
+      if (isEdit) {
+        await api.put(`/akun/${akun.id}`, { nama_akun: form.nama_akun.trim(), tipe: form.tipe });
+      } else {
+        await api.post('/akun', { nama_akun: form.nama_akun.trim(), tipe: form.tipe });
+      }
       onSaved();
     } catch (err) {
       setError(err.message);
