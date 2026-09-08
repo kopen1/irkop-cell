@@ -389,6 +389,7 @@ export default function DaftarBarangPage() {
           ]}
           rows={rows}
         />
+        </>
       )}
 
       {/* Form kategori (CRUD lengkap: GET/POST/PUT/DELETE) */}
