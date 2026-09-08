@@ -42,9 +42,14 @@ function search(q) {
   fireEvent.change(screen.getByPlaceholderText(/kode atau nama produk/i), { target: { value: q } });
 }
 
+function setJenisPenjualan() {
+  fireEvent.change(screen.getByLabelText('Jenis Transaksi'), { target: { value: 'penjualan' } });
+}
+
 describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
   it('menampilkan select Filter Kategori berisi opsi kategori dari GET /kategori', async () => {
     render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    setJenisPenjualan();
     const filter = await screen.findByLabelText('Filter Kategori');
     expect(filter).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Semua kategori' })).toBeTruthy();
@@ -56,6 +61,7 @@ describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
 
   it('Semua kategori (default) menampilkan semua produk yang cocok, termasuk tanpa kategori', async () => {
     render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    setJenisPenjualan();
     await screen.findByLabelText('Filter Kategori');
     search('1');
     await waitFor(() => expect(screen.getByText(/Toner/)).toBeTruthy());
@@ -65,6 +71,7 @@ describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
 
   it('filter kategori menyaring hasil pencarian', async () => {
     render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    setJenisPenjualan();
     const filter = await screen.findByLabelText('Filter Kategori');
     search('1');
 

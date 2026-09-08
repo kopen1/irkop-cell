@@ -43,7 +43,7 @@ function displayItems(t) {
 
 function buildStruk(t, tpl) {
   const lines = [];
-  lines.push((tpl.siteName || 'Iirkop Cell').toUpperCase());
+  lines.push((tpl.siteName || 'Irkop Cell').toUpperCase());
   if (tpl.header) lines.push(tpl.header);
   if (tpl.alamat) lines.push(tpl.alamat);
   lines.push('================================');
@@ -261,7 +261,7 @@ export function TransaksiDetail({ transaksi, onConfirm, onBayarKurang }) {
 
   const hasKirimUang = (data?.items || []).some((it) => Number(it.nominal_referensi || 0) > 0);
   const isAdminTx = data?.jenis === 'transfer' || data?.jenis === 'tariktunai';
-  const showKonfirmasi = true; // Tampilkan untuk semua jenis transaksi
+  const showKonfirmasi = data?.metode_bayar === 'transfer';
 
   const saveKonfirmasi = async () => {
     if (!data?.id || confirmBusy) return;
