@@ -52,6 +52,9 @@ export default function DaftarBarangPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleteBusy, setBulkDeleteBusy] = useState(false);
   const [deleteBusy, setDeleteBusy] = useState(false);
   const [kategoriOpen, setKategoriOpen] = useState(false);
   const [editKategori, setEditKategori] = useState(null);
@@ -69,6 +72,53 @@ export default function DaftarBarangPage() {
     [kategori.data]
   );
   const lowStock = rows.filter((p) => p.lacak_stok !== 0 && p.stok_minimum > 0 && p.stok <= p.stok_minimum);
+
+  const toggleSelect = (id) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === rows.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(rows.map((r) => r.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    setBulkDeleteBusy(true);
+    try {
+      for (const id of selectedIds) {
+        await api.del(`/produk/${id}`, { deleted_reason: 'bulk delete' });
+      }
+      toast.success(`${selectedIds.size} produk dihapus.`);
+      setSelectedIds(new Set());
+      setBulkDeleteOpen(false);
+      load().catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBulkDeleteBusy(false);
+    }
+  };
+
+  const handleBulkExport = () => {
+    const selected = rows.filter((r) => selectedIds.has(r.id));
+    const csv = buildCsv(selected);
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `produk-terpilih-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`${selected.length} produk di-export.`);
+  };
 
   // Ekspor katalog lengkap ke CSV (client-side dari GET /produk).
   const handleExport = async () => {
@@ -246,45 +296,82 @@ export default function DaftarBarangPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="Belum ada produk" description="Tambahkan produk pertama untuk mulai menjual." icon="barang" />
       ) : (
-        <Table
-          columns={[
-            { key: 'kode', header: 'Kode', render: (r) => <span className="num text-sm">{r.kode}</span> },
-            { key: 'nama', header: 'Nama' },
-            {
-              key: 'kategori_id',
-              header: 'Kategori',
-              render: (r) => {
-                const k = kategoriById[r.kategori_id];
-                return k ? (
-                  <Badge tone="neutral">
-                    {k.nama}
-                    {!k.lacak_stok && <span> · non-stok</span>}
-                  </Badge>
-                ) : (
-                  <span className="text-muted">—</span>
-                );
-              },
-            },
-            { key: 'harga', header: 'Harga Jual', align: 'right', render: (r) => <span className="num">{formatRupiah(r.harga)}</span> },
-            {
-              key: 'stok',
-              header: 'Stok',
-              align: 'right',
-              render: (r) =>
-                r.lacak_stok === 0 ? (
-                  <span className="text-muted">—</span>
-                ) : (
-                  <span className={`num ${r.stok_minimum > 0 && r.stok <= r.stok_minimum ? 'text-warning font-bold' : ''}`}>
-                    {r.stok}
-                    {r.stok_minimum > 0 && <span className="text-xs text-muted"> / min {r.stok_minimum}</span>}
-                  </span>
+        <>
+          {/* Bulk Actions Bar */}
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 mb-3" style={{ padding: 'var(--space-3) var(--space-4)', background: 'var(--primary-soft)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--primary)' }}>
+              <span className="text-sm font-bold">{selectedIds.size} produk dipilih</span>
+              <span className="text-sm text-muted">|</span>
+              <Button variant="ghost" size="sm" onClick={handleBulkExport}>
+                <Icon name="download" size={14} /> Export
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setBulkDeleteOpen(true)} style={{ color: 'var(--danger)' }}>
+                <Icon name="trash" size={14} /> Hapus
+              </Button>
+              <Button variant="ghost" size="sm" onClick={() => setSelectedIds(new Set())}>
+                <Icon name="close" size={14} /> Batal
+              </Button>
+            </div>
+          )}
+
+          <Table
+            columns={[
+              {
+                key: 'select',
+                header: (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.size === rows.length && rows.length > 0}
+                    onChange={toggleSelectAll}
+                    style={{ cursor: 'pointer' }}
+                  />
                 ),
-            },
-            {
-              key: 'aksi',
-              header: '',
-              align: 'right',
-              render: (r) => (
+                render: (r) => (
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.has(r.id)}
+                    onChange={() => toggleSelect(r.id)}
+                    style={{ cursor: 'pointer' }}
+                  />
+                ),
+              },
+              { key: 'kode', header: 'Kode', render: (r) => <span className="num text-sm">{r.kode}</span> },
+              { key: 'nama', header: 'Nama' },
+              {
+                key: 'kategori_id',
+                header: 'Kategori',
+                render: (r) => {
+                  const k = kategoriById[r.kategori_id];
+                  return k ? (
+                    <Badge tone="neutral">
+                      {k.nama}
+                      {!k.lacak_stok && <span> · non-stok</span>}
+                    </Badge>
+                  ) : (
+                    <span className="text-muted">—</span>
+                  );
+                },
+              },
+              { key: 'harga', header: 'Harga Jual', align: 'right', render: (r) => <span className="num">{formatRupiah(r.harga)}</span> },
+              {
+                key: 'stok',
+                header: 'Stok',
+                align: 'right',
+                render: (r) =>
+                  r.lacak_stok === 0 ? (
+                    <span className="text-muted">—</span>
+                  ) : (
+                    <span className={`num ${r.stok_minimum > 0 && r.stok <= r.stok_minimum ? 'text-warning font-bold' : ''}`}>
+                      {r.stok}
+                      {r.stok_minimum > 0 && <span className="text-xs text-muted"> / min {r.stok_minimum}</span>}
+                    </span>
+                  ),
+              },
+              {
+                key: 'aksi',
+                header: '',
+                align: 'right',
+                render: (r) => (
                 <div className="row-actions">
                   {can('daftar_barang') && (
                     <>
@@ -457,6 +544,16 @@ export default function DaftarBarangPage() {
             setDeleteBusy(false);
           }
         }}
+      />
+
+      <ConfirmDialog
+        open={bulkDeleteOpen}
+        title="Hapus Produk Terpilih"
+        message={`${selectedIds.size} produk akan dihapus secara soft-delete. Lanjutkan?`}
+        confirmLabel="Hapus Semua"
+        loading={bulkDeleteBusy}
+        onCancel={() => setBulkDeleteOpen(false)}
+        onConfirm={handleBulkDelete}
       />
 
       <ConfirmDialog
