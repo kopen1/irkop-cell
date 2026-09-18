@@ -63,7 +63,7 @@ describe('label & opsi metode', () => {
     expect(labelMetode('tunai')).toBe('Tunai');
     expect(labelMetode('transfer')).toBe('Transfer');
     expect(labelMetode('bon')).toBe('Bon');
-    expect(labelMetode('cash_tunai')).toBe('Cash & Tunai');
+    expect(labelMetode('cash_tunai')).toBe('Split');
   });
   it('menyediakan semua metode di daftar opsi', () => {
     expect(METODE_PEMBAYARAN.map((m) => m.value)).toEqual(['tunai', 'transfer', 'bon', 'cash_tunai']);

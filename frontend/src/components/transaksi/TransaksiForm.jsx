@@ -122,14 +122,6 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     return s?.saldo_sistem ?? 0;
   };
 
-  const pelangganOptions = useMemo(() => {
-    const list = [{ id: '', nama: 'Umum / Tanpa Pelanggan' }];
-    for (const p of pelangganList) {
-      list.push({ id: p.id, nama: p.nama });
-    }
-    return list;
-  }, [pelangganList]);
-
   const [jenis, setJenis] = useState(() => {
     if (initial?.jenis === 'produkdigital') return 'produkdigital';
     if (initial?.jenis === 'tariktunai') return 'tariktunai';
@@ -138,7 +130,6 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     return '';
   });
   const [tanggal, setTanggal] = useState(() => initial?.tanggal_transaksi || today);
-  const [pelangganInput, setPelangganInput] = useState(() => initial?.pelanggan_nama || 'Umum / Tanpa Pelanggan');
   const [pelangganId, setPelangganId] = useState(() => initial?.pelanggan_id || '');
   const [showPelangganForm, setShowPelangganForm] = useState(false);
   const [newPelangganNama, setNewPelangganNama] = useState('');
@@ -223,18 +214,11 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     if (mapped) setAkunBankDigital(mapped);
   };
 
-  const handlePelangganInput = (val) => {
-    setPelangganInput(val);
-    const match = pelangganList.find((p) => p.nama === val);
-    setPelangganId(match ? match.id : '');
-  };
-
   const handleCreatePelanggan = async () => {
     if (!newPelangganNama.trim()) return;
     setBusyPelanggan(true);
     try {
       const res = await api.post('/pelanggan', { nama: newPelangganNama.trim(), telepon: newPelangganTelepon.trim() || undefined });
-      setPelangganInput(newPelangganNama.trim());
       setPelangganId(res.id);
       setShowPelangganForm(false);
       setNewPelangganNama('');
@@ -382,35 +366,6 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
 
   const tarikDesc = `Pelanggan kirim ${formatRupiah(nominalTarikNum)} ke ${akunBankTarik || '-'}, toko berikan tunai ${formatRupiah(tunaiDikeluarkan)}.`;
 
-  const handleReset = () => {
-    setKeranjang([]);
-    setPelangganInput('Umum / Tanpa Pelanggan');
-    setPelangganId('');
-    setMetodeBayar('tunai');
-    setAkunPenerima('');
-    setSearch('');
-    setKategoriFilter('');
-    setSelectedDigitalProduk(null);
-    setSearchDigital('');
-    setHargaJualDigital('');
-    setAdminFeeDigital('');
-    setModalDigital('');
-    setQtyDigital(1);
-    setAdminPresetDigital('');
-    setNominalTarik('');
-    setAdminFeeTarik('');
-    setQtyTarik(1);
-    setAdminPresetTarik('');
-    setNamaDevice('');
-    setKerusakan('');
-    setBiayaService('');
-    setModalService('');
-    setTanggalGaransi('');
-    setCatatanTeknisi('');
-    setMetodeBayarService('tunai');
-    setSubmitError(null);
-  };
-
   const handleCancel = () => {
     if (onCancel) onCancel();
   };
@@ -505,6 +460,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
       };
     } else if (jenis === 'produkdigital') {
       body = {
+        jenis: 'produkdigital',
         items: [
           {
             produk_id: Number(selectedDigitalProduk.id),
@@ -590,12 +546,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
             </Field>
             <Field label={`Pelanggan${metodeBayar === 'bon' ? ' (Wajib untuk Bon)' : ''}`}>
               <div className="input-group">
-                <Select value={pelangganId} onChange={(e) => {
-                  const val = e.target.value;
-                  setPelangganId(val);
-                  const found = pelangganList.find((p) => String(p.id) === val);
-                  setPelangganInput(found ? found.nama : (val ? '' : 'Umum / Tanpa Pelanggan'));
-                }} style={{ flex: 1 }} required={metodeBayar === 'bon'}>
+                <Select value={pelangganId} onChange={(e) => setPelangganId(e.target.value)} style={{ flex: 1 }} required={metodeBayar === 'bon'}>
                   <option value="">Umum / Tanpa Pelanggan</option>
                   {pelangganList.map((p) => (
                     <option key={p.id} value={p.id}>{p.nama}{p.telepon ? ` (${p.telepon})` : ''}</option>

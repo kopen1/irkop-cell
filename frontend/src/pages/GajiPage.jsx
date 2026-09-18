@@ -8,6 +8,7 @@ import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { todayWIB, formatRupiah, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
+import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select, Textarea } from '../components/ui/Field';
 import { Modal } from '../components/ui/Modal';
@@ -46,6 +47,43 @@ export default function GajiPage() {
   const [rateOpen, setRateOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
 
+  const [ownerDate, setOwnerDate] = useState(todayWIB());
+  const [owner, setOwner] = useState({ status: 'idle', data: null, error: null });
+  const [unpaid, setUnpaid] = useState({ status: 'idle', items: [] });
+  const [payBusy, setPayBusy] = useState(null);
+  const loadUnpaid = async () => {
+    try {
+      const r = await api.get('/gaji/unpaid');
+      setUnpaid({ status: 'success', items: r.items || [] });
+    } catch {
+      setUnpaid({ status: 'error', items: [] });
+    }
+  };
+  useEffect(() => { loadUnpaid(); }, []);
+
+  const bayarGaji = async (uid) => {
+    if (!window.confirm('Bayar semua gaji yang belum dibayar milik orang ini dari Tunai Laci?')) return;
+    setPayBusy(uid);
+    try {
+      const r = await api.post('/gaji/bayar', { user_id: uid });
+      toast.success(`Gaji ${r.nama} ${formatRupiah(r.total)} dibayar.`);
+      await loadUnpaid();
+      load().catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setPayBusy(null);
+    }
+  };
+  useEffect(() => {
+    let cancelled = false;
+    setOwner({ status: 'loading', data: null, error: null });
+    api.get('/gaji/owner', { tanggal: ownerDate })
+      .then((res) => { if (!cancelled) setOwner({ status: 'success', data: res, error: null }); })
+      .catch((err) => { if (!cancelled) setOwner({ status: 'error', data: null, error: err }); });
+    return () => { cancelled = true; };
+  }, [ownerDate]);
+
   const data = state.data || {};
   const rows = (data.items || []).map((g) => ({ ...g, key: `${g.user_id}-${g.tanggal}` }));
   const totalBulan = rows.reduce((s, g) => s + Number(g.nominal), 0);
@@ -72,6 +110,62 @@ export default function GajiPage() {
         </div>
       </div>
 
+      <Card className="mt-4" title="Gaji Owner (Anda)">
+        <div className="grid-2">
+          <Field label="Tanggal">
+            <Input type="date" value={ownerDate} onChange={(e) => setOwnerDate(e.target.value)} />
+          </Field>
+        </div>
+        {owner.status === 'loading' ? (
+          <Loader />
+        ) : owner.status === 'error' ? (
+          <ErrorState error={owner.error} onRetry={() => setOwnerDate(ownerDate)} />
+        ) : owner.data ? (
+          <>
+            <div className="table-wrap mt-3">
+              <table className="table">
+                <thead>
+                  <tr><th>Komponen</th><th className="col-right">Nilai</th></tr>
+                </thead>
+                <tbody>
+                  <tr><td>Upah jaga toko (ikut jam buka{owner.data.jam_buka != null ? ` · buka ${String(owner.data.jam_buka).padStart(2, '0')}:00` : ''})</td><td className="col-right num">{formatRupiah(owner.data.upah)}</td></tr>
+                  <tr><td>Laba service hari ini</td><td className="col-right num">{formatRupiah(owner.data.service_laba)}</td></tr>
+                  <tr><td>Bagi hasil service ({owner.data.service_pct}%)</td><td className="col-right num">{formatRupiah(owner.data.service_share)}</td></tr>
+                  <tr><td style={{ fontWeight: 700 }}>Akru gaji owner hari ini</td><td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(owner.data.total)}</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p className="field-hint mt-2">Otomatis ditambahkan ke gaji owner saat Closing. Pembayaran dilakukan di bagian "Gaji Belum Dibayar" (mis. tiap 15 hari).</p>
+          </>
+        ) : null}
+      </Card>
+
+      <Card className="mt-4" title="Gaji Belum Dibayar">
+        {unpaid.status === 'loading' ? (
+          <Loader />
+        ) : unpaid.items.length === 0 ? (
+          <EmptyState title="Tidak ada gaji tertunggak" description="Semua gaji sudah dibayar." icon="gaji" />
+        ) : (
+          <Table
+            columns={[
+              { key: 'nama', header: 'Nama', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama}</span> },
+              { key: 'jumlah_hari', header: 'Hari', align: 'right', render: (r) => <span className="num">{r.jumlah_hari}</span> },
+              { key: 'periode', header: 'Periode', render: (r) => <span className="text-sm text-muted">{r.dari_tanggal} → {r.sampai_tanggal}</span> },
+              { key: 'total', header: 'Total', align: 'right', render: (r) => <span className="num">{formatRupiah(r.total)}</span> },
+              {
+                key: 'aksi', header: '', align: 'right',
+                render: (r) => (
+                  <Button size="sm" loading={payBusy === r.user_id} onClick={() => bayarGaji(r.user_id)}>
+                    <Icon name="wallet" size={14} /> Bayar
+                  </Button>
+                ),
+              },
+            ]}
+            rows={unpaid.items.map((r) => ({ ...r, key: r.user_id }))}
+          />
+        )}
+      </Card>
+
       {state.status === 'error' ? (
         <ErrorState error={state.error} onRetry={() => load().catch(() => {})} />
       ) : state.status === 'loading' && !data.items ? (
@@ -81,9 +175,10 @@ export default function GajiPage() {
       ) : (
         <Table
           columns={[
-            { key: 'nama', header: 'Karyawan', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama || r.user_nama || '-'}</span> },
+            { key: 'nama', header: 'Karyawan', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_karyawan || r.nama || '-'}</span> },
             { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
-            { key: 'sumber', header: 'Sumber', render: (r) => (r.sumber === 'auto' ? <Badge tone="info">Auto (Opening)</Badge> : <Badge tone="accent">Manual Edit</Badge>) },
+            { key: 'sumber', header: 'Sumber', render: (r) => (r.sumber === 'auto' ? <Badge tone="info">Auto</Badge> : <Badge tone="accent">Manual Edit</Badge>) },
+            { key: 'bayar', header: 'Bayar', render: (r) => (r.dibayar_at ? <Badge tone="success">Lunas</Badge> : <Badge tone="warning">Belum</Badge>) },
             { key: 'nominal', header: 'Nominal', align: 'right', render: (r) => <span className="num">{formatRupiah(r.nominal)}</span> },
             { key: 'catatan', header: 'Catatan', render: (r) => <span className="text-sm text-muted">{r.catatan || '—'}</span> },
             {

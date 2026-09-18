@@ -13,6 +13,8 @@ import ServiceHpPage from './pages/ServiceHpPage';
 import KasbonPage from './pages/KasbonPage';
 import PelangganPage from './pages/PelangganPage';
 import PengeluaranPage from './pages/PengeluaranPage';
+import IsiSaldoPage from './pages/IsiSaldoPage';
+import BeliStokPage from './pages/BeliStokPage';
 import GajiPage from './pages/GajiPage';
 import HargaServerPage from './pages/HargaServerPage';
 import PengaturanPage from './pages/PengaturanPage';
@@ -56,6 +58,8 @@ export default function App() {
         <Route path="/kasbon" element={<RequirePermission permission="kasbon"><KasbonPage /></RequirePermission>} />
         <Route path="/pelanggan" element={<RequirePermission permission="pelanggan"><PelangganPage /></RequirePermission>} />
         <Route path="/pengeluaran" element={<RequirePermission permission="pengeluaran"><PengeluaranPage /></RequirePermission>} />
+        <Route path="/isi-saldo" element={<RequirePermission permission="kasir"><IsiSaldoPage /></RequirePermission>} />
+        <Route path="/beli-stok" element={<RequirePermission permission="kasir"><BeliStokPage /></RequirePermission>} />
         <Route path="/gaji" element={<AdminOnly><GajiPage /></AdminOnly>} />
         <Route path="/harga-server" element={<AdminOnly><HargaServerPage /></AdminOnly>} />
         <Route path="/pengaturan" element={<AdminOnly permission="pengaturan"><PengaturanPage /></AdminOnly>} />

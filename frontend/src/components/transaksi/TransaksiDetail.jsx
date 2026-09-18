@@ -261,7 +261,8 @@ export function TransaksiDetail({ transaksi, onConfirm, onBayarKurang }) {
 
   const hasKirimUang = (data?.items || []).some((it) => Number(it.nominal_referensi || 0) > 0);
   const isAdminTx = data?.jenis === 'transfer' || data?.jenis === 'tariktunai';
-  const showKonfirmasi = data?.metode_bayar === 'transfer';
+  // Dropdown konfirmasi hanya relevan untuk transfer / tarik tunai / transaksi kirim uang.
+  const showKonfirmasi = data?.metode_bayar === 'transfer' || isAdminTx || hasKirimUang;
 
   const saveKonfirmasi = async () => {
     if (!data?.id || confirmBusy) return;

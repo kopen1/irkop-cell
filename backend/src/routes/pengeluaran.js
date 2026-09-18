@@ -1,5 +1,5 @@
 import { err } from '../lib/errors.js';
-import { nowIso, wibDateToUtcRange, isValidCalendarDate } from '../lib/time.js';
+import { nowIso, wibDateToday, wibDateToUtcRange, isValidCalendarDate } from '../lib/time.js';
 import { getAccount } from '../financial/akun.js';
 import { requireOpenSession } from '../financial/kasir.js';
 import { reverseFullSource } from '../financial/reversal.js';
@@ -15,7 +15,7 @@ function validateBody(body) {
   if (!['tunai', 'transfer'].includes(metodeBayar)) throw err(400, 'invalid_value', 'metode_bayar harus tunai atau transfer');
   if (!body.akun_sumber) throw err(400, 'missing_field', 'akun_sumber wajib diisi');
   let tanggal = body.tanggal;
-  if (!tanggal) tanggal = new Date().toISOString().slice(0, 10);
+  if (!tanggal) tanggal = wibDateToday();
   if (!isValidCalendarDate(tanggal)) throw err(400, 'invalid_value', 'tanggal harus format YYYY-MM-DD');
   return { deskripsi, kategori: body.kategori ? String(body.kategori).trim() : null, nominal, metodeBayar, akunSumber: String(body.akun_sumber), tanggal };
 }

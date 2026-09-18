@@ -18,12 +18,24 @@ function todayWib() {
 
 async function setup() {
   const { env } = setupEnv();
-  await createUserRaw(env, { nama: 'Admin', username: 'admin', password: 'admin1234', role: 'admin' });
+  const adminId = await createUserRaw(env, { nama: 'Admin', username: 'admin', password: 'admin1234', role: 'admin' });
   const karyawanId = await createUserRaw(env, { nama: 'Karyawan', username: 'kry', password: 'kry12345', role: 'karyawan' });
   await setPermission(env, karyawanId, 'kasir');
   const adminToken = await login(env, 'admin', 'admin1234');
   const karyawanToken = await login(env, 'kry', 'kry12345');
-  return { env, adminToken, karyawanToken, karyawanId };
+  return { env, adminToken, karyawanToken, adminId, karyawanId };
+}
+
+async function closeKasir(env, token) {
+  const cur = await call(env, '/api/kasir/current', { token });
+  const saldoReal = cur.data.saldo
+    .filter((x) => x.nama_akun !== 'Total Saldo')
+    .map((x) => ({ nama_akun: x.nama_akun, saldo_real: x.saldo_sistem }));
+  return call(env, '/api/kasir/closing', { method: 'POST', token, body: { saldo_real: saldoReal } });
+}
+
+function wibHourNow() {
+  return new Date(Date.now() + 7 * 3600 * 1000).getUTCHours();
 }
 
 async function setRate(env, token, userId, rateFlat) {
@@ -117,6 +129,58 @@ test('GAJI no double-pay: buka kasir dua kali ditolak (session_already_opened) -
 
   const rows = await gajiFor(env, adminToken, today, karyawanId);
   assert.equal(rows.length, 1, 'opening berulang tidak boleh menggandakan gaji');
+});
+
+test('GAJI shift: karyawan tanpa rate -> nominal sesuai jam buka (60k/45k)', async () => {
+  const { env, adminToken, karyawanToken, karyawanId } = await setup();
+  const today = todayWib();
+  const open = await openKasir(env, karyawanToken);
+  assert.equal(open.status, 200, JSON.stringify(open.data));
+  const wibHour = new Date(Date.now() + 7 * 3600 * 1000).getUTCHours();
+  const expected = wibHour < 16 ? 60000 : 45000;
+  const rows = await gajiFor(env, adminToken, today, karyawanId);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].nominal, expected);
+  assert.equal(rows[0].sumber, 'auto');
+});
+
+test('GAJI owner: akru otomatis saat Closing (upah ikut jam buka + 50% service), lalu bayar per orang', async () => {
+  const { env, adminToken, adminId } = await setup();
+  const today = todayWib();
+  await openKasir(env, adminToken);
+
+  // service: biaya 200k, modal 120k -> laba 80k -> share 50% = 40k
+  const svc = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-owner-1' },
+    body: {
+      jenis: 'service', metode_bayar: 'tunai', items: [],
+      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'Ganti LCD', biaya: 200000, harga_modal: 120000, tanggal_masuk: today },
+    },
+  });
+  assert.equal(svc.status, 200, JSON.stringify(svc.data));
+
+  const upah = wibHourNow() < 16 ? 60000 : 45000;
+  const close = await closeKasir(env, adminToken);
+  assert.equal(close.status, 200, JSON.stringify(close.data));
+
+  const rows = await gajiFor(env, adminToken, today, adminId);
+  assert.equal(rows.length, 1, 'owner akru 1 baris saat closing');
+  assert.equal(rows[0].nominal, upah + 40000);
+
+  const unpaid = await call(env, '/api/gaji/unpaid', { token: adminToken });
+  assert.equal(unpaid.status, 200);
+  const ownerUnpaid = unpaid.data.items.find((x) => x.user_id === adminId);
+  assert.equal(ownerUnpaid.total, upah + 40000);
+
+  const pay = await call(env, '/api/gaji/bayar', { method: 'POST', token: adminToken, body: { user_id: adminId } });
+  assert.equal(pay.status, 200, JSON.stringify(pay.data));
+  assert.equal(pay.data.total, upah + 40000);
+
+  const pend = await call(env, `/api/pengeluaran?tanggal=${today}`, { token: adminToken });
+  assert.ok(pend.data.items.some((x) => x.deskripsi.includes('Bayar gaji')), 'pengeluaran gaji tercatat');
+
+  const again = await call(env, '/api/gaji/bayar', { method: 'POST', token: adminToken, body: { user_id: adminId } });
+  assert.equal(again.status, 400, 'tidak ada lagi yang belum dibayar');
 });
 
 test('GAJI auto: admin buka kasir -> TIDAK dibuat baris gaji untuk admin', async () => {

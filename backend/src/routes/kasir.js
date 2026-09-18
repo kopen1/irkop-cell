@@ -1,5 +1,5 @@
 import { readBody } from '../lib/validate.js';
-import { opening, closing, sessionStatus, reminderKasirBelumClosing } from '../financial/kasir.js';
+import { opening, closing, reopen, sessionStatus, reminderKasirBelumClosing } from '../financial/kasir.js';
 
 export async function doOpening(db, request, ctx) {
   const body = await readBody(request);
@@ -9,6 +9,11 @@ export async function doOpening(db, request, ctx) {
 export async function doClosing(db, request, ctx) {
   const body = await readBody(request);
   return closing(db, { body, user: ctx.auth.user, ip: clientIp(request) });
+}
+
+export async function doReopen(db, request, ctx) {
+  const body = await readBody(request).catch(() => ({}));
+  return reopen(db, { body, user: ctx.auth.user, ip: clientIp(request) });
 }
 
 export async function current(db, request, ctx) {

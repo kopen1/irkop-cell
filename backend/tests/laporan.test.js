@@ -66,6 +66,21 @@ test('Laporan Bulanan: omzet, laba, pengeluaran, net, kasbon, rekap kategori ben
   assert.equal(catMap['Fisik'].omzet, 100000);
   assert.equal(catMap['Pulsa & Saldo'].omzet, 24000);
   assert.equal(catMap['Fisik'].qty, 1);
+
+  const saldoAkunMap = Object.fromEntries(r.data.saldo_akun.map((a) => [a.nama_akun, a]));
+  assert.equal(saldoAkunMap['Tunai Laci'].saldo_awal, 500000);
+  // tunai: 500k + 100k + 24k - 15k (ongkir) + 30k (pelunasan kasbon) = 639k
+  assert.equal(saldoAkunMap['Tunai Laci'].saldo_akhir, 639000);
+  assert.equal(r.data.total_saldo_awal, 1500000);
+  assert.equal(r.data.total_saldo_akhir, 1639000);
+
+  const harian = r.data.rincian_harian;
+  assert.equal(harian.length, 1, 'satu tanggal');
+  assert.equal(harian[0].jumlah_transaksi, 2);
+  assert.equal(harian[0].omzet, 124000);
+  assert.equal(harian[0].laba, 54000);
+  assert.equal(harian[0].pengeluaran, 15000);
+  assert.equal(harian[0].net, 54000 - 15000);
 });
 
 test('Laporan Tahunan: omzet + breakdown 12 bulan + ranking kategori', async () => {
@@ -78,6 +93,45 @@ test('Laporan Tahunan: omzet + breakdown 12 bulan + ranking kategori', async () 
   const month = Number(currentBulan().split('-')[1]) - 1;
   assert.equal(r.data.breakdown_12_bulan[month].omzet, 124000);
   assert.equal(r.data.ranking_kategori_terlaris[0].nama_kategori, 'Fisik');
+});
+
+test('Produk terlaris: qty, omzet, laba per produk (bulanan & tahunan)', async () => {
+  const { env, token } = await bootstrapLaporan();
+  const r = await call(env, `/api/laporan/produk-terlaris?bulan=${currentBulan()}`, { token });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.periode, 'bulanan');
+
+  const map = {};
+  for (const it of r.data.items) map[it.nama_produk] = it;
+  assert.equal(map['Pulsa 10rb'].qty, 2, 'Pulsa 10rb terjual 2');
+  assert.equal(map['Pulsa 10rb'].omzet, 24000);
+  assert.equal(map['Pulsa 10rb'].jumlah_transaksi, 1);
+  assert.equal(map['Toner'].qty, 1);
+  assert.equal(map['Toner'].laba, 30000);
+  assert.equal(r.data.items[0].nama_produk, 'Pulsa 10rb', 'urut qty terbanyak');
+
+  const y = await call(env, `/api/laporan/produk-terlaris?tahun=${currentTahun()}`, { token });
+  assert.equal(y.status, 200);
+  assert.equal(y.data.periode, 'tahunan');
+  assert.ok(y.data.items.length >= 2);
+});
+
+test('Omzet = penjualan item saja; tarik tunai masuk Arus Dana (bukan omzet)', async () => {
+  const { env, token } = await bootstrapLaporan();
+  await call(env, '/api/transaksi', {
+    method: 'POST', token,
+    body: { jenis: 'tariktunai', nominal: 100000, mitra: 'DANA', admin_type: 'dalam', tanggal_transaksi: todayWib() },
+  });
+
+  const r = await call(env, `/api/laporan/bulan?bulan=${currentBulan()}`, { token });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.omzet, 124000, 'omzet tetap penjualan item (tarik tunai tidak masuk)');
+
+  const sumKat = r.data.rekap_kategori.reduce((s, k) => s + Number(k.omzet), 0);
+  assert.equal(sumKat, r.data.omzet, 'jumlah rekap kategori = omzet');
+
+  assert.equal(r.data.arus_dana.tarik_tunai, 100000, 'nominal tarik tunai di arus dana');
+  assert.equal(r.data.arus_dana.total, 100000);
 });
 
 test('Export laporan CSV bulanan: berisi header, transaksi, pengeluaran', async () => {

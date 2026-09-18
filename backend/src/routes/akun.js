@@ -2,7 +2,7 @@ import { err } from '../lib/errors.js';
 import { readBody, asInt } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { nowIso } from '../lib/time.js';
-import { listActiveAccounts, listAllAccounts } from '../financial/akun.js';
+import { listActiveAccounts, listAllAccounts, isLedgerAkun } from '../financial/akun.js';
 
 export async function listAkun(db, request, ctx) {
   const url = new URL(request.url);
@@ -18,6 +18,7 @@ export async function createAkun(db, request, ctx) {
   const namaAkun = String(body.nama_akun || '').trim();
   const tipe = body.tipe;
   if (!namaAkun) throw err(400, 'missing_field', 'nama_akun wajib diisi');
+  if (isLedgerAkun(namaAkun)) throw err(400, 'reserved_name', `'${namaAkun}' adalah akun sistem, bukan akun uang`);
   if (!['tunai', 'bank', 'e_wallet', 'digital', 'lainnya'].includes(tipe)) throw err(400, 'invalid_value', 'tipe akun tidak valid');
   const dup = await db.one('SELECT id FROM akun_master WHERE nama_akun = ?', namaAkun);
   if (dup) throw err(409, 'duplicate_akun', 'Nama akun sudah ada');
@@ -38,6 +39,7 @@ export async function updateAkun(db, request, ctx, idStr) {
   if (body.nama_akun !== undefined) {
     const nama = String(body.nama_akun).trim();
     if (!nama) throw err(400, 'missing_field', 'nama_akun wajib diisi');
+    if (isLedgerAkun(nama)) throw err(400, 'reserved_name', `'${nama}' adalah akun sistem, bukan akun uang`);
     const dup = await db.one('SELECT id FROM akun_master WHERE nama_akun = ? AND id != ?', nama, id);
     if (dup) throw err(409, 'duplicate_akun', 'Nama akun sudah ada');
     sets.push('nama_akun = ?'); vals.push(nama);

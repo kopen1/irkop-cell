@@ -50,7 +50,6 @@ export async function updateKategori(db, request, ctx, idStr) {
   if (nama !== null) { sets.push('nama = ?'); vals.push(nama); }
   if (lacakStok !== null) { sets.push('lacak_stok = ?'); vals.push(lacakStok); }
   if (!sets.length) throw err(400, 'no_changes', 'Tidak ada perubahan');
-  sets.push('updated_at = ?'); vals.push(nowIso());
   vals.push(id);
   await db.exec(`UPDATE kategori_produk SET ${sets.join(', ')} WHERE id = ?`, ...vals);
   await writeAudit(db, { userId: user.id, aksi: 'update', tabel: 'kategori_produk', recordId: id, dataBefore: { nama: old.nama, lacak_stok: old.lacak_stok }, dataAfter: body });

@@ -59,6 +59,7 @@ a {
   letter-spacing: 0.2px;
 }
 
+.text-primary { color: var(--text-primary); }
 .text-secondary { color: var(--text-secondary); }
 .text-muted { color: var(--text-muted); }
 .text-success { color: var(--success); }

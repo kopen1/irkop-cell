@@ -207,3 +207,94 @@ export async function listHargaLog(db, request, ctx) {
   );
   return { items: rows };
 }
+
+// POST /api/harga-server/update-modal
+// Body:
+//   { kode }            -> update 1 produk
+//   { kode_list: [...] }-> update banyak produk
+//   { all_naik: true }  -> update semua yang harga_server > harga_modal
+// Logic: harga_modal := harga_server, harga jual dipertahankan margin lama.
+export async function updateModalFromServer(db, request, ctx) {
+  const { user } = ctx.auth;
+  if (user.role !== 'admin') throw err(403, 'forbidden', 'Admin only');
+
+  const body = await readBody(request);
+  const now = nowIso();
+
+  let targets = null; // null = semua naik
+  if (Array.isArray(body.kode_list) && body.kode_list.length) {
+    targets = body.kode_list.map((k) => String(k));
+  } else if (body.kode) {
+    targets = [String(body.kode)];
+  } else if (!body.all_naik) {
+    throw err(400, 'missing_field', 'Sertakan kode, kode_list, atau all_naik');
+  }
+
+  // Ambil baris harga_server sesuai target
+  let serverRows;
+  if (targets) {
+    const placeholders = targets.map(() => '?').join(',');
+    serverRows = await db.many(
+      `SELECT * FROM harga_server WHERE kode_produk IN (${placeholders})`,
+      ...targets
+    );
+  } else {
+    serverRows = await db.many(
+      `SELECT hs.* FROM harga_server hs
+         JOIN produk p ON p.kode = hs.kode_produk AND p.deleted_at IS NULL
+        WHERE hs.harga_server > p.harga_modal`
+    );
+  }
+
+  const updated = [];
+  const skipped = [];
+
+  for (const hs of serverRows) {
+    const p = await db.one(
+      'SELECT * FROM produk WHERE kode = ? AND deleted_at IS NULL',
+      hs.kode_produk
+    );
+    if (!p) {
+      skipped.push({ kode: hs.kode_produk, reason: 'Produk tidak ada di Daftar Barang' });
+      continue;
+    }
+    if (p.harga_modal === hs.harga_server) {
+      skipped.push({ kode: hs.kode_produk, reason: 'Harga modal sudah sama' });
+      continue;
+    }
+
+    // Pertahankan margin lama: harga_jual - harga_modal
+    const margin = (p.harga || 0) - (p.harga_modal || 0);
+    const newModal = hs.harga_server;
+    const newHarga = newModal + margin;
+
+    await db.exec(
+      'UPDATE produk SET harga_modal = ?, harga = ?, updated_at = ? WHERE id = ?',
+      newModal, newHarga, now, p.id
+    );
+    await writeAudit(db, {
+      userId: user.id,
+      aksi: 'update_modal_from_server',
+      tabel: 'produk',
+      recordId: p.id,
+      dataBefore: { kode: p.kode, harga_modal: p.harga_modal, harga: p.harga },
+      dataAfter: { kode: p.kode, harga_modal: newModal, harga: newHarga },
+    });
+
+    updated.push({
+      kode: hs.kode_produk,
+      nama: p.nama,
+      modal_lama: p.harga_modal,
+      modal_baru: newModal,
+      harga_jual: newHarga,
+    });
+  }
+
+  return {
+    updated_count: updated.length,
+    skipped_count: skipped.length,
+    updated,
+    skipped,
+    message: `${updated.length} produk diperbarui, ${skipped.length} dilewati`,
+  };
+}

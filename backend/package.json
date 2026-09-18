@@ -6,6 +6,8 @@
   "description": "Irkop Cell — Team 1 Core & Backend (Cloudflare Workers + D1)",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:local": "node dev-server.js",
+    "dev:fresh": "node dev-server.js --fresh",
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply irkop-d1",
     "db:local": "wrangler d1 migrations apply irkop-d1 --local",

@@ -14,16 +14,12 @@ const produk = {
     { id: 1, kode: 'PLS-001', nama: 'Pulsa', harga: 12000, kategori_id: 2, deleted_at: null },
     { id: 2, kode: 'TNR-001', nama: 'Toner', harga: 50000, kategori_id: 1, deleted_at: null },
     { id: 3, kode: 'TANPA-1', nama: 'Tanpa Kategori', harga: 3000, kategori_id: null, deleted_at: null },
-    { id: 4, kode: 'TF-DANA', nama: 'Transfer DANA', harga: 1000, kategori_id: 3, deleted_at: null },
-    { id: 5, kode: 'TT-X', nama: 'Tarik Tunai', harga: 1000, kategori_id: 4, deleted_at: null },
   ],
 };
 const kategori = {
   items: [
     { id: 1, nama: 'Fisik', lacak_stok: 1 },
     { id: 2, nama: 'Digital', lacak_stok: 0 },
-    { id: 3, nama: 'Transfer', lacak_stok: 0 },
-    { id: 4, nama: 'Tarik Tunai', lacak_stok: 0 },
   ],
 };
 
@@ -33,22 +29,26 @@ beforeEach(() => {
     if (path === '/produk') return produk;
     if (path === '/kategori') return kategori;
     if (path === '/akun') return { items: [] };
+    if (path === '/pelanggan') return { items: [] };
+    if (path === '/kasir/current') return { status: 'buka', saldo: [] };
     return { items: [] };
   });
 });
-afterEach(() => cleanup());
-
-function search(q) {
-  fireEvent.change(screen.getByPlaceholderText(/kode atau nama produk/i), { target: { value: q } });
-}
+afterEach(cleanup);
 
 function setJenisPenjualan() {
-  fireEvent.change(screen.getByLabelText('Jenis Transaksi'), { target: { value: 'penjualan' } });
+  fireEvent.change(screen.getByLabelText(/jenis transaksi/i), { target: { value: 'penjualan' } });
+}
+function search(q) {
+  fireEvent.change(screen.getByPlaceholderText(/ketik kode atau nama/i), { target: { value: q } });
 }
 
-describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
-  it('menampilkan select Filter Kategori berisi opsi kategori dari GET /kategori', async () => {
+describe('TransaksiForm — Filter Kategori & keranjang', () => {
+  it('Filter Kategori hanya tampil saat Jenis = Penjualan, berisi opsi dari GET /kategori', async () => {
     render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    // Belum pilih jenis → filter belum tampil
+    expect(screen.queryByLabelText('Filter Kategori')).toBeNull();
+
     setJenisPenjualan();
     const filter = await screen.findByLabelText('Filter Kategori');
     expect(filter).toBeTruthy();
@@ -92,13 +92,13 @@ describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
 
   it('produk tanpa kategori tetap bisa dipilih via filter Tanpa kategori', async () => {
     render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    setJenisPenjualan();
     const filter = await screen.findByLabelText('Filter Kategori');
     fireEvent.change(filter, { target: { value: 'none' } });
     search('Tanpa');
-    await waitFor(() => expect(screen.getByText(/Tanpa Kategori/)).toBeTruthy());
-    fireEvent.click(screen.getByText(/Tanpa Kategori/));
-    await waitFor(() => expect(screen.queryByText(/Belum ada produk di keranjang/)).toBeNull());
-    expect(screen.getByText('Tanpa Kategori')).toBeTruthy();
+    const hasil = await screen.findByText(/Tanpa Kategori/);
+    fireEvent.click(hasil);
+    expect(await screen.findByText('Keranjang (1 item)')).toBeTruthy();
   });
 
   it('daftar kategori kosong: filter tetap tampil dan pencarian tetap berfungsi', async () => {
@@ -106,9 +106,12 @@ describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
       if (path === '/produk') return { items: [{ id: 1, kode: 'X-1', nama: 'Bebas', harga: 100, kategori_id: null, deleted_at: null }] };
       if (path === '/kategori') return { items: [] };
       if (path === '/akun') return { items: [] };
+      if (path === '/pelanggan') return { items: [] };
+      if (path === '/kasir/current') return { status: 'buka', saldo: [] };
       return { items: [] };
     });
     render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    setJenisPenjualan();
     const filter = await screen.findByLabelText('Filter Kategori');
     expect(screen.getByRole('option', { name: 'Semua kategori' })).toBeTruthy();
     expect(screen.getByRole('option', { name: 'Tanpa kategori' })).toBeTruthy();
@@ -117,56 +120,27 @@ describe('TransaksiForm Filter Kategori (ITEM 4)', () => {
     expect(filter.value).toBe('');
   });
 
-  it('edit transaksi: prefill keranjang tetap tampil dan filter tidak mengganggu', async () => {
+  it('edit transaksi: prefill keranjang tampil dengan qty & tombol Simpan', async () => {
     const initial = {
       id: 9,
+      jenis: 'penjualan',
       metode_bayar: 'tunai',
       items: [{ produk_id: 1, kode: 'PLS-001', nama_produk: 'Pulsa', harga: 12000, qty: 2 }],
     };
     render(<TransaksiForm initial={initial} onSaved={() => {}} onCancel={() => {}} />);
-    await screen.findByLabelText('Filter Kategori');
+    expect(await screen.findByText('Keranjang (1 item)')).toBeTruthy();
     expect(screen.getByText('Pulsa')).toBeTruthy();
     expect(screen.getByText('2')).toBeTruthy();
-    expect(screen.getByText(/Simpan Perubahan/)).toBeTruthy();
+    expect(screen.getByText('Simpan Transaksi')).toBeTruthy();
   });
 
-  it('produk dari kategori kirim-uang (Transfer) otomatis menampilkan input Nominal & Akun sumber', async () => {
+  it('mencari dan menambah produk ke keranjang', async () => {
     render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
-    const filter = await screen.findByLabelText('Filter Kategori');
-    fireEvent.change(filter, { target: { value: '3' } });
-    await waitFor(() => expect(screen.getByText(/Transfer DANA/)).toBeTruthy());
-    fireEvent.click(screen.getByText(/Transfer DANA/));
-    await waitFor(() => expect(screen.getByLabelText(/Produk jasa Kirim Uang/).checked).toBe(true));
-    expect(screen.getByText('Nominal transfer')).toBeTruthy();
-    expect(screen.getByPlaceholderText(/mis\. 500\.000/)).toBeTruthy();
-    expect(screen.getByText('Akun sumber')).toBeTruthy();
-  });
-
-  it('produk dari kategori biasa tidak otomatis tercentang Kirim Uang', async () => {
-    render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
+    setJenisPenjualan();
     await screen.findByLabelText('Filter Kategori');
-    search('Pulsa');
-    await waitFor(() => expect(screen.getByText(/Pulsa/)).toBeTruthy());
-    fireEvent.click(screen.getByText(/Pulsa/));
-    await waitFor(() => expect(screen.getByLabelText(/Produk jasa Kirim Uang/).checked).toBe(false));
-    expect(screen.queryByText('Nominal transfer')).toBeNull();
-  });
-
-  it('produk dari kategori Tarik Tunai: label sadar-arah (nominal diterima, akun penerima saldo)', async () => {
-    render(<TransaksiForm onSaved={() => {}} onCancel={() => {}} />);
-    const filter = await screen.findByLabelText('Filter Kategori');
-    fireEvent.change(filter, { target: { value: '4' } });
-    const btn = await screen.findByRole('button', { name: /Tarik Tunai/ });
-    fireEvent.click(btn);
-    await waitFor(() => expect(screen.getByLabelText(/Produk jasa Tarik Tunai/).checked).toBe(true));
-    expect(screen.getByText('Nominal diterima')).toBeTruthy();
-    expect(screen.getByText('Akun penerima saldo')).toBeTruthy();
-    expect(screen.queryByText('Nominal transfer')).toBeNull();
-  });
-
-  it('showKategoriFilter=false menyembunyikan filter (manual entry LaporanPage tetap aman)', async () => {
-    render(<TransaksiForm showKategoriFilter={false} onSaved={() => {}} onCancel={() => {}} />);
-    expect(screen.queryByLabelText('Filter Kategori')).toBeNull();
-    expect(await screen.findByLabelText('Cari produk (kode / nama)')).toBeTruthy();
+    search('Toner');
+    const hasil = await screen.findByText(/Toner/);
+    fireEvent.click(hasil);
+    expect(await screen.findByText('Keranjang (1 item)')).toBeTruthy();
   });
 });

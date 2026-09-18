@@ -31,6 +31,7 @@ export default function HargaServerPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [logOpen, setLogOpen] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState({});
 
   const load = useMemo(
     () => async () => {
@@ -64,10 +65,47 @@ export default function HargaServerPage() {
     try {
       const data = await api.get('/harga-server/alerts');
       setAlerts(data.items || []);
-    } catch (err) {}
+    } catch {
+      /* abaikan */
+    }
   };
 
   useEffect(() => { load(); loadCompare(); loadAlerts(); }, [load, loadCompare]);
+
+  const reloadAll = () => { load(); loadCompare(); loadAlerts(); };
+
+  // Update modal 1 produk di Daftar Barang dari harga server
+  const doUpdateModal = async (row) => {
+    setUpdateBusy((s) => ({ ...s, [row.kode_produk]: true }));
+    try {
+      const res = await api.post('/harga-server/update-modal', { kode: row.kode_produk });
+      if (res.updated_count > 0) {
+        const u = res.updated[0];
+        toast.success(`${u.nama}: modal ${formatRupiah(u.modal_lama)} → ${formatRupiah(u.modal_baru)}`);
+      } else {
+        toast.warning(res.skipped?.[0]?.reason || 'Tidak ada yang diperbarui');
+      }
+      reloadAll();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setUpdateBusy((s) => ({ ...s, [row.kode_produk]: false }));
+    }
+  };
+
+  // Update semua produk yang harga server > modal (harga naik)
+  const doUpdateAllNaik = async () => {
+    setUpdateBusy((s) => ({ ...s, __all: true }));
+    try {
+      const res = await api.post('/harga-server/update-modal', { all_naik: true });
+      toast.success(`${res.updated_count} produk diperbarui${res.skipped_count ? `, ${res.skipped_count} dilewati` : ''}.`);
+      reloadAll();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setUpdateBusy((s) => ({ ...s, __all: false }));
+    }
+  };
 
   const data = state.data || {};
   const items = data.items || [];
@@ -82,13 +120,18 @@ export default function HargaServerPage() {
         subtitle="Perbandingan harga modal vs harga dari OrderKuota/DANA"
         actions={
           <>
+            {summary.naik > 0 && (
+              <Button onClick={doUpdateAllNaik} loading={updateBusy.__all}>
+                <Icon name="refresh" size={16} /> Update Modal Naik ({summary.naik})
+              </Button>
+            )}
             <Button variant="secondary" onClick={() => setLogOpen(true)}>
               <Icon name="clock" size={16} /> Log
             </Button>
             <Button variant="secondary" onClick={() => setImportOpen(true)}>
               <Icon name="download" size={16} /> Import
             </Button>
-            <Button onClick={() => { load(); loadCompare(); loadAlerts(); }}>
+            <Button variant="secondary" onClick={reloadAll}>
               <Icon name="refresh" size={16} /> Refresh
             </Button>
           </>
@@ -180,9 +223,22 @@ export default function HargaServerPage() {
               return <Badge tone="success">OK</Badge>;
             }},
             { key: 'aksi', header: '', render: (r) => (
-              <Button variant="ghost" size="sm" onClick={() => setEditTarget(r)}>
-                <Icon name="edit" size={15} />
-              </Button>
+              <div className="row-actions">
+                {(r.status === 'naik' || r.status === 'turun') && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    loading={updateBusy[r.kode_produk]}
+                    onClick={() => doUpdateModal(r)}
+                    title="Samakan modal Daftar Barang dengan harga server (margin jual dipertahankan)"
+                  >
+                    <Icon name="refresh" size={13} /> Update Modal
+                  </Button>
+                )}
+                <Button variant="ghost" size="sm" onClick={() => setEditTarget(r)} title="Edit harga server">
+                  <Icon name="edit" size={15} />
+                </Button>
+              </div>
             )},
           ]}
           rows={compareItems.map((r) => ({ ...r, key: r.id }))}

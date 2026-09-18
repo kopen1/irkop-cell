@@ -36,20 +36,25 @@ export default function KasirPage() {
   const [editLoading, setEditLoading] = useState(false);
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState(null);
+  const [reopenBusy, setReopenBusy] = useState(false);
 
   useEffect(() => {
     if (sesi.status === 'error') return;
     if (sesi.status !== 'success') return;
     if (sesi.data?.status === 'belum_buka' && akun.status === 'success') {
-      const akunList = akun.data?.items || [];
+      const akunList = (akun.data?.items || []).filter((a) => a.tipe !== 'lainnya');
+      const saran = Object.fromEntries((sesi.data.saldo_awal_saran || []).map((s) => [s.nama_akun, s.saldo]));
       setOpening(
         akunList.length
-          ? akunList.map((a) => ({ nama_akun: a.nama_akun, saldo: 0 }))
+          ? akunList.map((a) => ({
+              nama_akun: a.nama_akun,
+              saldo: saran[a.nama_akun] != null ? formatRupiahInput(String(saran[a.nama_akun])) : 0,
+            }))
           : []
       );
     }
     if (sesi.data?.status === 'buka') {
-      const s = sesi.data.saldo || [];
+      const s = (sesi.data.saldo || []).filter((x) => x.nama_akun !== 'Total Saldo');
       setClosing(
         s.length
           ? s.map((x) => ({
@@ -134,8 +139,12 @@ export default function KasirPage() {
     try {
       const data = await api.get('/kasir/current', { kasir_sesi_id: s.kasir_sesi_id });
       const rows = data.closing?.length
-        ? data.closing.map((c) => ({ nama_akun: c.nama_akun, saldo_sistem: c.saldo_sistem ?? 0, saldo_real: c.saldo_real ?? c.saldo_sistem ?? 0 }))
-        : (data.saldo || []).map((x) => ({ nama_akun: x.nama_akun, saldo_sistem: x.saldo_sistem ?? 0, saldo_real: x.saldo_sistem ?? 0 }));
+        ? data.closing
+            .filter((c) => c.nama_akun !== 'Total Saldo')
+            .map((c) => ({ nama_akun: c.nama_akun, saldo_sistem: c.saldo_sistem ?? 0, saldo_real: c.saldo_real ?? c.saldo_sistem ?? 0 }))
+        : (data.saldo || [])
+            .filter((x) => x.nama_akun !== 'Total Saldo')
+            .map((x) => ({ nama_akun: x.nama_akun, saldo_sistem: x.saldo_sistem ?? 0, saldo_real: x.saldo_sistem ?? 0 }));
       setEditRows(rows);
       setEditCatatan(data.catatan_closing || '');
       setEditSesi((prev) => ({ ...prev, status: data.status }));
@@ -143,6 +152,20 @@ export default function KasirPage() {
       setEditErr(err.message);
     } finally {
       setEditLoading(false);
+    }
+  };
+
+  const doReopen = async () => {
+    if (!window.confirm('Buka ulang sesi kasir hari ini? Hasil closing lama akan dihapus dan sesi kembali berstatus buka.')) return;
+    setReopenBusy(true);
+    try {
+      await api.post('/kasir/reopen', {});
+      toast.success('Sesi kasir dibuka ulang.');
+      sesi.run();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setReopenBusy(false);
     }
   };
 
@@ -221,11 +244,9 @@ export default function KasirPage() {
       )}
 
       {status === 'belum_buka' && (
-        <Card
-          title="Opening — Saldo Awal"
-          subtitle="Saldo awal setiap akun saat memulai sesi. Closing & saldo sistem dihitung backend dari saldo awal + mutasi."
-        >
+        <Card title="Opening — Saldo Awal">
           <form onSubmit={doOpening}>
+            <p className="field-hint mb-2">Saldo awal otomatis diisi dari sesi terakhir. Sesuaikan bila ada perubahan.</p>
             <div className="flex flex-col gap-3">
               {opening && opening.length > 0 ? (
                 opening.map((o, idx) => (
@@ -264,22 +285,24 @@ export default function KasirPage() {
 
       {status === 'buka' && (
         <>
-          <Card title="Saldo Sistem (berjalan)" subtitle="Nilai resmi backend: saldo_opening + mutasi. Closing tidak mengurangi/menambah saldo lagi (PRD 12.2).">
+          <Card title="Saldo Sistem (berjalan)">
+            <div className="mb-3 text-right">
+              <Button variant="secondary" size="sm" onClick={() => sesi.run()}>
+                <Icon name="refresh" size={14} /> Muat ulang
+              </Button>
+            </div>
             <BalanceTable rows={sesi.data?.saldo || []} />
           </Card>
 
           <div className="mt-4">
-            <Card
-              title="Closing — Rekonsiliasi"
-              subtitle={`Cocokkan saldo real tiap aplikasi dengan saldo sistem. Selisih = saldo_real − saldo_sistem (dihitung backend).`}
-            >
+            <Card title="Closing — Rekonsiliasi">
               <form onSubmit={doClosing}>
                 <div className="flex flex-col gap-3">
                   {(closing || []).map((c, idx) => (
                     <div key={c.nama_akun} className="akun-row">
                       <div>
                         <div style={{ fontWeight: 600 }}>{c.nama_akun}</div>
-                        <span className="num text-sm text-secondary">Sistem: {formatRupiah(c.saldo_sistem)}</span>
+                        <span className="num text-sm text-primary font-bold">Sistem: {formatRupiah(c.saldo_sistem)}</span>
                       </div>
                       <Field label="Saldo real (Rp)">
                         <Input
@@ -315,6 +338,11 @@ export default function KasirPage() {
 
       {status === 'tutup' && (
         <>
+          <div className="mb-3 text-right">
+            <Button variant="secondary" size="sm" onClick={doReopen} loading={reopenBusy}>
+              <Icon name="refresh" size={14} /> Buka ulang sesi
+            </Button>
+          </div>
           <Card title="Hasil Rekonsiliasi">
             {sesi.data?.closing?.length ? (
               <div className="table-wrap">
@@ -352,7 +380,7 @@ export default function KasirPage() {
           </Card>
 
           <div className="mt-4">
-            <Card title="Saldo Sistem (sesi dimulai)" subtitle="Saldo awal + mutasi sepanjang sesi (nilai backend).">
+            <Card title="Saldo Sistem (sesi dimulai)">
               <BalanceTable rows={sesi.data?.saldo || []} />
             </Card>
           </div>
@@ -387,15 +415,12 @@ export default function KasirPage() {
           <p className="text-sm text-secondary">Sesi ini sudah ditutup. Perbarui halaman untuk melihat hasilnya.</p>
         ) : (
           <>
-            <p className="text-sm text-secondary mb-3">
-              Sesi <b>{editSesi?.tanggal}</b> masih berstatus buka. Koreksi saldo real (klosing) &amp; catatan, lalu simpan untuk menutup sesi tersebut. Closing tidak mengubah mutasi — selisih dihitung backend dan dicatat di audit.
-            </p>
             <div className="flex flex-col gap-3">
               {(editRows || []).map((c, idx) => (
                 <div key={c.nama_akun} className="akun-row">
                   <div>
                     <div style={{ fontWeight: 600 }}>{c.nama_akun}</div>
-                    <span className="num text-sm text-secondary">Sistem: {formatRupiah(c.saldo_sistem)}</span>
+                    <span className="num text-sm text-primary font-bold">Sistem: {formatRupiah(c.saldo_sistem)}</span>
                   </div>
                   <Field label="Saldo real (Rp)">
                     <Input
@@ -443,7 +468,7 @@ function BalanceTable({ rows }) {
           {rows.map((r) => (
             <tr key={r.nama_akun}>
               <td>{r.nama_akun}</td>
-              <td className="col-right num">{formatRupiah(r.saldo_opening)}</td>
+              <td className="col-right num text-primary font-bold">{formatRupiah(r.saldo_opening)}</td>
               <td className="col-right num text-success">+{formatSignedRupiah(r.mutasi || 0)}</td>
               <td className="col-right num" style={{ fontWeight: 800 }}>{formatRupiah(r.saldo_sistem)}</td>
             </tr>

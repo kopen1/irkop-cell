@@ -76,7 +76,7 @@
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  padding: var(--space-5);
+  padding: var(--space-5) 5px;
   box-shadow: var(--shadow-sm);
 }
 .card-header {
@@ -286,7 +286,7 @@
 
 /* ---------- Page header & filter ---------- */
 .page {
-  padding: var(--space-5);
+  padding: var(--space-5) 5px;
   max-width: var(--container-max);
   margin: 0 auto;
   width: 100%;
@@ -301,6 +301,12 @@
 }
 .page-title { font-size: 1.35rem; font-weight: 800; }
 .page-subtitle { font-size: 0.85rem; color: var(--text-secondary); }
+
+/* Semua keterangan/subtitle disembunyikan (tampilan ringkas atas permintaan). */
+.page-subtitle,
+.card-header p.text-sm.text-secondary {
+  display: none;
+}
 
 .filter-bar {
   display: flex;
@@ -686,7 +692,8 @@
   .sidebar-desktop { display: none; }
   .topbar-brand-mobile { display: inline-flex; }
   .desktop-only { display: none !important; }
-  .page { padding: var(--space-4); }
+  .page { padding: var(--space-4) 5px; }
+  .card { padding: var(--space-4) 5px; }
   .shell-content { margin-bottom: var(--bottomnav-height); }
   .modal-overlay { padding: var(--space-3); align-items: flex-end; }
   .modal { max-width: none; border-radius: var(--radius-lg) var(--radius-lg) 0 0; max-height: calc(100vh - var(--space-8)); }

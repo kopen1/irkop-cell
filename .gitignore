@@ -16,6 +16,7 @@ token.md.bak
 node_modules/
 dist/
 .wrangler/
+backend/.dev-data/
 
 # Logs
 *.log

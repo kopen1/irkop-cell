@@ -8,7 +8,7 @@ export function NavList({ onNavigate }) {
   const { user, permissions } = useAuth();
   const renderLink = (item) => {
     if (item.adminOnly && user?.role !== 'admin') return null;
-    if (!canAccess(permissions, item.key)) return null;
+    if (!canAccess(permissions, item.perm || item.key)) return null;
     return (
       <NavLink
         key={item.key}

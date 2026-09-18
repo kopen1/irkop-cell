@@ -10,7 +10,7 @@ import { useEffect, useState } from 'react';
 import { api, downloadFile } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useSiteName } from '../hooks/useSiteName';
-import { todayWIB, formatRupiah } from '../lib/format';
+import { todayWIB, formatRupiah, formatSignedRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -82,6 +82,11 @@ export default function LaporanPage() {
   const [status, setStatus] = useState('loading');
   const [error, setError] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
+  const [refresh, setRefresh] = useState(0);
+  const [produk, setProduk] = useState({ status: 'loading', items: [], error: null });
+  const [nilaiStok, setNilaiStok] = useState({ status: 'loading', data: null, error: null });
+  const [rekon, setRekon] = useState({ status: 'idle', data: null, error: null });
+  const [bukuKas, setBukuKas] = useState({ status: 'idle', data: null, error: null });
   const siteName = useSiteName();
 
   const isBulanan = period === 'bulanan';
@@ -111,7 +116,56 @@ export default function LaporanPage() {
     return () => {
       cancelled = true;
     };
-  }, [period, year, month]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [period, year, month, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false;
+    setProduk({ status: 'loading', items: [], error: null });
+    const params = isBulanan ? { bulan: bulanParam } : { tahun: year };
+    api
+      .get('/laporan/produk-terlaris', { ...params, limit: 50 })
+      .then((res) => {
+        if (!cancelled) setProduk({ status: 'success', items: res.items || [], error: null });
+      })
+      .catch((err) => {
+        if (!cancelled) setProduk({ status: 'error', items: [], error: err });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [period, year, month, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    let cancelled = false;
+    setNilaiStok((s) => ({ ...s, status: 'loading' }));
+    api
+      .get('/laporan/nilai-stok')
+      .then((res) => { if (!cancelled) setNilaiStok({ status: 'success', data: res, error: null }); })
+      .catch((err) => { if (!cancelled) setNilaiStok({ status: 'error', data: null, error: err }); });
+    return () => { cancelled = true; };
+  }, [refresh]);
+
+  useEffect(() => {
+    if (!isBulanan) return undefined;
+    let cancelled = false;
+    setRekon({ status: 'loading', data: null, error: null });
+    api
+      .get('/laporan/rekonsiliasi', { bulan: bulanParam })
+      .then((res) => { if (!cancelled) setRekon({ status: 'success', data: res, error: null }); })
+      .catch((err) => { if (!cancelled) setRekon({ status: 'error', data: null, error: err }); });
+    return () => { cancelled = true; };
+  }, [period, year, month, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!isBulanan) return undefined;
+    let cancelled = false;
+    setBukuKas({ status: 'loading', data: null, error: null });
+    api
+      .get('/laporan/buku-kas', { bulan: bulanParam })
+      .then((res) => { if (!cancelled) setBukuKas({ status: 'success', data: res, error: null }); })
+      .catch((err) => { if (!cancelled) setBukuKas({ status: 'error', data: null, error: err }); });
+    return () => { cancelled = true; };
+  }, [period, year, month, refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleCsv() {
     try {
@@ -155,12 +209,41 @@ export default function LaporanPage() {
     for (const c of cells) html += '<tr><td>' + c[0] + '</td><td class="r">' + c[1] + '</td></tr>';
     html += '</tbody></table>';
 
+    const saldoAkun = r.saldo_akun || [];
+    if (saldoAkun.length) {
+      html += '<h2>Saldo Akun</h2><table><thead><tr><th>Akun</th><th class="r">Saldo Awal</th><th class="r">Saldo Akhir</th></tr></thead><tbody>';
+      for (const a of saldoAkun) {
+        html += '<tr><td>' + a.nama_akun + '</td><td class="r">' + formatRupiah(a.saldo_awal || 0) + '</td><td class="r">' + formatRupiah(a.saldo_akhir || 0) + '</td></tr>';
+      }
+      html += '<tr class="sum"><td>Total uang</td><td class="r">' + formatRupiah(r.total_saldo_awal || 0) + '</td><td class="r">' + formatRupiah(r.total_saldo_akhir || 0) + '</td></tr>';
+      html += '</tbody></table>';
+    }
+
     const kategori = r.rekap_kategori || [];
     if (kategori.length) {
       html += '<h2>Rekap Kategori</h2><table><thead><tr><th>Kategori</th><th>Jumlah Item</th><th>Qty</th><th class="r">Omzet</th></tr></thead><tbody>';
       for (const k of kategori) {
         html += '<tr><td>' + k.nama_kategori + '</td><td>' + (k.jumlah_item || 0) + '</td><td>' + (k.qty || 0) + '</td><td class="r">' + formatRupiah(k.omzet || 0) + '</td></tr>';
       }
+      html += '</tbody></table>';
+    }
+
+    const harian = r.rincian_harian || [];
+    if (harian.length) {
+      html += '<h2>Rincian Harian</h2><table><thead><tr><th>Tanggal</th><th>Trx</th><th class="r">Omzet</th><th class="r">Laba</th><th class="r">Pengeluaran</th><th class="r">Beli Stok</th><th class="r">Net</th></tr></thead><tbody>';
+      for (const h of harian) {
+        html += '<tr><td>' + h.tanggal + '</td><td>' + (h.jumlah_transaksi || 0) + '</td><td class="r">' + formatRupiah(h.omzet || 0) + '</td><td class="r">' + formatRupiah(h.laba || 0) + '</td><td class="r">' + formatRupiah(h.pengeluaran || 0) + '</td><td class="r">' + formatRupiah(h.beli_stok || 0) + '</td><td class="r">' + formatRupiah(h.net || 0) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+
+    if (r.arus_dana) {
+      html += '<h2>Arus Dana (bukan omzet)</h2><table><thead><tr><th>Jenis</th><th class="r">Nominal</th></tr></thead><tbody>';
+      html += '<tr><td>Kirim uang (nominal titipan)</td><td class="r">' + formatRupiah(r.arus_dana.kirim_uang || 0) + '</td></tr>';
+      html += '<tr><td>Tarik tunai</td><td class="r">' + formatRupiah(r.arus_dana.tarik_tunai || 0) + '</td></tr>';
+      html += '<tr><td>Transfer</td><td class="r">' + formatRupiah(r.arus_dana.transfer || 0) + '</td></tr>';
+      html += '<tr class="sum"><td>Total Arus Dana</td><td class="r">' + formatRupiah(r.arus_dana.total || 0) + '</td></tr>';
+      html += '<tr><td>Pendapatan admin (fee)</td><td class="r">' + formatRupiah(r.pendapatan_admin || 0) + '</td></tr>';
       html += '</tbody></table>';
     }
 
@@ -188,6 +271,23 @@ export default function LaporanPage() {
         html += '</tbody></table>';
       }
     }
+    const pl = produk.items || [];
+    if (pl.length) {
+      html += '<h2>Produk Terlaris</h2><table><thead><tr><th>#</th><th>Produk</th><th>Kategori</th><th>Qty</th><th class="r">Omzet</th><th class="r">Laba</th></tr></thead><tbody>';
+      for (const p of pl) {
+        html += '<tr><td>' + p.peringkat + '</td><td>' + p.nama_produk + '</td><td>' + p.nama_kategori + '</td><td>' + p.qty + '</td><td class="r">' + formatRupiah(p.omzet || 0) + '</td><td class="r">' + formatRupiah(p.laba || 0) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+
+    const bkd = bukuKas.data;
+    if (bkd && bkd.per_jenis?.length) {
+      html += '<h2>Buku Kas (semua pergerakan)</h2><table><thead><tr><th>Jenis</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Net</th></tr></thead><tbody>';
+      for (const j of bkd.per_jenis) {
+        html += '<tr><td>' + j.jenis + '</td><td class="r">' + formatRupiah(j.masuk) + '</td><td class="r">' + formatRupiah(j.keluar) + '</td><td class="r">' + formatRupiah(j.net) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
     return html;
   }
 
@@ -208,6 +308,8 @@ export default function LaporanPage() {
     qty: k.qty || 0,
     omzet: k.omzet || 0,
   }));
+
+  const harianRows = (data && data.rincian_harian || []).map((h) => ({ ...h, key: h.tanggal }));
 
   const kasbon = (data && data.kasbon) || {};
   const kasbonRows = [
@@ -244,6 +346,40 @@ export default function LaporanPage() {
     qty: c.qty || 0,
     omzet: c.omzet || 0,
   }));
+
+  const produkRows = (produk.items || []).map((p) => ({
+    ...p,
+    key: String(p.produk_id ?? 'svc') + '-' + p.nama_produk,
+  }));
+
+  const stokTotal = nilaiStok.data?.total;
+  const nilaiStokRows = (nilaiStok.data?.per_kategori || []).map((g) => ({ ...g, key: g.nama_kategori }));
+  if (stokTotal) {
+    nilaiStokRows.push({
+      key: '__total',
+      nama_kategori: 'TOTAL',
+      qty: stokTotal.qty,
+      nilai_modal: stokTotal.nilai_modal,
+      nilai_jual: stokTotal.nilai_jual,
+      potensi_laba: stokTotal.potensi_laba,
+    });
+  }
+
+  const bk = bukuKas.data;
+  const bukuJenisRows = (bk?.per_jenis || []).map((j) => ({ ...j, key: j.jenis }));
+  const bukuAkunRows = (bk?.per_akun || []).map((a) => ({ ...a, key: a.nama_akun }));
+
+  const rk = rekon.data;
+  const rekonRows = rk
+    ? [
+        { key: 'laba', label: 'Laba', value: rk.laba },
+        { key: 'peng', label: 'Pengeluaran operasional', value: -rk.pengeluaran_operasional },
+        { key: 'stok', label: 'Δ Stok (beli − COGS)', value: -rk.delta_stok },
+        { key: 'piutang', label: 'Δ Piutang (kasbon)', value: -rk.delta_piutang },
+        { key: 'expected', label: 'Δ Uang seharusnya', value: rk.delta_uang_seharusnya, bold: true },
+        { key: 'actual', label: 'Δ Uang aktual (mutasi)', value: rk.delta_uang_aktual, bold: true },
+      ]
+    : [];
 
   const hasContent = data && (data.jumlah_transaksi || data.omzet || data.pengeluaran || data.net);
 
@@ -331,6 +467,60 @@ export default function LaporanPage() {
                 />
               </Card>
 
+              <Card className="mt-4" title="Rincian Harian">
+                <Table
+                  columns={[
+                    { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
+                    { key: 'jumlah_transaksi', header: 'Trx', align: 'right', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
+                    { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
+                    { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
+                    { key: 'pengeluaran', header: 'Pengeluaran', align: 'right', render: (r) => <span className="num text-danger">{formatRupiah(r.pengeluaran)}</span> },
+                    { key: 'beli_stok', header: 'Beli Stok', align: 'right', render: (r) => <span className="num text-muted">{formatRupiah(r.beli_stok)}</span> },
+                    { key: 'net', header: 'Net', align: 'right', render: (r) => <span className="num">{formatSignedRupiah(r.net)}</span> },
+                  ]}
+                  rows={harianRows}
+                  empty={<EmptyState title="Belum ada pergerakan harian" icon="laporan" />}
+                />
+              </Card>
+
+              <Card className="mt-4" title="Arus Dana (bukan omzet)">
+                <div className="table-wrap">
+                  <table className="table">
+                    <thead>
+                      <tr><th>Jenis</th><th className="col-right">Nominal</th></tr>
+                    </thead>
+                    <tbody>
+                      <tr><td>Kirim uang (nominal titipan)</td><td className="col-right num">{formatRupiah(data.arus_dana?.kirim_uang || 0)}</td></tr>
+                      <tr><td>Tarik tunai</td><td className="col-right num">{formatRupiah(data.arus_dana?.tarik_tunai || 0)}</td></tr>
+                      <tr><td>Transfer</td><td className="col-right num">{formatRupiah(data.arus_dana?.transfer || 0)}</td></tr>
+                      <tr><td style={{ fontWeight: 700 }}>Total Arus Dana</td><td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(data.arus_dana?.total || 0)}</td></tr>
+                      <tr><td>Pendapatan admin (fee)</td><td className="col-right num">{formatRupiah(data.pendapatan_admin || 0)}</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <p className="field-hint mt-2">Nominal titipan (kirim uang/tarik/transfer) bukan pendapatan, jadi tidak dihitung Omzet.</p>
+              </Card>
+
+              <Card className="mt-4" title="Saldo Akun (awal → akhir bulan)">
+                <Table
+                  columns={[
+                    { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
+                    { key: 'saldo_awal', header: 'Saldo Awal', align: 'right', render: (r) => <span className="num">{formatRupiah(r.saldo_awal)}</span> },
+                    { key: 'saldo_akhir', header: 'Saldo Akhir', align: 'right', render: (r) => <span className="num font-bold">{formatRupiah(r.saldo_akhir)}</span> },
+                  ]}
+                  rows={(data.saldo_akun || []).map((a) => ({ ...a, key: a.nama_akun }))}
+                  empty={<EmptyState title="Belum ada saldo" icon="akun" />}
+                />
+                <div className="flex justify-between mt-3 text-sm">
+                  <span className="text-secondary">Total uang awal</span>
+                  <b className="num">{formatRupiah(data.total_saldo_awal || 0)}</b>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-secondary">Total uang akhir</span>
+                  <b className="num">{formatRupiah(data.total_saldo_akhir || 0)}</b>
+                </div>
+              </Card>
+
               <div className="grid-2 mt-4">
                 <Card title="Kasbon" subtitle="Ringkasan kasbon periode ini">
                   <div className="table-wrap">
@@ -407,20 +597,139 @@ export default function LaporanPage() {
               </Card>
             </>
           )}
+
+          <Card className="mt-4" title="Produk Terlaris" subtitle={`Produk paling banyak terjual — ${periodeLabel}`}>
+            {produk.status === 'loading' ? (
+              <Loader />
+            ) : produk.status === 'error' ? (
+              <ErrorState error={produk.error} onRetry={() => setRefresh((r) => r + 1)} />
+            ) : (
+              <Table
+                columns={[
+                  { key: 'peringkat', header: '#', align: 'right', render: (r) => <span className="num">{r.peringkat}</span> },
+                  { key: 'nama_produk', header: 'Produk', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_produk}</span> },
+                  { key: 'nama_kategori', header: 'Kategori', render: (r) => <span className="text-sm text-muted">{r.nama_kategori}</span> },
+                  { key: 'qty', header: 'Qty Terjual', align: 'right', render: (r) => <span className="num">{r.qty}</span> },
+                  { key: 'jumlah_transaksi', header: 'Transaksi', align: 'right', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
+                  { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
+                  { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
+                ]}
+                rows={produkRows}
+                empty={<EmptyState title="Belum ada produk terjual" description="Data muncul setelah ada transaksi pada periode ini." icon="barang" />}
+              />
+            )}
+          </Card>
         </>
       )}
 
-      <Card className="mt-4" title="Catatan Tambah/Edisi Transaksi Manual">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Tambah transaksi manual untuk kasus lupa dicatat (PRD 5.4). Transaksi akan ditandai <code>manual_entry</code> dan tercatat pada <code>tanggal_transaksi</code> (WIB).
-          </span>
+      {status === 'success' && (
+        <Card className="mt-4" title="Nilai Stok (modal & jual)">
+          {nilaiStok.status === 'loading' ? (
+            <Loader />
+          ) : nilaiStok.status === 'error' ? (
+            <ErrorState error={nilaiStok.error} onRetry={() => setRefresh((r) => r + 1)} />
+          ) : (
+            <Table
+              columns={[
+                { key: 'nama_kategori', header: 'Kategori', render: (r) => <span style={{ fontWeight: r.key === '__total' ? 700 : 600 }}>{r.nama_kategori}</span> },
+                { key: 'qty', header: 'Qty', align: 'right', render: (r) => <span className="num" style={{ fontWeight: r.key === '__total' ? 700 : 400 }}>{r.qty}</span> },
+                { key: 'nilai_modal', header: 'Nilai Modal', align: 'right', render: (r) => <span className="num" style={{ fontWeight: r.key === '__total' ? 700 : 400 }}>{formatRupiah(r.nilai_modal)}</span> },
+                { key: 'nilai_jual', header: 'Nilai Jual', align: 'right', render: (r) => <span className="num" style={{ fontWeight: r.key === '__total' ? 700 : 400 }}>{formatRupiah(r.nilai_jual)}</span> },
+                { key: 'potensi_laba', header: 'Potensi Laba', align: 'right', render: (r) => <span className="num" style={{ fontWeight: r.key === '__total' ? 700 : 400 }}>{formatRupiah(r.potensi_laba)}</span> },
+              ]}
+              rows={nilaiStokRows}
+              empty={<EmptyState title="Belum ada stok terlacak" description="Isi stok & aktifkan 'lacak stok' pada kategori." icon="barang" />}
+            />
+          )}
+        </Card>
+      )}
+
+      {status === 'success' && isBulanan && (
+        <Card className="mt-4" title={`Rekonsiliasi Bulanan — ${monthName(bulanParam)}`}>
+          {rekon.status === 'loading' ? (
+            <Loader />
+          ) : rekon.status === 'error' ? (
+            <ErrorState error={rekon.error} onRetry={() => setRefresh((r) => r + 1)} />
+          ) : rk ? (
+            <>
+              <div className="table-wrap">
+                <table className="table">
+                  <thead>
+                    <tr><th>Komponen</th><th className="col-right">Nilai</th></tr>
+                  </thead>
+                  <tbody>
+                    {rekonRows.map((r) => (
+                      <tr key={r.key}>
+                        <td style={{ fontWeight: r.bold ? 700 : 400 }}>{r.label}</td>
+                        <td className="col-right num" style={{ fontWeight: r.bold ? 700 : 400 }}>{formatSignedRupiah(r.value)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="flex justify-between items-center mt-3">
+                <span className="text-sm text-secondary">
+                  Selisih (aktual − seharusnya), toleransi {formatRupiah(rk.toleransi)}
+                </span>
+                <span
+                  className="num font-bold"
+                  style={{ color: rk.status === 'aman' ? 'var(--success)' : rk.status === 'bahaya' ? 'var(--danger)' : 'var(--warning)' }}
+                >
+                  {formatSignedRupiah(rk.selisih)} · {rk.status.toUpperCase()}
+                </span>
+              </div>
+            </>
+          ) : null}
+        </Card>
+      )}
+
+      {status === 'success' && isBulanan && (
+        <Card className="mt-4" title={`Buku Kas — ${monthName(bulanParam)}`}>
+          {bukuKas.status === 'loading' ? (
+            <Loader />
+          ) : bukuKas.status === 'error' ? (
+            <ErrorState error={bukuKas.error} onRetry={() => setRefresh((r) => r + 1)} />
+          ) : bk ? (
+            <>
+              <h4 className="card-title-sm mb-2">Ringkasan per Jenis</h4>
+              <Table
+                columns={[
+                  { key: 'jenis', header: 'Jenis', render: (r) => <span style={{ fontWeight: 600 }}>{r.jenis}</span> },
+                  { key: 'masuk', header: 'Masuk', align: 'right', render: (r) => <span className="num text-success">{formatRupiah(r.masuk)}</span> },
+                  { key: 'keluar', header: 'Keluar', align: 'right', render: (r) => <span className="num text-danger">{formatRupiah(r.keluar)}</span> },
+                  { key: 'net', header: 'Net', align: 'right', render: (r) => <span className="num">{formatSignedRupiah(r.net)}</span> },
+                ]}
+                rows={bukuJenisRows}
+                empty={<EmptyState title="Belum ada pergerakan" icon="laporan" />}
+              />
+              <h4 className="card-title-sm mb-2" style={{ marginTop: 16 }}>Per Akun</h4>
+              <Table
+                columns={[
+                  { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
+                  { key: 'masuk', header: 'Masuk', align: 'right', render: (r) => <span className="num text-success">{formatRupiah(r.masuk)}</span> },
+                  { key: 'keluar', header: 'Keluar', align: 'right', render: (r) => <span className="num text-danger">{formatRupiah(r.keluar)}</span> },
+                  { key: 'net', header: 'Net', align: 'right', render: (r) => <span className="num">{formatSignedRupiah(r.net)}</span> },
+                ]}
+                rows={bukuAkunRows}
+                empty={<EmptyState title="Belum ada pergerakan" icon="akun" />}
+              />
+              <div className="flex justify-between items-center mt-3 text-sm text-secondary">
+                <span>Total masuk {formatRupiah(bk.total_masuk)} · total keluar {formatRupiah(bk.total_keluar)}</span>
+                <b className="num">Net {formatSignedRupiah(bk.net)}</b>
+              </div>
+            </>
+          ) : null}
+        </Card>
+      )}
+
+      <Card className="mt-4" title="Tambah/Edisi Transaksi Manual">
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <Button variant="secondary" onClick={() => setCreateOpen(true)}>
             <Icon name="plus" size={14} /> Tambah Transaksi Manual
           </Button>
         </div>
         <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Tambah Transaksi Manual" size="lg">
-          <TransaksiForm manualEntry={true} showKategoriFilter={false} tanggalTransaksi={todayWIB()} onSaved={() => { setCreateOpen(false); setStatus('loading'); run(); }} onCancel={() => setCreateOpen(false)} />
+          <TransaksiForm manualEntry={true} showKategoriFilter={false} tanggalTransaksi={todayWIB()} onSaved={() => { setCreateOpen(false); setRefresh((r) => r + 1); }} onCancel={() => setCreateOpen(false)} />
         </Modal>
       </Card>
     </div>

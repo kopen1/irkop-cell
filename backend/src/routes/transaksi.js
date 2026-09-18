@@ -231,7 +231,7 @@ async function loadProducts(db, items) {
     if (!it || (!it.produk_id && !it.service_hp_id)) throw err(400, 'missing_field', 'setiap item wajib punya produk_id atau service_hp_id');
     if (it.produk_id) {
       const prod = await db.one(
-        'SELECT p.*, k.nama AS kategori_nama FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id WHERE p.id = ?',
+        'SELECT p.*, k.nama AS kategori_nama, k.lacak_stok AS kategori_lacak_stok FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id WHERE p.id = ?',
         it.produk_id
       );
       if (!prod) throw err(400, 'invalid_product', `Produk id ${it.produk_id} tidak ditemukan`);
@@ -286,6 +286,7 @@ function computeItems(items, produkMap) {
     let nominalRef = null;
     let akunSumber = null;
     let isTarik = false;
+    let lacakStok = 0;
 
     if (it.service_hp_id) {
       // Item Service HP: langsung mereferensikan record service_hp (tanpa produk jasa terpisah).
@@ -303,11 +304,23 @@ function computeItems(items, produkMap) {
     } else {
       const prod = produkMap.get(`p:${it.produk_id}`);
       harga = Number(prod.harga);
-      modal = prod.harga_modal == null ? 0 : Number(prod.harga_modal);
-      hargaModalSnapshot = prod.harga_modal;
+      // Produk digital: modal bisa diisi manual di form (mis. harga beli beda
+      // dari master produk). Pakai nilai form bila dikirim, fallback ke master.
+      if (it.harga_modal !== undefined && it.harga_modal !== null && it.harga_modal !== '') {
+        const formModal = Number(it.harga_modal);
+        if (!Number.isInteger(formModal) || formModal < 0) {
+          throw err(400, 'invalid_value', `harga_modal item "${prod.nama}" harus integer >= 0`);
+        }
+        modal = formModal;
+        hargaModalSnapshot = formModal;
+      } else {
+        modal = prod.harga_modal == null ? 0 : Number(prod.harga_modal);
+        hargaModalSnapshot = prod.harga_modal;
+      }
       nama = prod.nama;
       produkId = prod.id;
       isTarik = TARIK_KATEGORI.test(prod.kategori_nama || '');
+      lacakStok = Number(prod.kategori_lacak_stok || 0) === 1 ? 1 : 0;
       nominalRef = it.nominal_referensi == null ? null : Number(it.nominal_referensi);
       akunSumber = it.akun_sumber || null;
     }
@@ -344,10 +357,38 @@ function computeItems(items, produkMap) {
       subtotal: fee,
       nominal_referensi: nominalRef,
       akun_sumber: akunSumber,
+      lacak_stok: lacakStok,
     });
   }
 
   return { subtotal, total: omzet, laba, itemRows, effects };
+}
+
+// Stok hanya dilacak untuk produk dengan kategori lacak_stok=1. Penjualan
+// fisik mengurangi stok; reversal/restore menambahnya. Produk digital TIDAK
+// menyentuh stok fisik (dipenuhi dari akun saldo).
+function stockStatements(db, entries, sign, now) {
+  const map = new Map();
+  for (const e of entries) {
+    if (!e.produk_id || !e.lacak_stok) continue;
+    const delta = sign * Number(e.qty || 0);
+    if (delta === 0) continue;
+    map.set(e.produk_id, (map.get(e.produk_id) || 0) + delta);
+  }
+  return [...map.entries()].map(([produkId, delta]) =>
+    db.raw.prepare('UPDATE produk SET stok = stok + ?, updated_at = ? WHERE id = ?').bind(delta, now, produkId)
+  );
+}
+
+async function loadStockItemsOfTransaksi(db, transaksiId) {
+  return db.many(
+    `SELECT ti.produk_id, ti.qty, 1 AS lacak_stok
+       FROM transaksi_item ti
+       JOIN produk p ON p.id = ti.produk_id
+       JOIN kategori_produk k ON k.id = p.kategori_id
+      WHERE ti.transaksi_id = ? AND k.lacak_stok = 1`,
+    transaksiId
+  );
 }
 
 function planMutations({ metodeBayar, akunPenerima, subtotal, effects }) {
@@ -787,6 +828,11 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     );
   }
 
+  // Auto-kurang stok untuk penjualan fisik (produk digital tidak menyentuh stok).
+  if (jenis !== 'produkdigital') {
+    stmts.push(...stockStatements(db, itemRows, -1, now));
+  }
+
   const { results } = await db.batch(stmts);
   if (!results.every((r) => r.success)) throw err(500, 'tx_failed', 'Gagal menyimpan transaksi');
 
@@ -827,6 +873,13 @@ export async function softDeleteTransaksi(db, body, ctx, idStr) {
   const reversalResult = await reverseFullSource(db, {
     sumberTipe: 'transaksi', sumberId: tx.id, kasirSesiId: sesi.id, actionKey,
   });
+
+  // Kembalikan stok yang tadinya berkurang (penjualan fisik).
+  if (tx.jenis !== 'produkdigital') {
+    const oldStock = await loadStockItemsOfTransaksi(db, tx.id);
+    const stmts = stockStatements(db, oldStock, 1, nowIso());
+    if (stmts.length) await db.batch(stmts);
+  }
 
   await db.exec(
     'UPDATE transaksi SET deleted_at = ?, deleted_by = ?, deleted_reason = ?, updated_at = ? WHERE id = ?',
@@ -903,6 +956,13 @@ export async function updateTransaksi(db, body, ctx, idStr) {
       ).bind(sesi.id, m.nama_akun, m.jumlah, tx.id, mutationKey, now)
     );
   });
+  // Sesuaikan stok: kembalikan item lama, kurangi item baru (kecuali produk digital).
+  if (tx.jenis !== 'produkdigital') {
+    const oldStock = await loadStockItemsOfTransaksi(db, tx.id);
+    stmts.push(...stockStatements(db, oldStock, 1, now));
+    stmts.push(...stockStatements(db, itemRows, -1, now));
+  }
+
   const { results } = await db.batch(stmts);
   if (metodeBayar === 'bon') {
     await db.exec(

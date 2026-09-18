@@ -43,8 +43,13 @@ test('GET /api/kasir/current?kasir_sesi_id=... mengembalikan data sesi lampau ya
   assert.equal(r.data.status, 'buka');
   assert.equal(r.data.tanggal, yesterdayWib());
   assert.equal(r.data.kasir_sesi_id, sesiId);
-  assert.equal(r.data.saldo.length, 1);
-  assert.equal(r.data.saldo[0].saldo_sistem, 600000);
+  // saldo berisi akun + baris "Total Saldo"
+  assert.equal(r.data.saldo.length, 2);
+  const tunai = r.data.saldo.find((s) => s.nama_akun === 'Tunai Laci');
+  assert.equal(tunai.saldo_sistem, 600000);
+  const total = r.data.saldo.find((s) => s.nama_akun === 'Total Saldo');
+  // Total Saldo mengecualikan Tunai Laci → 0 karena hanya ada Tunai Laci
+  assert.equal(total.saldo_sistem, 0);
 });
 
 test('GET /api/kasir/current?tanggal=... (fallback date) mengembalikan status belum_buka bila tidak ada sesi', async () => {

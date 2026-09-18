@@ -9,7 +9,7 @@ import { formatRupiah, formatDateTime } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
-import { Modal } from '../components/ui/Modal';
+import { Modal, ConfirmDialog } from '../components/ui/Modal';
 import { Table } from '../components/ui/Table';
 import { Loader, ErrorState, EmptyState } from '../components/ui/States';
 import { Badge, PelunasanBadge } from '../components/ui/Badge';
@@ -72,12 +72,69 @@ export default function PelangganPage() {
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
 
+  const [aliasForm, setAliasForm] = useState({ tipe: 'no_rekening', nilai: '' });
+  const [aliasEdit, setAliasEdit] = useState(null);
+  const [aliasBusy, setAliasBusy] = useState(false);
+  const [aliasDelete, setAliasDelete] = useState(null);
+
   useEffect(() => {
     if (editTarget) setEditForm({ nama: editTarget.nama || '', telepon: editTarget.telepon || '' });
   }, [editTarget]);
 
   const data = state.data || {};
   const rows = (data.items || []).map((p) => ({ ...p, key: p.id }));
+
+  const reloadDetail = async () => {
+    if (!detail?.id) return;
+    try {
+      const res = await api.get(`/pelanggan/${detail.id}`);
+      setDetail(res.pelanggan || res);
+    } catch { /* abaikan */ }
+  };
+
+  const addAlias = async () => {
+    if (!aliasForm.nilai.trim()) return toast.warning('Nilai alias wajib diisi.');
+    setAliasBusy(true);
+    try {
+      await api.post(`/pelanggan/${detail.id}/alias`, { tipe: aliasForm.tipe, nilai: aliasForm.nilai.trim() });
+      setAliasForm({ tipe: aliasForm.tipe, nilai: '' });
+      toast.success('Alias ditambahkan.');
+      await reloadDetail();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAliasBusy(false);
+    }
+  };
+
+  const saveAliasEdit = async () => {
+    if (!aliasEdit?.nilai?.trim()) return toast.warning('Nilai alias wajib diisi.');
+    setAliasBusy(true);
+    try {
+      await api.put(`/pelanggan/alias/${aliasEdit.id}`, { tipe: aliasEdit.tipe, nilai: aliasEdit.nilai.trim() });
+      setAliasEdit(null);
+      toast.success('Alias diperbarui.');
+      await reloadDetail();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAliasBusy(false);
+    }
+  };
+
+  const doDeleteAlias = async () => {
+    setAliasBusy(true);
+    try {
+      await api.del(`/pelanggan/alias/${aliasDelete.id}`);
+      toast.success('Alias dihapus.');
+      setAliasDelete(null);
+      await reloadDetail();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAliasBusy(false);
+    }
+  };
 
   const openDetail = async (p) => {
     setDetailOpen(true);
@@ -204,6 +261,159 @@ export default function PelangganPage() {
         </Field>
       </div>
 
+      {createOpen && can('pelanggan') && (
+        <div className="card mb-4" style={{ padding: 'var(--space-4)' }}>
+          <PelangganForm
+            onCancel={() => setCreateOpen(false)}
+            onSaved={() => {
+              setCreateOpen(false);
+              toast.success('Pelanggan ditambahkan.');
+              load().catch(() => {});
+            }}
+          />
+        </div>
+      )}
+
+      {detailOpen && (
+        <div className="card mb-4" style={{ padding: 'var(--space-4)' }}>
+          {detailLoading ? (
+            <Loader />
+          ) : detail?._error ? (
+            <ErrorState error={{ message: detail._error }} />
+          ) : detail ? (
+            <>
+              <div className="flex justify-between items-center mb-3">
+                <h3 className="card-title">Detail: {detail.nama}</h3>
+                <div className="flex gap-2">
+                  {can('pelanggan') && (
+                    <>
+                      <Button variant="secondary" size="sm" onClick={() => { setEditTarget(detail); setDetailOpen(false); setDetail(null); }}>
+                        <Icon name="edit" size={14} /> Edit
+                      </Button>
+                      <Button variant="danger" size="sm" onClick={() => { setDeleteTarget(detail); setDetailOpen(false); setDetail(null); }}>
+                        <Icon name="trash" size={14} /> Hapus
+                      </Button>
+                    </>
+                  )}
+                  <Button variant="secondary" size="sm" onClick={() => { setDetailOpen(false); setDetail(null); }}>Tutup</Button>
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-4">
+                <div className="grid-2">
+                  <div><p className="text-xs text-muted">Nama</p><p className="font-bold">{detail.nama}</p></div>
+                  <div><p className="text-xs text-muted">Telepon</p><p className="text-sm">{detail.telepon || '—'}</p></div>
+                  <div><p className="text-xs text-muted">Total belanja</p><p className="num">{formatRupiah(detail.total_belanja)}</p></div>
+                  <div><p className="text-xs text-muted">Frekuensi transaksi</p><p className="num">{detail.frekuensi_transaksi}</p></div>
+                </div>
+
+                <section>
+                  <h4 className="card-title-sm mb-2">Alias / nomor</h4>
+                  {detail.alias?.length ? (
+                    <ul className="flex flex-col" style={{ fontSize: '0.85rem', listStyle: 'none', padding: 0, margin: 0, gap: 10 }}>
+                      {detail.alias.map((a) => (
+                        <li key={a.id} className="flex items-center" style={{ gap: 10 }}>
+                          {aliasEdit?.id === a.id ? (
+                            <>
+                              <Select
+                                value={aliasEdit.tipe}
+                                onChange={(e) => setAliasEdit((s) => ({ ...s, tipe: e.target.value }))}
+                                style={{ width: 130 }}
+                              >
+                                <option value="nama">nama</option>
+                                <option value="no_rekening">no_rekening</option>
+                                <option value="no_hp">no_hp</option>
+                              </Select>
+                              <input
+                                className="input"
+                                value={aliasEdit.nilai}
+                                onChange={(e) => setAliasEdit((s) => ({ ...s, nilai: e.target.value }))}
+                                style={{ flex: 1 }}
+                              />
+                              <Button size="sm" loading={aliasBusy} onClick={saveAliasEdit}>Simpan</Button>
+                              <Button size="sm" variant="secondary" onClick={() => setAliasEdit(null)}>Batal</Button>
+                            </>
+                          ) : (
+                            <>
+                              <Badge tone={a.sumber === 'notifhook_auto' ? 'info' : 'neutral'}>{a.tipe}</Badge>
+                              <span style={{ wordBreak: 'break-all' }}>{a.nilai}</span>
+                              <span className="text-muted text-xs">{a.sumber === 'notifhook_auto' ? 'auto NotifHook' : 'manual'}</span>
+                              <span style={{ flex: 1 }} />
+                              <Button variant="ghost" size="sm" aria-label={`Edit alias ${a.nilai}`} onClick={() => setAliasEdit({ id: a.id, tipe: a.tipe, nilai: a.nilai })}>
+                                <Icon name="edit" size={14} />
+                              </Button>
+                              <Button variant="ghost" size="sm" aria-label={`Hapus alias ${a.nilai}`} onClick={() => setAliasDelete(a)}>
+                                <Icon name="trash" size={14} />
+                              </Button>
+                            </>
+                          )}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <p className="text-sm text-muted">Belum ada alias.</p>
+                  )}
+
+                  <div className="flex mt-3" style={{ gap: 10 }}>
+                    <Select
+                      value={aliasForm.tipe}
+                      onChange={(e) => setAliasForm((f) => ({ ...f, tipe: e.target.value }))}
+                      style={{ width: 130 }}
+                    >
+                      <option value="nama">nama</option>
+                      <option value="no_rekening">no_rekening</option>
+                      <option value="no_hp">no_hp</option>
+                    </Select>
+                    <input
+                      className="input"
+                      placeholder="Nilai alias (mis. nomor rekening / HP)"
+                      value={aliasForm.nilai}
+                      onChange={(e) => setAliasForm((f) => ({ ...f, nilai: e.target.value }))}
+                      style={{ flex: 1 }}
+                    />
+                    <Button size="sm" loading={aliasBusy} onClick={addAlias}>
+                      <Icon name="plus" size={14} /> Tambah
+                    </Button>
+                  </div>
+                </section>
+
+                <section>
+                  <h4 className="card-title-sm mb-2">Kasbon</h4>
+                  {detail.kasbon?.length ? (
+                    <Table
+                      columns={[
+                        { key: 'nominal', header: 'Nominal', render: (r) => <span className="num text-sm">{formatRupiah(r.nominal)}</span> },
+                        { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-xs">{r.tanggal}</span> },
+                        { key: 'status', header: 'Status', render: (r) => <PelunasanBadge status={r.status} /> },
+                      ]}
+                      rows={detail.kasbon.map((k) => ({ ...k, key: k.id }))}
+                    />
+                  ) : (
+                    <p className="text-sm text-muted">Tidak ada kasbon.</p>
+                  )}
+                </section>
+
+                <section>
+                  <h4 className="card-title-sm mb-2">Riwayat transaksi</h4>
+                  {detail.riwayat_transaksi?.length ? (
+                    <Table
+                      columns={[
+                        { key: 'kode_transaksi', header: 'Kode', render: (r) => <span className="num text-sm">{r.kode_transaksi}</span> },
+                        { key: 'created_at', header: 'Waktu', render: (r) => <span className="text-xs">{formatDateTime(r.created_at)}</span> },
+                        { key: 'total', header: 'Total', render: (r) => <span className="num text-sm">{formatRupiah(r.total)}</span> },
+                      ]}
+                      rows={detail.riwayat_transaksi.map((t) => ({ ...t, key: t.id }))}
+                    />
+                  ) : (
+                    <p className="text-sm text-muted">Belum ada riwayat.</p>
+                  )}
+                </section>
+              </div>
+            </>
+          ) : null}
+        </div>
+      )}
+
       {state.status === 'error' ? (
         <ErrorState error={state.error} onRetry={() => load().catch(() => {})} />
       ) : state.status === 'loading' && !data.items ? (
@@ -228,94 +438,6 @@ export default function PelangganPage() {
           rows={rows}
         />
       )}
-
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Tambah Pelanggan">
-        <PelangganForm
-          onCancel={() => setCreateOpen(false)}
-          onSaved={() => {
-            setCreateOpen(false);
-            toast.success('Pelanggan ditambahkan.');
-            load().catch(() => {});
-          }}
-        />
-      </Modal>
-
-      {/* Detail */}
-      <Modal open={detailOpen} onClose={() => setDetailOpen(false)} title="Detail Pelanggan"
-        footer={detail && !detail._error && can('pelanggan') ? (
-          <>
-            <Button variant="danger" size="sm" onClick={() => { setDeleteTarget(detail); setDetailOpen(false); }}>
-              <Icon name="trash" size={14} /> Hapus
-            </Button>
-            <Button variant="secondary" size="sm" onClick={() => { setEditTarget(detail); setDetailOpen(false); }}>
-              <Icon name="edit" size={14} /> Edit
-            </Button>
-          </>
-        ) : null}
-      >
-        {detailLoading ? (
-          <Loader />
-        ) : detail?._error ? (
-          <ErrorState error={{ message: detail._error }} />
-        ) : detail ? (
-          <div className="flex flex-col gap-4">
-            <div className="grid-2">
-              <div><p className="text-xs text-muted">Nama</p><p className="font-bold">{detail.nama}</p></div>
-              <div><p className="text-xs text-muted">Telepon</p><p className="text-sm">{detail.telepon || '—'}</p></div>
-              <div><p className="text-xs text-muted">Total belanja</p><p className="num">{formatRupiah(detail.total_belanja)}</p></div>
-              <div><p className="text-xs text-muted">Frekuensi transaksi</p><p className="num">{detail.frekuensi_transaksi}</p></div>
-            </div>
-
-            <section>
-              <h4 className="card-title-sm mb-2">Alias / nomor</h4>
-              {detail.alias?.length ? (
-                <ul className="flex flex-col gap-1" style={{ fontSize: '0.85rem' }}>
-                  {detail.alias.map((a, i) => (
-                    <li key={i}>
-                      <Badge tone={a.sumber === 'notifhook_auto' ? 'info' : 'neutral'}>{a.tipe}</Badge>{' '}
-                      {a.nilai} <span className="text-muted text-xs">({a.sumber === 'notifhook_auto' ? 'auto NotifHook' : 'manual'})</span>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted">Belum ada alias.</p>
-              )}
-            </section>
-
-            <section>
-              <h4 className="card-title-sm mb-2">Kasbon</h4>
-              {detail.kasbon?.length ? (
-                <Table
-                  columns={[
-                    { key: 'nominal', header: 'Nominal', render: (r) => <span className="num text-sm">{formatRupiah(r.nominal)}</span> },
-                    { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-xs">{r.tanggal}</span> },
-                    { key: 'status', header: 'Status', render: (r) => <PelunasanBadge status={r.status} /> },
-                  ]}
-                  rows={detail.kasbon.map((k) => ({ ...k, key: k.id }))}
-                />
-              ) : (
-                <p className="text-sm text-muted">Tidak ada kasbon.</p>
-              )}
-            </section>
-
-            <section>
-              <h4 className="card-title-sm mb-2">Riwayat transaksi</h4>
-              {detail.riwayat?.length ? (
-                <Table
-                  columns={[
-                    { key: 'id', header: 'ID', render: (r) => <span className="num text-sm">{r.id}</span> },
-                    { key: 'created_at', header: 'Waktu', render: (r) => <span className="text-xs">{formatDateTime(r.created_at)}</span> },
-                    { key: 'total', header: 'Total', render: (r) => <span className="num text-sm">{formatRupiah(r.total)}</span> },
-                  ]}
-                  rows={detail.riwayat.map((t) => ({ ...t, key: t.id }))}
-                />
-              ) : (
-                <p className="text-sm text-muted">Belum ada riwayat.</p>
-              )}
-            </section>
-          </div>
-        ) : null}
-      </Modal>
 
       {/* Import Kontak */}
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import Kontak">
@@ -437,6 +559,16 @@ export default function PelangganPage() {
           )}
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(aliasDelete)}
+        title="Hapus Alias"
+        message={`Hapus alias ${aliasDelete?.tipe} "${aliasDelete?.nilai}"?`}
+        confirmLabel="Hapus"
+        loading={aliasBusy}
+        onCancel={() => setAliasDelete(null)}
+        onConfirm={doDeleteAlias}
+      />
     </div>
   );
 }
@@ -462,15 +594,17 @@ function PelangganForm({ onCancel, onSaved }) {
   };
 
   return (
-    <form onSubmit={submit} className="flex flex-col gap-4">
-      <Field label="Nama" required>
-        <Input type="text" value={form.nama} onChange={(e) => setForm((f) => ({ ...f, nama: e.target.value }))} />
-      </Field>
-      <Field label="Telepon / nomor (opsional)" hint="Nomor HP/rekening bisa jadi alias untuk mencocokan via NotifHook.">
-        <Input type="tel" value={form.telepon} onChange={(e) => setForm((f) => ({ ...f, telepon: e.target.value }))} />
-      </Field>
+    <form onSubmit={submit}>
+      <div className="grid-2">
+        <Field label="Nama" required>
+          <Input type="text" value={form.nama} onChange={(e) => setForm((f) => ({ ...f, nama: e.target.value }))} />
+        </Field>
+        <Field label="Telepon / nomor (opsional)" hint="HP/rekening jadi alias untuk pencocokan NotifHook.">
+          <Input type="tel" value={form.telepon} onChange={(e) => setForm((f) => ({ ...f, telepon: e.target.value }))} />
+        </Field>
+      </div>
       {error && <p className="field-error" role="alert">{error}</p>}
-      <div className="flex justify-end gap-2">
+      <div className="flex justify-end gap-2 mt-3">
         <Button variant="secondary" type="button" onClick={onCancel}>Batal</Button>
         <Button type="submit" loading={busy}>Simpan</Button>
       </div>

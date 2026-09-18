@@ -13,6 +13,8 @@ export const NAV = [
   { key: 'kasbon', label: 'Kasbon', icon: 'kasbon', path: '/kasbon', main: false, section: 'Operasional' },
   { key: 'pelanggan', label: 'Pelanggan', icon: 'pelanggan', path: '/pelanggan', main: false, section: 'Operasional' },
   { key: 'pengeluaran', label: 'Pengeluaran', icon: 'pengeluaran', path: '/pengeluaran', main: false, section: 'Operasional' },
+  { key: 'isi_saldo', label: 'Isi Saldo', icon: 'wallet', path: '/isi-saldo', main: false, section: 'Operasional', perm: 'kasir' },
+  { key: 'beli_stok', label: 'Beli Stok', icon: 'barang', path: '/beli-stok', main: false, section: 'Operasional', perm: 'kasir' },
 ];
 
 export const NAV_SYSTEM = [

@@ -36,11 +36,11 @@ describe('useSiteName', () => {
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 
-  it('fallback aman ke Iirkop Cell saat GET /settings gagal', async () => {
+  it('fallback aman ke Irkop Cell saat GET /settings gagal', async () => {
     api.get.mockRejectedValue(new Error('network_error'));
     const { result } = renderHook(() => useSiteName());
     await waitFor(() => expect(result.current).toBe(DEFAULT_SITE_NAME));
-    expect(result.current).toBe('Iirkop Cell');
+    expect(result.current).toBe('Irkop Cell');
     expect(api.get).toHaveBeenCalledTimes(1);
   });
 

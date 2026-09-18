@@ -1,8 +1,11 @@
 import { err } from '../lib/errors.js';
 import { readBody, asInt, asDate, asEnum } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
-import { nowIso, isValidCalendarDate } from '../lib/time.js';
+import { nowIso, isValidCalendarDate, wibDateToday } from '../lib/time.js';
 import { requireAdmin } from '../lib/auth.js';
+import { hitungGajiOwner } from '../financial/gaji.js';
+import { requireSessionForToday } from '../financial/kasir.js';
+import { getAccount } from '../financial/akun.js';
 
 export async function listGaji(db, request, ctx) {
   requireAdmin(ctx);
@@ -74,6 +77,70 @@ export async function updateGaji(db, request, ctx, idStr) {
   await db.exec(`UPDATE gaji_harian SET ${sets.join(', ')} WHERE id = ?`, ...vals);
   await writeAudit(db, { userId: admin.id, aksi: 'update', tabel: 'gaji_harian', recordId: id, dataBefore: old, dataAfter: body });
   return { id, message: 'Gaji harian diperbarui' };
+}
+
+// GET /api/gaji/owner?tanggal=YYYY-MM-DD — hitung gaji owner (jaga + 50% service)
+export async function getOwnerGaji(db, request, ctx) {
+  requireAdmin(ctx);
+  const url = new URL(request.url);
+  const tanggal = asDate(url.searchParams.get('tanggal'), { required: true, field: 'tanggal' });
+  return hitungGajiOwner(db, tanggal);
+}
+
+// GET /api/gaji/unpaid — gaji yang belum dibayar, dikelompokkan per orang.
+export async function listGajiUnpaid(db, request, ctx) {
+  requireAdmin(ctx);
+  const rows = await db.many(
+    `SELECT g.user_id, COALESCE(u.nama, '?') AS nama, COUNT(*) AS jumlah_hari,
+            COALESCE(SUM(g.nominal), 0) AS total,
+            MIN(g.tanggal) AS dari_tanggal, MAX(g.tanggal) AS sampai_tanggal
+       FROM gaji_harian g LEFT JOIN users u ON u.id = g.user_id
+      WHERE g.dibayar_at IS NULL
+      GROUP BY g.user_id, u.nama ORDER BY nama`
+  );
+  return { items: rows.map((r) => ({ ...r, jumlah_hari: Number(r.jumlah_hari), total: Number(r.total) })) };
+}
+
+// POST /api/gaji/bayar  { user_id, akun? } — bayar SEMUA gaji belum dibayar milik
+// satu orang: buat 1 Pengeluaran (biaya) dari akun (default Tunai Laci) + tandai lunas.
+export async function bayarGaji(db, request, ctx) {
+  const admin = requireAdmin(ctx);
+  const body = await readBody(request);
+  const userId = asInt(body.user_id, { required: true, field: 'user_id' });
+  const user = await db.one('SELECT id, nama FROM users WHERE id = ?', userId);
+  if (!user) throw err(400, 'invalid_user', 'User tidak ditemukan');
+  const akun = body.akun ? (await getAccount(db, body.akun)).nama_akun : 'Tunai Laci';
+
+  const unpaid = await db.one(
+    'SELECT COUNT(*) AS n, COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE user_id = ? AND dibayar_at IS NULL',
+    userId
+  );
+  const total = Number(unpaid.total);
+  if (total <= 0) throw err(400, 'invalid_value', 'Tidak ada gaji yang belum dibayar');
+
+  const sesi = await requireSessionForToday(db);
+  const ts = nowIso();
+  const marker = `[gaji] Bayar gaji ${user.nama}`;
+  const res = await db.exec(
+    `INSERT INTO pengeluaran (deskripsi, kategori, nominal, metode_bayar, akun_sumber, tanggal, dicatat_oleh, created_at)
+     VALUES (?, 'gaji', ?, 'tunai', ?, ?, ?, ?)`,
+    marker, total, akun, wibDateToday(), admin.id, ts
+  );
+  const pengeluaranId = res.lastRowId;
+  await db.exec(
+    `INSERT OR IGNORE INTO mutasi_saldo (kasir_sesi_id, nama_akun, jumlah, sumber_tipe, sumber_id, mutation_key, created_at)
+     VALUES (?, ?, ?, 'pengeluaran', ?, ?, ?)`,
+    sesi.id, akun, -total, pengeluaranId, `gaji-bayar:${userId}:${pengeluaranId}`, ts
+  );
+  await db.exec(
+    'UPDATE gaji_harian SET dibayar_at = ?, dibayar_oleh = ? WHERE user_id = ? AND dibayar_at IS NULL',
+    ts, admin.id, userId
+  );
+  await writeAudit(db, {
+    userId: admin.id, aksi: 'bayar_gaji', tabel: 'gaji_harian', recordId: userId,
+    dataAfter: { user_id: userId, nama: user.nama, total, akun, pengeluaran_id: pengeluaranId, jumlah_hari: Number(unpaid.n) },
+  });
+  return { user_id: userId, nama: user.nama, total, jumlah_hari: Number(unpaid.n), akun, pengeluaran_id: pengeluaranId, status: 'dibayar' };
 }
 
 export async function listRateGaji(db, request, ctx) {
