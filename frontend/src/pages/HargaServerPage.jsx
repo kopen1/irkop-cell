@@ -33,6 +33,8 @@ export default function HargaServerPage() {
   const [editTarget, setEditTarget] = useState(null);
   const [logOpen, setLogOpen] = useState(false);
   const [updateBusy, setUpdateBusy] = useState({});
+  const [linkTarget, setLinkTarget] = useState(null);
+  const [autoLinkBusy, setAutoLinkBusy] = useState(false);
 
   const load = useMemo(
     () => async () => {
@@ -95,6 +97,19 @@ export default function HargaServerPage() {
   };
 
   // Update semua produk yang harga server > modal (harga naik)
+  const doAutoLink = async () => {
+    setAutoLinkBusy(true);
+    try {
+      const res = await api.post('/harga-server/auto-link', {});
+      toast.success(`Auto-link: ${res.linked} produk terhubung${res.total_belum ? ` (${res.total_belum} belum terhubung)` : ''}.`);
+      reloadAll();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setAutoLinkBusy(false);
+    }
+  };
+
   const doUpdateAllNaik = async () => {
     setUpdateBusy((s) => ({ ...s, __all: true }));
     try {
@@ -126,6 +141,9 @@ export default function HargaServerPage() {
                 <Icon name="refresh" size={16} /> Update Modal Naik ({summary.naik})
               </Button>
             )}
+            <Button variant="secondary" onClick={doAutoLink} loading={autoLinkBusy}>
+              <Icon name="refresh" size={16} /> Auto-link
+            </Button>
             <Button variant="secondary" onClick={() => setLogOpen(true)}>
               <Icon name="clock" size={16} /> Log
             </Button>
@@ -208,6 +226,7 @@ export default function HargaServerPage() {
           columns={[
             { key: 'kode_produk', header: 'Kode', render: (r) => <span className="font-mono text-sm" style={{ fontWeight: 600 }}>{r.kode_produk}</span> },
             { key: 'nama_produk', header: 'Nama', render: (r) => <span className="text-sm">{r.nama_produk}</span> },
+            { key: 'lokal', header: 'Produk Lokal', render: (r) => (r.nama_produk_daftar ? <span className="text-sm">{r.nama_produk_daftar}</span> : <Badge tone="warning">Belum</Badge>) },
             { key: 'kategori', header: 'Kategori', render: (r) => { const c = kategoriColor(r.kategori); return <span className="badge" style={{ background: c.bg, color: c.fg, fontWeight: 700 }}>{r.kategori}</span>; } },
             { key: 'harga_server', header: 'Harga Server', align: 'right', render: (r) => <span className="num" style={{ fontWeight: 600 }}>{formatRupiah(r.harga_server)}</span> },
             { key: 'biaya', header: 'Biaya Fisik', align: 'right', render: (r) => (r.biaya ? <span className="num text-muted">+{formatRupiah(r.biaya)}</span> : <span className="text-muted">—</span>) },
@@ -238,6 +257,9 @@ export default function HargaServerPage() {
                     <Icon name="refresh" size={13} /> Update Modal
                   </Button>
                 )}
+                <Button variant="secondary" size="sm" onClick={() => setLinkTarget(r)} title="Hubungkan ke produk lokal">
+                  Link
+                </Button>
                 <Button variant="ghost" size="sm" onClick={() => setEditTarget(r)} title="Edit harga server">
                   <Icon name="edit" size={15} />
                 </Button>
@@ -273,6 +295,17 @@ export default function HargaServerPage() {
               load();
               loadCompare();
             }}
+          />
+        )}
+      </Modal>
+
+      {/* Link Modal */}
+      <Modal open={Boolean(linkTarget)} onClose={() => setLinkTarget(null)} title="Hubungkan ke Produk Lokal">
+        {linkTarget && (
+          <LinkForm
+            target={linkTarget}
+            onCancel={() => setLinkTarget(null)}
+            onSaved={() => { setLinkTarget(null); toast.success('Produk dihubungkan.'); reloadAll(); }}
           />
         )}
       </Modal>
@@ -416,6 +449,77 @@ function LogHarga() {
           rows={logs.map((l) => ({ ...l, key: l.id }))}
         />
       )}
+    </div>
+  );
+}
+
+function LinkForm({ target, onCancel, onSaved }) {
+  const toast = useToast();
+  const [q, setQ] = useState('');
+  const [items, setItems] = useState([]);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    if (!q.trim()) { setItems([]); return undefined; }
+    const t = setTimeout(() => {
+      api.get('/produk', { q }).then((r) => setItems(r.items || [])).catch(() => setItems([]));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [q]);
+
+  const pick = async (kode) => {
+    setBusy(true);
+    try {
+      await api.post('/harga-server/link', { id: target.id, kode_lokal: kode });
+      onSaved();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const unlink = async () => {
+    setBusy(true);
+    try {
+      await api.post('/harga-server/link', { id: target.id, kode_lokal: null });
+      onSaved();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
+      <p className="text-sm"><b>{target.nama_produk}</b> <span className="text-muted">({target.kode_produk})</span></p>
+      {target.kode_lokal && (
+        <p className="text-sm flex items-center gap-2">
+          Terhubung ke: <b className="num">{target.kode_lokal}</b>
+          <Button variant="ghost" size="sm" onClick={unlink} disabled={busy}>Lepas</Button>
+        </p>
+      )}
+      <Field label="Cari produk lokal">
+        <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ketik kode/nama produk lokal…" autoComplete="off" />
+      </Field>
+      {items.length > 0 && (
+        <div className="table-wrap" style={{ maxHeight: 240, overflowY: 'auto' }}>
+          <table className="table" style={{ minWidth: 0 }}>
+            <tbody>
+              {items.map((p) => (
+                <tr key={p.id} style={{ cursor: 'pointer' }} onClick={() => !busy && pick(p.kode)}>
+                  <td className="num text-sm">{p.kode}</td>
+                  <td className="text-sm">{p.nama}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className="flex justify-end">
+        <Button variant="secondary" onClick={onCancel}>Tutup</Button>
+      </div>
     </div>
   );
 }

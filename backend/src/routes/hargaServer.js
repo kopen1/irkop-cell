@@ -68,7 +68,7 @@ export async function perbandinganHarga(db, request, ctx) {
   const rows = await db.many(`
     SELECT hs.*, p.nama AS nama_produk_daftar, p.harga_modal AS modal_daftar, p.harga AS harga_jual_daftar
       FROM harga_server hs
-      LEFT JOIN produk p ON p.kode = hs.kode_produk AND p.deleted_at IS NULL
+      LEFT JOIN produk p ON p.kode = COALESCE(hs.kode_lokal, hs.kode_produk) AND p.deleted_at IS NULL
      ORDER BY hs.kode_produk
   `);
 
@@ -252,6 +252,97 @@ export async function listHargaLog(db, request, ctx) {
   return { items: rows };
 }
 
+// POST /api/harga-server/link  { id, kode_lokal } — hubungkan baris harga server
+// ke produk lokal (kode_lokal null untuk melepas).
+export async function linkProduk(db, request, ctx) {
+  const { user } = ctx.auth;
+  if (user.role !== 'admin') throw err(403, 'forbidden', 'Admin only');
+  const body = await readBody(request);
+  const id = Number(body.id);
+  if (!Number.isInteger(id)) throw err(400, 'invalid_value', 'id tidak valid');
+  const hs = await db.one('SELECT * FROM harga_server WHERE id = ?', id);
+  if (!hs) throw err(404, 'not_found', 'Harga server tidak ditemukan');
+  const kodeLokal = body.kode_lokal == null || body.kode_lokal === '' ? null : String(body.kode_lokal).trim();
+  if (kodeLokal) {
+    const p = await db.one('SELECT id FROM produk WHERE lower(kode) = lower(?) AND deleted_at IS NULL', kodeLokal);
+    if (!p) throw err(400, 'invalid_produk', 'Produk lokal tidak ditemukan');
+  }
+  await db.exec('UPDATE harga_server SET kode_lokal = ?, updated_at = ? WHERE id = ?', kodeLokal, nowIso(), id);
+  await writeAudit(db, { userId: user.id, aksi: 'link_harga_server', tabel: 'harga_server', recordId: id, dataAfter: { kode_lokal: kodeLokal } });
+  return { id, kode_lokal: kodeLokal };
+}
+
+const OP_LABEL = { indosat: 'Indosat', tri: 'Three', telkomsel: 'Telkomsel', xl: 'XL', axis: 'Axis', smartfren: 'Smartfren', smart: 'Smartfren' };
+function operatorLabel(hs) {
+  const fromOp = OP_LABEL[String(hs.operator || '').toLowerCase()];
+  if (fromOp) return fromOp;
+  const n = String(hs.nama_produk || '').toLowerCase();
+  if (/\bindosat\b/.test(n)) return 'Indosat';
+  if (/\btri\b|\bthree\b/.test(n)) return 'Three';
+  if (/\btelkomsel\b|\btsel\b/.test(n)) return 'Telkomsel';
+  if (/\bxl\b/.test(n)) return 'XL';
+  if (/\baxis\b/.test(n)) return 'Axis';
+  if (/\bsmartfren\b|\bsmart\b/.test(n)) return 'Smartfren';
+  return '';
+}
+function parseGBHari(nama) {
+  const s = String(nama || '');
+  const gbM = s.match(/(\d+(?:[.,]\d+)?)\s*gb/i);
+  const gb = gbM ? Math.floor(parseFloat(gbM[1].replace(',', '.'))) : null;
+  let hari = null;
+  const hM = s.match(/(\d+)\s*hari/i);
+  if (hM) hari = parseInt(hM[1]);
+  else if (/harian/i.test(s)) hari = 1;
+  return { gb, hari };
+}
+function namaPunyaOperator(nama, op) {
+  const n = String(nama || '').toLowerCase();
+  const o = op.toLowerCase();
+  if (o === 'three') return /\bthree\b|\btri\b/.test(n);
+  if (o === 'indosat') return /\bindosat\b|\bisat\b/.test(n);
+  if (o === 'telkomsel') return /\btelkomsel\b|\btsel\b/.test(n);
+  if (o === 'xl') return /\bxl\b/.test(n);
+  if (o === 'axis') return /\baxis\b/.test(n);
+  if (o === 'smartfren') return /\bsmartfren\b|\bsmart\b|\bsm\b/.test(n);
+  return n.includes(o);
+}
+
+// POST /api/harga-server/auto-link — cocokkan otomatis server ↔ produk lokal
+// berdasarkan operator + kapasitas (GB) + masa aktif (hari). Hanya yang unik.
+export async function autoLinkProduk(db, request, ctx) {
+  const { user } = ctx.auth;
+  if (user.role !== 'admin') throw err(403, 'forbidden', 'Admin only');
+  const rows = await db.many(
+    `SELECT hs.* FROM harga_server hs
+       LEFT JOIN produk p ON p.kode = COALESCE(hs.kode_lokal, hs.kode_produk) AND p.deleted_at IS NULL
+      WHERE p.id IS NULL AND hs.kategori = 'cetak_voucher'`
+  );
+  const prods = await db.many('SELECT kode, nama FROM produk WHERE deleted_at IS NULL');
+  let linked = 0;
+  const detail = [];
+  for (const hs of rows) {
+    const op = operatorLabel(hs);
+    const { gb, hari } = parseGBHari(hs.nama_produk);
+    if (!op || gb == null) continue;
+    const cands = prods.filter((p) => {
+      if (!namaPunyaOperator(p.nama, op)) return false;
+      const pg = parseGBHari(p.nama);
+      if (pg.gb !== gb) return false;
+      if (hari == null) return true;
+      if (pg.hari === hari) return true;
+      if ((hari === 28 || hari === 30) && (pg.hari === 28 || pg.hari === 30)) return true;
+      return false;
+    });
+    if (cands.length === 1) {
+      await db.exec('UPDATE harga_server SET kode_lokal = ?, updated_at = ? WHERE id = ?', cands[0].kode, nowIso(), hs.id);
+      linked += 1;
+      detail.push({ id: hs.id, kode_produk: hs.kode_produk, kode_lokal: cands[0].kode });
+    }
+  }
+  await writeAudit(db, { userId: user.id, aksi: 'auto_link_harga_server', tabel: 'harga_server', dataAfter: { linked } });
+  return { linked, total_belum: rows.length, detail };
+}
+
 // POST /api/harga-server/update-modal
 // Body:
 //   { kode }            -> update 1 produk
@@ -286,7 +377,7 @@ export async function updateModalFromServer(db, request, ctx) {
     // all_naik: ambil semua yang punya produk, filter efektif > modal di bawah.
     serverRows = await db.many(
       `SELECT hs.* FROM harga_server hs
-         JOIN produk p ON p.kode = hs.kode_produk AND p.deleted_at IS NULL`
+         JOIN produk p ON p.kode = COALESCE(hs.kode_lokal, hs.kode_produk) AND p.deleted_at IS NULL`
     );
   }
 
@@ -297,7 +388,7 @@ export async function updateModalFromServer(db, request, ctx) {
   for (const hs of serverRows) {
     const p = await db.one(
       'SELECT * FROM produk WHERE kode = ? AND deleted_at IS NULL',
-      hs.kode_produk
+      hs.kode_lokal || hs.kode_produk
     );
     if (!p) {
       skipped.push({ kode: hs.kode_produk, reason: 'Produk tidak ada di Daftar Barang' });

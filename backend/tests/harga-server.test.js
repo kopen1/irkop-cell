@@ -138,6 +138,44 @@ test('POST /api/harga-server/update-modal all_naik: hanya update yang naik', asy
   assert.equal(a2.harga_modal, 10000); // tidak berubah
 });
 
+test('link harga server ke produk lokal (kode beda) + update-modal', async () => {
+  const { env, token } = await bootstrap();
+  await seedProduk(env, { kode: 'Vi7', nama: 'Indosat 7GB 28 Hari', harga: 35000, harga_modal: 32000 });
+  await call(env, '/api/harga-server', {
+    method: 'POST', token,
+    body: { items: [{ kode: 'Vindosat7', nama: 'Freedom Internet 7GB 28Hari', kategori: 'cetak_voucher', operator: 'indosat', harga: 32500 }] },
+  });
+  const list = await call(env, '/api/harga-server', { token });
+  const hs = list.data.items.find((x) => x.kode_produk === 'Vindosat7');
+
+  const link = await call(env, '/api/harga-server/link', { method: 'POST', token, body: { id: hs.id, kode_lokal: 'Vi7' } });
+  assert.equal(link.status, 200, JSON.stringify(link.data));
+
+  const cmp = await call(env, '/api/harga-server/perbandingan', { token });
+  const row = cmp.data.items.find((x) => x.kode_produk === 'Vindosat7');
+  assert.equal(Number(row.modal_daftar), 32000, 'kena produk lokal Vi7');
+  assert.equal(row.status, 'naik'); // (32500 + 500) - 32000
+
+  const up = await call(env, '/api/harga-server/update-modal', { method: 'POST', token, body: { kode: 'Vindosat7' } });
+  assert.equal(up.data.updated_count, 1);
+  const p = await env.DB.prepare("SELECT harga_modal FROM produk WHERE kode = 'Vi7'").first();
+  assert.equal(Number(p.harga_modal), 33000, 'modal Vi7 = 32500 + 500');
+});
+
+test('auto-link cocokkan server ke produk (operator+GB+hari)', async () => {
+  const { env, token } = await bootstrap();
+  await seedProduk(env, { kode: 'Vi7', nama: 'Indosat 7GB 28 Hari', harga: 35000, harga_modal: 32000 });
+  await call(env, '/api/harga-server', {
+    method: 'POST', token,
+    body: { items: [{ kode: 'Vindosat7', nama: 'Freedom Internet 7GB 28Hari', kategori: 'cetak_voucher', operator: 'indosat', harga: 32500 }] },
+  });
+  const r = await call(env, '/api/harga-server/auto-link', { method: 'POST', token, body: {} });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.linked, 1);
+  const hs = await env.DB.prepare("SELECT kode_lokal FROM harga_server WHERE kode_produk = 'Vindosat7'").first();
+  assert.equal(hs.kode_lokal, 'Vi7');
+});
+
 test('POST /api/harga-server/update-modal: kode tanpa produk dilewati', async () => {
   const { env, token } = await bootstrap();
   await call(env, '/api/harga-server', {

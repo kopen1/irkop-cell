@@ -58,6 +58,8 @@ case'harga-server':
   if(m==='GET'&&param==='log')return hargaServerRoutes.listHargaLog(db,request,ctx);
   if(m==='POST'&&!param)return hargaServerRoutes.importHargaServer(db,request,ctx);
   if(m==='POST'&&param==='update-modal')return hargaServerRoutes.updateModalFromServer(db,request,ctx);
+  if(m==='POST'&&param==='link')return hargaServerRoutes.linkProduk(db,request,ctx);
+  if(m==='POST'&&param==='auto-link')return hargaServerRoutes.autoLinkProduk(db,request,ctx);
   if(m==='PUT'&&param)return hargaServerRoutes.updateHargaServer(db,request,ctx,param);
   if(m==='DELETE'&&param)return hargaServerRoutes.deleteHargaServer(db,request,ctx,param);
   break;
