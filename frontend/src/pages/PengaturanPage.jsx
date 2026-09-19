@@ -68,7 +68,6 @@ function UmumTab() {
         three: s.biaya_voucher_three ?? '',
         default: s.biaya_voucher_default ?? '',
       });
-      if (s.default_theme) setTheme(s.default_theme);
     }).catch(() => {}).finally(() => setLoaded(true));
   }, [setTheme]);
 
@@ -100,7 +99,7 @@ function UmumTab() {
 
   return (
     <Card title="Identitas & Tampilan">
-      <div className="flex flex-col gap-4" style={{ maxWidth: 480 }}>
+      <div className="flex flex-col gap-4">
         <Field label="Nama website">
           <Input type="text" value={nama} onChange={(e) => setNama(e.target.value)} />
         </Field>
