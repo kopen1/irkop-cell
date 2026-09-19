@@ -186,6 +186,8 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
   const [kerusakan, setKerusakan] = useState(initial?.service?.deskripsi_kerusakan || '');
   const [biayaService, setBiayaService] = useState(initial?.service?.biaya ? String(initial.service.biaya) : '');
   const [modalService, setModalService] = useState(initial?.service?.harga_modal ? String(initial.service.harga_modal) : '');
+  const [spareparts, setSpareparts] = useState([]);
+  const [searchSparepart, setSearchSparepart] = useState('');
   const [tanggalMasuk, setTanggalMasuk] = useState(initial?.service?.tanggal_masuk || today);
   const [tanggalGaransi, setTanggalGaransi] = useState(initial?.service?.tanggal_garansi || '');
   const [catatanTeknisi, setCatatanTeknisi] = useState(initial?.service?.catatan || '');
@@ -308,6 +310,26 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     setKeranjang((prev) => prev.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
   const removeItem = (idx) => setKeranjang((prev) => prev.filter((_, i) => i !== idx));
 
+  // Sparepart untuk Service HP (kategori 'Sparepart').
+  const spareProdukList = useMemo(() => allProduk.filter((p) => p.kategori_nama === 'Sparepart'), [allProduk]);
+  const hasilSparepart = useMemo(() => {
+    if (!searchSparepart.trim()) return [];
+    const q = searchSparepart.toLowerCase();
+    return spareProdukList
+      .filter((p) => (p.kode || '').toLowerCase().includes(q) || (p.nama || '').toLowerCase().includes(q))
+      .slice(0, 10);
+  }, [searchSparepart, spareProdukList]);
+  const addSparepart = (p) => {
+    setSpareparts((prev) => {
+      const ex = prev.find((x) => x.produk_id === p.id);
+      if (ex) return prev.map((x) => (x.produk_id === p.id ? { ...x, qty: x.qty + 1 } : x));
+      return [...prev, { produk_id: p.id, kode: p.kode, nama: p.nama, qty: 1, modal: p.harga_modal || 0 }];
+    });
+    setSearchSparepart('');
+  };
+  const updateSparepart = (idx, patch) => setSpareparts((prev) => prev.map((x, i) => (i === idx ? { ...x, ...patch } : x)));
+  const removeSparepart = (idx) => setSpareparts((prev) => prev.filter((_, i) => i !== idx));
+
   const totalKeranjang = keranjang.reduce((s, it) => s + (Number(it.harga) || 0) * Number(it.qty || 1), 0);
 
   const handlePickDigitalProduk = (p) => {
@@ -374,7 +396,8 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
   };
 
   const biayaServiceNum = parseRupiah(biayaService) || 0;
-  const modalServiceNum = parseRupiah(modalService) || 0;
+  const partModalNum = spareparts.reduce((s, x) => s + (Number(x.modal) || 0) * (Number(x.qty) || 0), 0);
+  const modalServiceNum = spareparts.length ? partModalNum : (parseRupiah(modalService) || 0);
   const labaService = biayaServiceNum - modalServiceNum;
 
   const isTransfer = metodeBayar === 'transfer';
@@ -525,6 +548,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
           deskripsi_kerusakan: kerusakan.trim(),
           biaya: biayaServiceNum,
           harga_modal: modalServiceNum,
+          parts: spareparts.map((s) => ({ produk_id: s.produk_id, qty: s.qty })),
           tanggal_masuk: tanggalMasuk || null,
           tanggal_garansi: tanggalGaransi || null,
           catatan: catatanTeknisi || null,
@@ -1195,13 +1219,14 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
                   placeholder="Harga ke pelanggan"
                 />
               </Field>
-              <Field label="Modal (Rp)">
+              <Field label="Modal (Rp)" hint={spareparts.length ? 'Otomatis dari sparepart' : 'Biaya part/bahan'}>
                 <Input
                   type="text"
                   inputMode="numeric"
-                  value={modalService ? formatRupiahInput(modalService) : ''}
+                  value={modalServiceNum ? formatRupiahInput(String(modalServiceNum)) : ''}
                   onChange={(e) => setModalService(formatRupiahInput(e.target.value))}
                   placeholder="Biaya part/bahan"
+                  disabled={spareparts.length > 0}
                 />
               </Field>
               <Field label="Laba">
@@ -1228,6 +1253,51 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
                 </div>
               </Field>
             </div>
+
+            <Field label="Sparepart dipakai (opsional)" hint="Stok sparepart otomatis berkurang; modal service diambil dari sparepart ini.">
+              <Input
+                type="search"
+                value={searchSparepart}
+                placeholder="Ketik kode/nama sparepart…"
+                onChange={(e) => setSearchSparepart(e.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+            {hasilSparepart.length > 0 && (
+              <div className="card" style={{ padding: 4, marginTop: 6, boxShadow: 'none' }}>
+                {hasilSparepart.map((p) => (
+                  <button
+                    key={p.id}
+                    type="button"
+                    className="flex justify-between items-center w-full"
+                    style={{ background: 'none', border: 'none', padding: '6px 8px', cursor: 'pointer', textAlign: 'left' }}
+                    onClick={() => addSparepart(p)}
+                  >
+                    <span className="text-sm"><span className="font-mono text-muted">{p.kode}</span> -- {p.nama}</span>
+                    <span className="num text-sm">stok {p.stok} · modal {formatRupiah(p.harga_modal || 0)}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            {spareparts.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                {spareparts.map((s, idx) => (
+                  <div key={s.produk_id} className="flex items-center justify-between" style={{ gap: 8, marginBottom: 6 }}>
+                    <span className="text-sm"><b>{s.nama}</b> <span className="text-muted">(modal {formatRupiah(s.modal)})</span></span>
+                    <span className="flex items-center" style={{ gap: 8 }}>
+                      <div className="cart-item-stepper">
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateSparepart(idx, { qty: Math.max(1, s.qty - 1) })}>-</button>
+                        <span className="num cart-item-qty">{s.qty}</span>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateSparepart(idx, { qty: s.qty + 1 })}>+</button>
+                      </div>
+                      <Button variant="ghost" size="sm" type="button" aria-label="Hapus sparepart" onClick={() => removeSparepart(idx)}>
+                        <Icon name="trash" size={15} />
+                      </Button>
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
             <div className="grid-2" style={{ marginTop: 12 }}>
               <Field label="Tanggal Masuk">

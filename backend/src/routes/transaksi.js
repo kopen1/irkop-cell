@@ -637,6 +637,7 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
   const sesi = await requireOpenSession(db);
 
   // Service HP: create service_hp record lalu masukkan sebagai item
+  let servicePartEntries = [];
   if (body.service) {
     const svc = body.service;
     const svcNow = nowIso();
@@ -648,6 +649,31 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
         ? umum.id
         : (await db.exec("INSERT INTO pelanggan (nama, created_at) VALUES ('Umum', ?)", svcNow)).lastRowId;
     }
+
+    // Sparepart yang dipakai (opsional): stok turun + modal otomatis dari sparepart.
+    const parts = Array.isArray(svc.parts) ? svc.parts : [];
+    let partModal = 0;
+    for (const pt of parts) {
+      const produkId = Number(pt.produk_id);
+      const qty = Number(pt.qty) || 1;
+      if (!Number.isInteger(produkId) || produkId < 1 || !Number.isInteger(qty) || qty < 1) {
+        throw err(400, 'invalid_value', 'Sparepart tidak valid (produk & qty)');
+      }
+      const prod = await db.one(
+        `SELECT p.id, p.nama, p.harga_modal, k.lacak_stok AS kategori_lacak_stok
+           FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id
+          WHERE p.id = ? AND p.deleted_at IS NULL`,
+        produkId
+      );
+      if (!prod) throw err(400, 'invalid_product', `Sparepart id ${produkId} tidak ditemukan`);
+      if (Number(prod.kategori_lacak_stok || 0) !== 1) {
+        throw err(400, 'invalid_product', `Produk '${prod.nama}' tidak melacak stok`);
+      }
+      partModal += (prod.harga_modal == null ? 0 : Number(prod.harga_modal)) * qty;
+      servicePartEntries.push({ produk_id: prod.id, qty, lacak_stok: 1 });
+    }
+    const modalFinal = servicePartEntries.length ? partModal : (svc.harga_modal != null ? Number(svc.harga_modal) : null);
+
     const svcResult = await db.exec(
       `INSERT INTO service_hp (pelanggan_id, nama_device, deskripsi_kerusakan, biaya, harga_modal, tanggal_masuk, catatan, status)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -655,13 +681,13 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
       svc.nama_device,
       svc.deskripsi_kerusakan || null,
       svc.biaya != null ? svc.biaya : null,
-      svc.harga_modal != null ? svc.harga_modal : null,
+      modalFinal,
       svc.tanggal_masuk || svcNow,
       svc.catatan || null,
       'selesai'
     );
     // Replace body.items with a single item referencing the new service_hp
-    body.items = [{ service_hp_id: svcResult.lastRowId, qty: 1, biaya: svc.biaya, harga_modal: svc.harga_modal }];
+    body.items = [{ service_hp_id: svcResult.lastRowId, qty: 1, biaya: svc.biaya, harga_modal: modalFinal }];
   }
 
   const produkMap = await loadProducts(db, body.items);
@@ -831,6 +857,10 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
   // Auto-kurang stok untuk penjualan fisik (produk digital tidak menyentuh stok).
   if (jenis !== 'produkdigital') {
     stmts.push(...stockStatements(db, itemRows, -1, now));
+  }
+  // Sparepart yang dipakai pada service → stok turun (modal sudah dihitung di service).
+  if (servicePartEntries.length) {
+    stmts.push(...stockStatements(db, servicePartEntries, -1, now));
   }
 
   const { results } = await db.batch(stmts);
