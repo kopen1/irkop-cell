@@ -2,6 +2,7 @@ import { err } from '../lib/errors.js';
 import { readBody, asInt, asString, asBool } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { nowIso } from '../lib/time.js';
+import { autoCreateProdukFromTransaksi } from '../financial/autoProduk.js';
 
 function cleanName(v) {
   return String(v || '').trim().replace(/\s+/g, ' ');
@@ -158,4 +159,11 @@ export async function deleteProduk(db, request, ctx, idStr) {
   await db.exec('UPDATE produk SET deleted_at = ?, updated_at = ? WHERE id = ?', nowIso(), nowIso(), id);
   await writeAudit(db, { userId: user.id, aksi: 'soft_delete', tabel: 'produk', recordId: id, dataBefore: { kode: old.kode, nama: old.nama } });
   return { id, status: 'soft_deleted' };
+}
+
+// POST /api/produk/scan-otomatis — pindai transaksi & buat produk otomatis.
+export async function scanProdukOtomatis(db, request, ctx) {
+  const result = await autoCreateProdukFromTransaksi(db, {});
+  await writeAudit(db, { userId: ctx.auth.user.id, aksi: 'scan_produk_otomatis', tabel: 'produk', dataAfter: { dibuat: result.dibuat, dilewati: result.dilewati, created: result.created } });
+  return result;
 }

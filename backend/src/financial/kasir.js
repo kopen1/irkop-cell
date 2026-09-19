@@ -4,6 +4,7 @@ import { getAccount } from './akun.js';
 import { sumMutationBySession } from './mutasi.js';
 import { writeAudit } from '../lib/audit.js';
 import { ensureGajiAutoInput, ensureOwnerGajiAutoInput } from './gaji.js';
+import { autoCreateProdukFromTransaksi } from './autoProduk.js';
 
 // Akun ledger / label hitung yang BUKAN akun uang — tidak direkonsiliasi
 // dan tidak wajib ada di akun_master saat opening/closing.
@@ -244,6 +245,9 @@ export async function closing(db, { body, user, ip }) {
     const jamBuka = (new Date(sesi.dibuka_at).getUTCHours() + 7) % 24;
     await ensureOwnerGajiAutoInput(db, { tanggal: sesi.tanggal, jamBuka, kasirSesiId: sesi.id });
   }
+
+  // Buat produk otomatis dari transaksi DANA/Bank yang sering.
+  await autoCreateProdukFromTransaksi(db, {});
 
   await writeAudit(db, { userId: user.id, aksi: 'closing', tabel: 'kasir_sesi', recordId: sesi.id, dataAfter: { tanggal, kasir_sesi_id: sesi.id, rekonsiliasi: processed, catatan: body.catatan_closing ?? null }, ip });
 

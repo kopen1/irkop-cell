@@ -52,6 +52,7 @@ export default function DaftarBarangPage() {
   }, [load]);
 
   const [createOpen, setCreateOpen] = useState(false);
+  const [scanBusy, setScanBusy] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
@@ -150,6 +151,19 @@ export default function DaftarBarangPage() {
   };
 
   // Ekspor katalog lengkap ke CSV (client-side dari GET /produk).
+  const handleScan = async () => {
+    setScanBusy(true);
+    try {
+      const res = await api.post('/produk/scan-otomatis', {});
+      toast.success(`Scan selesai: ${res.dibuat} produk dibuat, ${res.dilewati} dilewati.`);
+      load().catch(() => {});
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setScanBusy(false);
+    }
+  };
+
   const handleExport = async () => {
     try {
       const dataFull = await api.get('/produk');
@@ -295,6 +309,9 @@ export default function DaftarBarangPage() {
               </Button>
               <Button variant="secondary" onClick={() => { setImportResult(null); setImportOpen(true); }}>
                 <Icon name="database" size={16} /> Import CSV
+              </Button>
+              <Button variant="secondary" onClick={handleScan} loading={scanBusy}>
+                <Icon name="refresh" size={16} /> Scan Produk
               </Button>
               <Button onClick={() => { setEditItem(null); setCreateOpen(true); }}>
                 <Icon name="plus" size={16} /> Tambah Produk
