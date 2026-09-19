@@ -13,9 +13,19 @@ const PALETTE = [
   { bg: 'rgba(132,204,22,0.20)', fg: '#65a30d' },  // lime
 ];
 
+// Warna tetap untuk kategori umum (agar pasti berbeda, tidak bentrok hash).
+const NAMED = {
+  voucher: 0,      // biru
+  saldo: 1,        // hijau
+  aksesoris: 2,    // amber
+  sparepart: 4,    // violet
+  'service hp': 5, // pink
+};
+
 export function kategoriColor(nama) {
-  const s = String(nama || '');
+  const key = String(nama || '').toLowerCase().trim();
+  if (key in NAMED) return PALETTE[NAMED[key]];
   let h = 0;
-  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < key.length; i += 1) h = (h * 31 + key.charCodeAt(i)) >>> 0;
   return PALETTE[h % PALETTE.length];
 }
