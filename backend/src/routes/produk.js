@@ -110,11 +110,28 @@ export async function createProduk(db, request, ctx) {
     lacakStok = k.lacak_stok;
   }
 
-  const dup = await db.one('SELECT id FROM produk WHERE kode = ?', kode);
-  if (dup) throw err(409, 'duplicate_kode', 'Kode produk sudah ada');
+  const dup = await db.one('SELECT * FROM produk WHERE kode = ?', kode);
+  if (dup && !dup.deleted_at) throw err(409, 'duplicate_kode', 'Kode produk sudah ada');
 
   const stok = lacakStok ? asInt(body.stok, { field: 'stok', min: 0, defaultVal: 0 }) || 0 : 0;
   const stokMinimum = lacakStok ? asInt(body.stok_minimum, { field: 'stok_minimum', min: 0, defaultVal: 0 }) || 0 : 0;
+  const satuan = body.satuan ? String(body.satuan) : 'pcs';
+
+  // Kode sudah ada tapi produknya soft-deleted → restore + update dari data baru
+  // (supaya re-import bisa memakai kembali kode lama yang sudah dihapus).
+  if (dup) {
+    await db.exec(
+      `UPDATE produk SET nama = ?, kategori_id = ?, harga = ?, harga_modal = ?, stok = ?, stok_minimum = ?, satuan = ?,
+         deleted_at = NULL, updated_at = ? WHERE id = ?`,
+      nama, kategoriId, harga, hargaModal, stok, stokMinimum, satuan, nowIso(), dup.id
+    );
+    await writeAudit(db, {
+      userId: user.id, aksi: 'restore', tabel: 'produk', recordId: dup.id,
+      dataBefore: { kode: dup.kode, deleted_at: dup.deleted_at },
+      dataAfter: { kode, nama, harga, harga_modal: hargaModal, kategori_id: kategoriId, stok },
+    });
+    return { id: dup.id, kode, nama, harga, harga_modal: hargaModal, kategori_id: kategoriId, stok, stok_minimum: stokMinimum, restored: true };
+  }
 
   const res = await db.exec(
     `INSERT INTO produk (kode, nama, kategori_id, harga, harga_modal, stok, stok_minimum, satuan, created_at)
