@@ -22,6 +22,13 @@ import { Icon } from '../components/ui/Icon';
 
 const LIMIT = 100;
 
+// Operator/brand untuk grouping produk (dibaca dari nama produk).
+const BRANDS = ['Indosat', 'Telkomsel', 'Smartfren', 'Tri', 'XL', 'Axis', 'by.U', 'Dana', 'GoPay', 'OVO', 'ShopeePay', 'PLN'];
+function brandOf(nama) {
+  const n = String(nama || '').toLowerCase();
+  return BRANDS.find((b) => n.includes(b.toLowerCase())) || '';
+}
+
 export default function DaftarBarangPage() {
   const { can } = useAuth();
   const toast = useToast();
@@ -72,6 +79,33 @@ export default function DaftarBarangPage() {
     [kategori.data]
   );
   const lowStock = rows.filter((p) => p.lacak_stok !== 0 && p.stok_minimum > 0 && p.stok <= p.stok_minimum);
+
+  // Grouping tampilan: per Kategori · Operator, urut harga termurah.
+  const displayRows = useMemo(() => {
+    const groupLabel = (r) => {
+      const k = kategoriById[r.kategori_id]?.nama || 'Tanpa Kategori';
+      const b = brandOf(r.nama);
+      return b ? `${k} · ${b}` : k;
+    };
+    const sorted = [...rows].sort((a, b) => {
+      const ga = groupLabel(a);
+      const gb = groupLabel(b);
+      if (ga !== gb) return ga.localeCompare(gb);
+      return (Number(a.harga) || 0) - (Number(b.harga) || 0);
+    });
+    const out = [];
+    let last = null;
+    for (const r of sorted) {
+      const g = groupLabel(r);
+      if (g !== last) {
+        out.push({ _group: g, key: `group:${g}` });
+        last = g;
+      }
+      out.push(r);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, kategoriById]);
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
@@ -387,7 +421,7 @@ export default function DaftarBarangPage() {
               ),
             },
           ]}
-          rows={rows}
+          rows={displayRows}
         />
         </>
       )}

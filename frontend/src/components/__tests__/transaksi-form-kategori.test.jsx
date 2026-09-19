@@ -66,7 +66,7 @@ describe('TransaksiForm — Filter Kategori & keranjang', () => {
     search('1');
     await waitFor(() => expect(screen.getByText(/Toner/)).toBeTruthy());
     expect(screen.getByText(/Pulsa/)).toBeTruthy();
-    expect(screen.getByText(/Tanpa Kategori/)).toBeTruthy();
+    expect(screen.getAllByText(/Tanpa Kategori/).length).toBeGreaterThan(0);
   });
 
   it('filter kategori menyaring hasil pencarian', async () => {
@@ -85,7 +85,7 @@ describe('TransaksiForm — Filter Kategori & keranjang', () => {
     expect(screen.queryByText(/Toner/)).toBeNull();
 
     fireEvent.change(filter, { target: { value: 'none' } });
-    await waitFor(() => expect(screen.getByText(/Tanpa Kategori/)).toBeTruthy());
+    await waitFor(() => expect(screen.getAllByText(/Tanpa Kategori/).length).toBeGreaterThan(0));
     expect(screen.queryByText(/Pulsa/)).toBeNull();
     expect(screen.queryByText(/Toner/)).toBeNull();
   });
@@ -96,7 +96,7 @@ describe('TransaksiForm — Filter Kategori & keranjang', () => {
     const filter = await screen.findByLabelText('Filter Kategori');
     fireEvent.change(filter, { target: { value: 'none' } });
     search('Tanpa');
-    const hasil = await screen.findByText(/Tanpa Kategori/);
+    const hasil = await screen.findByRole('button', { name: /Tanpa Kategori/ });
     fireEvent.click(hasil);
     expect(await screen.findByText('Keranjang (1 item)')).toBeTruthy();
   });

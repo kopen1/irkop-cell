@@ -210,6 +210,7 @@ export default function HargaServerPage() {
             { key: 'kategori', header: 'Kategori', render: (r) => <Badge tone="info">{r.kategori}</Badge> },
             { key: 'harga_server', header: 'Harga Server', align: 'right', render: (r) => <span className="num" style={{ fontWeight: 600 }}>{formatRupiah(r.harga_server)}</span> },
             { key: 'modal_daftar', header: 'Modal Daftar', align: 'right', render: (r) => r.modal_daftar ? <span className="num">{formatRupiah(r.modal_daftar)}</span> : <span className="text-muted">—</span> },
+            { key: 'harga_jual_daftar', header: 'Harga Jual', align: 'right', render: (r) => r.harga_jual_daftar ? <span className="num">{formatRupiah(r.harga_jual_daftar)}</span> : <span className="text-muted">—</span> },
             { key: 'selisih', header: 'Selisih', align: 'right', render: (r) => {
               if (r.status === 'baru') return <Badge tone="warning">Baru</Badge>;
               if (r.selisih > 0) return <span className="num" style={{ color: 'var(--danger)', fontWeight: 600 }}>+{formatRupiah(r.selisih)}</span>;

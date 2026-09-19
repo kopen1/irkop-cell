@@ -26,6 +26,13 @@ const SUB_JENIS_AKUN_MAP = {
   transfer: 'SeaBank',
 };
 
+// Operator/brand untuk grouping pemilih produk (dibaca dari nama).
+const BRANDS = ['Indosat', 'Telkomsel', 'Smartfren', 'Tri', 'XL', 'Axis', 'by.U', 'Dana', 'GoPay', 'OVO', 'ShopeePay', 'PLN'];
+function brandOf(nama) {
+  const n = String(nama || '').toLowerCase();
+  return BRANDS.find((b) => n.includes(b.toLowerCase())) || '';
+}
+
 const ADMIN_PRESETS = [
   { value: '', label: 'Preset' },
   { value: '0', label: '0' },
@@ -260,9 +267,34 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
 
   const hasilPenjualan = useMemo(() => {
     if (!search) return null;
-    return allProduk.filter((p) => matchKategori(p) && predikat(p, search)).slice(0, 12);
+    return allProduk.filter((p) => matchKategori(p) && predikat(p, search)).slice(0, 60);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, allProduk, kategoriFilter]);
+
+  // Pemilih produk di-group per Kategori · Operator, urut harga termurah.
+  const hasilPenjualanGrouped = useMemo(() => {
+    if (!hasilPenjualan || hasilPenjualan.length === 0) return null;
+    const label = (p) => {
+      const k = kategoriList.find((x) => x.id === p.kategori_id)?.nama || 'Tanpa Kategori';
+      const b = brandOf(p.nama);
+      return b ? `${k} · ${b}` : k;
+    };
+    const sorted = [...hasilPenjualan].sort((a, b) => {
+      const ga = label(a);
+      const gb = label(b);
+      if (ga !== gb) return ga.localeCompare(gb);
+      return (Number(a.harga) || 0) - (Number(b.harga) || 0);
+    });
+    const out = [];
+    let last = null;
+    for (const p of sorted) {
+      const g = label(p);
+      if (g !== last) { out.push({ _group: g, key: `g:${g}` }); last = g; }
+      out.push(p);
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasilPenjualan, kategoriList]);
 
   const hasilDigital = useMemo(() => {
     if (!searchDigital) return null;
@@ -608,33 +640,42 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
               </Field>
             </div>
 
-            {hasilPenjualan && hasilPenjualan.length > 0 && (
+            {hasilPenjualanGrouped && (
               <div
                 className="card"
-                style={{ padding: 'var(--space-2)', maxHeight: 190, overflowY: 'auto', boxShadow: 'none' }}
+                style={{ padding: 'var(--space-2)', maxHeight: 220, overflowY: 'auto', boxShadow: 'none' }}
               >
-                {hasilPenjualan.map((p) => (
-                  <button
-                    key={p.id}
-                    type="button"
-                    className="flex justify-between items-center w-full"
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      padding: '8px 10px',
-                      borderRadius: 'var(--radius-sm)',
-                      textAlign: 'left',
-                      cursor: 'pointer',
-                    }}
-                    onClick={() => onPickProduk(p)}
-                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
-                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
-                  >
-                    <span>
-                      <span className="font-mono text-sm text-muted">{p.kode}</span> -- {p.nama}
-                    </span>
-                    <span className="num text-sm" style={{ color: 'var(--success)' }}>{formatRupiah(p.harga)}</span>
-                  </button>
+                {hasilPenjualanGrouped.map((p) => (
+                  p._group ? (
+                    <div
+                      key={p.key}
+                      style={{ position: 'sticky', top: 0, padding: '4px 10px', background: 'var(--table-header)', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.5px', fontWeight: 700, borderRadius: 'var(--radius-sm)' }}
+                    >
+                      {p._group}
+                    </div>
+                  ) : (
+                    <button
+                      key={p.id}
+                      type="button"
+                      className="flex justify-between items-center w-full"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        padding: '8px 10px',
+                        borderRadius: 'var(--radius-sm)',
+                        textAlign: 'left',
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => onPickProduk(p)}
+                      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--bg-hover)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <span>
+                        <span className="font-mono text-sm text-muted">{p.kode}</span> -- {p.nama}
+                      </span>
+                      <span className="num text-sm" style={{ color: 'var(--success)' }}>{formatRupiah(p.harga)}</span>
+                    </button>
+                  )
                 ))}
               </div>
             )}
