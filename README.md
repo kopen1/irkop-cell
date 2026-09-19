@@ -62,13 +62,16 @@ Target pengguna: pemilik konter PPOB, kasir, dan admin.
 - Data finansial 100% dari backend, tidak dihitung di frontend
 
 ### Daftar Barang / Produk
-- CRUD produk dengan kategori
-- Pencarian dan filter
+- CRUD produk dengan kategori + **filter kategori** + pencarian
+- **Grouping** per `Kategori · Operator` (dari kode voucher), urut harga termurah
+- Kolom **Laba** (harga jual − modal) + field Laba otomatis di form
+- **Scan Produk** — buat produk otomatis dari transaksi DANA/Bank yang sering (lihat Engine Auto-Produk)
 
 ### Service HP (PRD 5.6)
 - CRUD service HP dengan status: Masuk → Proses → Selesai → Diambil
 - Notifikasi ke pelanggan bersifat manual (admin telepon/chat sendiri)
 - Pencatatan biaya dan tanggal masuk/selesai
+- **Pakai sparepart** (kategori `Sparepart`) saat input service → stok sparepart turun otomatis, modal & laba dihitung dari sparepart
 
 ### Kasbon (PRD 5.7)
 - CRUD kasbon terkait transaksi bon
@@ -142,13 +145,22 @@ Target pengguna: pemilik konter PPOB, kasir, dan admin.
 - **Laporan**: Produk Terlaris, Rincian Harian, Saldo Akun (awal→akhir) + total uang, Arus Dana (bukan omzet), Pendapatan admin, Buku Kas, Rekonsiliasi bulanan (baris Cek + toleransi).
 - **Buka ulang sesi kasir** (`POST /api/kasir/reopen`) + setoran pasca-closing.
 - **Opening otomatis** dari saldo sesi terakhir.
-- **Gaji**: akru otomatis (karyawan saat opening, owner saat closing), gaji owner = upah ikut jam buka + 50% laba service, dan pembayaran berkala via "Gaji Belum Dibayar" (per orang).
-- **Seed riwayat lokal** `backend/seed-history.js` (contoh 1 bulan: service, pengeluaran, beli stok, gaji, transfer, kasbon).
+- **Gaji**: akru otomatis (karyawan saat opening, owner saat closing), gaji owner = upah ikut jam buka + 50% laba service, pembayaran berkala via "Gaji Belum Dibayar" (per orang), dan **filter bulan** di halaman Gaji.
+- **Service pakai Sparepart** — kategori `Sparepart` (lacak stok); di form Service pilih sparepart + qty → **stok turun otomatis**, **modal = Σ modal sparepart**, laba = biaya − modal.
+- **Engine Auto-Produk** (`financial/autoProduk.js`) — pindai transaksi **Produk Digital (DANA/GoPay/Ovo)** + **Transfer (Bank)** 7 hari; kalau (provider + nominal) muncul **≥ 10×** & belum ada produknya → **otomatis buat produk** di kategori `Saldo` (kode `D/B/O/G` + ribuan, `harga = nominal + admin`). Jalan **saat Closing** + tombol **"Scan Produk"** di Daftar Barang.
+- **Biaya Voucher Fisik** bisa diatur di **Pengaturan** (Telkomsel/Three/lainnya) → `Update Modal` = `harga server + biaya`.
+- **Kolom & Field Laba** di Daftar Barang (harga jual − modal; hitungan tampilan, **tidak** disimpan ke DB).
+- **Filter Kategori** di Daftar Barang.
+- **Grouping produk** per **Kategori · Operator** (dibaca dari kode voucher: `Vi`=Indosat, `Vs`=Telkomsel, `Vt`=Three, `Vx`=XL, `Vsm`=Smartfren, `VA`=Axis) di Daftar Barang & pemilih produk Transaksi, urut harga termurah.
+- **UI**: sidebar desktop bisa di-hide (tombol hamburger); skala font **desktop 175% / mobile 100%**; topbar & bottom nav mobile dipadatkan.
+- **Seed lokal**: `backend/seed-history.js` (contoh 1 bulan), `backend/seed-harga-server.js` (contoh perbandingan harga).
 
 ### Diubah
 - **Omzet** = penjualan item saja (nominal tarik tunai/transfer/kirim uang dipindah ke **Arus Dana**); Rekap Kategori otomatis = Omzet.
 - **Produk Digital** menyertakan `jenis` + `akun_sumber`; modal dipakai dari form (bukan hanya master).
 - **Harga Produk Digital** per transaksi memakai `harga_jual`/`harga_modal` dari form.
+- **Harga Server / Update Modal** menambahkan **biaya fisik per operator** untuk voucher (dari Pengaturan).
+- **Kategori `Cetak Voucher` → `Voucher`** (nama kategori saja; nilai `kategori` di harga server tetap `cetak_voucher`).
 - **Merge pelanggan** ikut memindahkan nomor telepon & semua alias (format satu baris nama — nomor).
 - **Detail pelanggan** jadi inline.
 - **Total/frekuensi pelanggan** dihitung dari transaksi (bukan kolom basi); riwayat transaksi tampil.
@@ -159,9 +171,11 @@ Target pengguna: pemilik konter PPOB, kasir, dan admin.
 - Default tanggal **Pengeluaran** memakai WIB (sebelumnya UTC → bisa beda hari).
 - Riwayat transaksi pelanggan tidak tampil (`riwayat` vs `riwayat_transaksi`).
 - Simpan transaksi manual di Laporan memanggil fungsi `run()` yang tidak ada.
+- Halaman **Gaji** kini benar-benar memfilter per bulan (`month`).
+- Form produk: **Harga Jual & Modal terformat** (mis. `13.000`) saat edit.
 
 ### Migrasi baru
-- `0010_transfer_saldo.sql`, `0011_pembelian_stok.sql`, `0012_gaji_dibayar.sql`.
+- `0010_transfer_saldo.sql`, `0011_pembelian_stok.sql`, `0012_gaji_dibayar.sql` (dijalankan manual di D1).
 
 ---
 
@@ -305,9 +319,9 @@ Semua task Sprint 1–5 selesai. QA dan integration test lulus.
 
 | Area | Tests | Status |
 |---|---|---|
-| Backend (financial engine, auth, laporan, stok, transfer, beli stok, gaji, rekonsiliasi, NotifHook, reminder, timezone) | 191 | ✅ PASS |
+| Backend (financial engine, auth, laporan, stok, transfer, beli stok, gaji, service-sparepart, auto-produk, rekonsiliasi, NotifHook, reminder, timezone) | 198 | ✅ PASS |
 | Frontend (format, routes, smoke login/tema/redirect, smoke laporan, halaman) | 75 | ✅ PASS |
-| **Total** | **266** | **✅ PASS** |
+| **Total** | **273** | **✅ PASS** |
 
 Jalankan:
 ```bash
