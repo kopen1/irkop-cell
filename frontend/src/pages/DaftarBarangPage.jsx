@@ -12,6 +12,7 @@ import { useDebounce } from '../hooks/useDebounce';
 import { formatRupiah, formatRupiahInput, parseRupiah, todayWIB } from '../lib/format';
 import { buildCsv, parseCsv, rowsToObjects, CSV_HEADERS } from '../lib/csv';
 import { operatorOf } from '../lib/operator';
+import { kategoriColor } from '../lib/kategoriColor';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
@@ -396,13 +397,13 @@ export default function DaftarBarangPage() {
                 header: 'Kategori',
                 render: (r) => {
                   const k = kategoriById[r.kategori_id];
-                  return k ? (
-                    <Badge tone="neutral">
+                  if (!k) return <span className="text-muted">—</span>;
+                  const c = kategoriColor(k.nama);
+                  return (
+                    <span className="badge" style={{ background: c.bg, color: c.fg, fontWeight: 700 }}>
                       {k.nama}
                       {!k.lacak_stok && <span> · non-stok</span>}
-                    </Badge>
-                  ) : (
-                    <span className="text-muted">—</span>
+                    </span>
                   );
                 },
               },

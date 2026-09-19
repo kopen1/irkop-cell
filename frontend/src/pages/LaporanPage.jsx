@@ -11,6 +11,7 @@ import { api, downloadFile } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { useSiteName } from '../hooks/useSiteName';
 import { todayWIB, formatRupiah, formatSignedRupiah } from '../lib/format';
+import { kategoriColor } from '../lib/kategoriColor';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
@@ -457,7 +458,7 @@ export default function LaporanPage() {
               <Card className="mt-4" title="Rekap Kategori" subtitle="Snapshot transaksi_item periode ini">
                 <Table
                   columns={[
-                    { key: 'nama', header: 'Kategori' },
+                    { key: 'nama', header: 'Kategori', render: (r) => { const c = kategoriColor(r.nama); return <span className="badge" style={{ background: c.bg, color: c.fg, fontWeight: 700 }}>{r.nama}</span>; } },
                     { key: 'jumlah_item', header: 'Jumlah Item', align: 'right', render: (r) => <span className="num">{r.jumlah_item}</span> },
                     { key: 'qty', header: 'Qty', align: 'right', render: (r) => <span className="num">{r.qty}</span> },
                     { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },

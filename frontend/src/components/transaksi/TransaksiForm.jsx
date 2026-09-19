@@ -6,6 +6,7 @@ import { Button } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Field';
 import { Icon } from '../ui/Icon';
 import { operatorOf } from '../../lib/operator';
+import { kategoriColor } from '../../lib/kategoriColor';
 
 const JENIS_OPTIONS = [
   { value: '', label: '-- Pilih Jenis --' },
@@ -667,7 +668,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
                   p._group ? (
                     <div
                       key={p.key}
-                      style={{ position: 'sticky', top: 0, padding: '4px 10px', background: 'var(--table-header)', color: 'var(--text-secondary)', textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.5px', fontWeight: 700, borderRadius: 'var(--radius-sm)' }}
+                      style={{ position: 'sticky', top: 0, padding: '4px 10px', background: kategoriColor(p._group.split(' · ')[0]).bg, color: kategoriColor(p._group.split(' · ')[0]).fg, textTransform: 'uppercase', fontSize: '0.7rem', letterSpacing: '0.5px', fontWeight: 700, borderRadius: 'var(--radius-sm)' }}
                     >
                       {p._group}
                     </div>
