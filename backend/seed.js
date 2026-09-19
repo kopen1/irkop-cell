@@ -6,7 +6,7 @@ import { nowIso } from './src/lib/time.js';
 
 // [nama, lacak_stok]
 const KATEGORI = [
-  ['Cetak Voucher', 0],
+  ['Voucher', 0],
   ['Pulsa', 0],
   ['Saldo', 0],
   ['Token', 0],
@@ -17,20 +17,20 @@ const KATEGORI = [
 // [kode, nama, kategori, harga_modal, harga, stok]
 const PRODUK = [
   // Voucher (Jateng)
-  ['Vi03', 'Indosat Freedom Mini 3GB 1Hari', 'Cetak Voucher', 6900, 8900, 0],
-  ['Vi07', 'Indosat Freedom Mini 7GB 1Hari', 'Cetak Voucher', 7681, 9700, 0],
-  ['Vi1005', 'Indosat Freedom Mini 10GB 5Hari', 'Cetak Voucher', 16848, 18900, 0],
-  ['Vi107', 'Indosat Freedom Mini 5GB 7Hari', 'Cetak Voucher', 19840, 21900, 0],
-  ['Vi7', 'Indosat Freedom Internet 7GB 28Hari', 'Cetak Voucher', 32308, 34300, 0],
-  ['Vi15', 'Indosat Freedom Internet 15GB 28Hari', 'Cetak Voucher', 44075, 46100, 0],
-  ['Vt06', 'Tri Happy 6GB+2GB 1Hari', 'Cetak Voucher', 6500, 8500, 0],
-  ['Vt7', 'Tri Happy Java 7GB 28Hari', 'Cetak Voucher', 31510, 33500, 0],
-  ['Vs04', 'Tsel Jateng 4GB+3GB 1Hari', 'Cetak Voucher', 8750, 10700, 0],
-  ['Vs6', 'Tsel Jateng 6GB+12GB 28Hari', 'Cetak Voucher', 51810, 53800, 0],
-  ['Vx05', 'XL Flex Mini 5GB 1Hari', 'Cetak Voucher', 6870, 8900, 0],
-  ['Vx7', 'XL Flex 7GB 28Hari', 'Cetak Voucher', 33000, 35000, 0],
-  ['Vsm7', 'Smartfren Nonstop 7GB 28Hari', 'Cetak Voucher', 32620, 34600, 0],
-  ['Va7', 'Axis Aigo 7GB 28Hari', 'Cetak Voucher', 33220, 35200, 0],
+  ['Vi03', 'Indosat Freedom Mini 3GB 1Hari', 'Voucher', 6900, 8900, 0],
+  ['Vi07', 'Indosat Freedom Mini 7GB 1Hari', 'Voucher', 7681, 9700, 0],
+  ['Vi1005', 'Indosat Freedom Mini 10GB 5Hari', 'Voucher', 16848, 18900, 0],
+  ['Vi107', 'Indosat Freedom Mini 5GB 7Hari', 'Voucher', 19840, 21900, 0],
+  ['Vi7', 'Indosat Freedom Internet 7GB 28Hari', 'Voucher', 32308, 34300, 0],
+  ['Vi15', 'Indosat Freedom Internet 15GB 28Hari', 'Voucher', 44075, 46100, 0],
+  ['Vt06', 'Tri Happy 6GB+2GB 1Hari', 'Voucher', 6500, 8500, 0],
+  ['Vt7', 'Tri Happy Java 7GB 28Hari', 'Voucher', 31510, 33500, 0],
+  ['Vs04', 'Tsel Jateng 4GB+3GB 1Hari', 'Voucher', 8750, 10700, 0],
+  ['Vs6', 'Tsel Jateng 6GB+12GB 28Hari', 'Voucher', 51810, 53800, 0],
+  ['Vx05', 'XL Flex Mini 5GB 1Hari', 'Voucher', 6870, 8900, 0],
+  ['Vx7', 'XL Flex 7GB 28Hari', 'Voucher', 33000, 35000, 0],
+  ['Vsm7', 'Smartfren Nonstop 7GB 28Hari', 'Voucher', 32620, 34600, 0],
+  ['Va7', 'Axis Aigo 7GB 28Hari', 'Voucher', 33220, 35200, 0],
 
   // Pulsa
   ['pi10', 'Pulsa Indosat 10k', 'Pulsa', 9750, 12000, 0],

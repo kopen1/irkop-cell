@@ -14,7 +14,7 @@ import { Icon } from '../components/ui/Icon';
 
 const KATEGORI_OPTIONS = [
   { value: '', label: 'Semua Kategori' },
-  { value: 'cetak_voucher', label: 'Cetak Voucher' },
+  { value: 'cetak_voucher', label: 'Voucher' },
   { value: 'pulsa', label: 'Pulsa' },
   { value: 'dana', label: 'DANA' },
   { value: 'gopay', label: 'GoPay' },

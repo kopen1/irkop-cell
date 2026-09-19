@@ -39,7 +39,7 @@ function upsert(kode, nama, sumber, kategori, harga, adminFee = 0) {
 const prods = db.prepare(`
   SELECT p.kode, p.nama, p.harga_modal, p.harga
     FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id
-   WHERE p.deleted_at IS NULL AND k.nama = 'Cetak Voucher'
+   WHERE p.deleted_at IS NULL AND k.nama = 'Voucher'
    ORDER BY p.id`).all();
 
 let naik = 0;

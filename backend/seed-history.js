@@ -46,7 +46,7 @@ const nowTs = new Date().toISOString();
 if (!get("SELECT id FROM akun_master WHERE nama_akun = 'Simpanan'")) {
   run("INSERT INTO akun_master (nama_akun, tipe, aktif, created_at) VALUES ('Simpanan', 'tunai', 1, ?)", nowTs);
 }
-run("UPDATE kategori_produk SET lacak_stok = 1 WHERE nama = 'Cetak Voucher'");
+run("UPDATE kategori_produk SET lacak_stok = 1 WHERE nama = 'Voucher'");
 
 // Karyawan + rate gaji
 let karyawan = get("SELECT id FROM users WHERE role = 'karyawan' ORDER BY id LIMIT 1");
