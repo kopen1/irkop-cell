@@ -11,9 +11,9 @@ const PREFIX = { Dana: 'D', Bank: 'B', Ovo: 'O', Gopay: 'G' };
 
 function providerDariNama(nama) {
   const n = String(nama || '').toLowerCase();
-  if (n.includes('gopay') || n.includes('go pay')) return 'Gopay';
-  if (n.includes('ovo')) return 'Ovo';
-  if (n.includes('dana')) return 'Dana';
+  if (/\bgopay\b|\bgo ?pay\b/.test(n)) return 'Gopay';
+  if (/\bovo\b/.test(n)) return 'Ovo';
+  if (/\bdana\b/.test(n)) return 'Dana';
   return '';
 }
 
