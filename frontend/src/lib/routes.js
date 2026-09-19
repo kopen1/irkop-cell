@@ -23,8 +23,12 @@ export const NAV_SYSTEM = [
   { key: 'pengaturan', label: 'Pengaturan', icon: 'settings', path: '/pengaturan', main: false, section: 'Sistem', adminOnly: true },
 ];
 
-// Menu utama untuk bottom navigation mobile.
-export const MAIN_NAV_MOBILE = NAV.filter((n) => n.main).map((n) => ({ key: n.key, label: n.label, icon: n.icon, path: n.path }));
+// Menu utama untuk bottom navigation mobile (Laporan diganti Daftar Barang).
+const MOBILE_KEYS = ['dashboard', 'transaksi', 'kasir', 'daftar_barang'];
+export const MAIN_NAV_MOBILE = MOBILE_KEYS
+  .map((k) => NAV.find((n) => n.key === k))
+  .filter(Boolean)
+  .map((n) => ({ key: n.key, label: n.key === 'daftar_barang' ? 'Barang' : n.label, icon: n.icon, path: n.path }));
 
 // Cek apakah path bisa diakses oleh permission user.
 // - Admin: semua.
