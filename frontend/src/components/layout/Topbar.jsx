@@ -4,7 +4,7 @@ import { useSiteName } from '../../hooks/useSiteName';
 import { useTheme, THEMES } from '../../context/ThemeContext';
 import { Icon } from '../ui/Icon';
 
-export function Topbar({ title, onOpenMenu }) {
+export function Topbar({ title, onOpenMenu, onToggleSidebar, sidebarCollapsed }) {
   const { user } = useAuth();
   const siteName = useSiteName();
   return (
@@ -12,8 +12,17 @@ export function Topbar({ title, onOpenMenu }) {
       <button type="button" className="btn btn-ghost btn-sm mobile-only" onClick={onOpenMenu} aria-label="Buka menu navigasi">
         <Icon name="menu" size={20} />
       </button>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm desktop-only"
+        onClick={onToggleSidebar}
+        aria-label={sidebarCollapsed ? 'Tampilkan menu navigasi' : 'Sembunyikan menu navigasi'}
+        title={sidebarCollapsed ? 'Tampilkan menu' : 'Sembunyikan menu'}
+      >
+        <Icon name="menu" size={20} />
+      </button>
       <span className="topbar-brand-mobile">
-        <span className="sidebar-logo" style={{ width: 30, height: 30, fontSize: '0.7rem' }}>IK</span>
+        <span className="sidebar-logo">IK</span>
         {siteName}
       </span>
       <span className="topbar-title desktop-only">{title}</span>

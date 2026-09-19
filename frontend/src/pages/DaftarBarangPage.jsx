@@ -11,6 +11,7 @@ import { useAsync } from '../hooks/useAsync';
 import { useDebounce } from '../hooks/useDebounce';
 import { formatRupiah, formatRupiahInput, parseRupiah, todayWIB } from '../lib/format';
 import { buildCsv, parseCsv, rowsToObjects, CSV_HEADERS } from '../lib/csv';
+import { operatorOf } from '../lib/operator';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
@@ -22,17 +23,11 @@ import { Icon } from '../components/ui/Icon';
 
 const LIMIT = 100;
 
-// Operator/brand untuk grouping produk (dibaca dari nama produk).
-const BRANDS = ['Indosat', 'Telkomsel', 'Smartfren', 'Tri', 'XL', 'Axis', 'by.U', 'Dana', 'GoPay', 'OVO', 'ShopeePay', 'PLN'];
-function brandOf(nama) {
-  const n = String(nama || '').toLowerCase();
-  return BRANDS.find((b) => n.includes(b.toLowerCase())) || '';
-}
-
 export default function DaftarBarangPage() {
   const { can } = useAuth();
   const toast = useToast();
   const [q, setQ] = useState('');
+  const [filterKategori, setFilterKategori] = useState('');
   const debouncedQ = useDebounce(q, 300);
 
   const kategori = useAsync(() => api.get('/kategori'), { deps: [] });
@@ -42,14 +37,14 @@ export default function DaftarBarangPage() {
     () => async () => {
       setState((s) => ({ ...s, status: 'loading' }));
       try {
-        const data = await api.get('/produk', { q: debouncedQ, limit: LIMIT });
+        const data = await api.get('/produk', { q: debouncedQ, kategori_id: filterKategori || undefined, limit: LIMIT });
         setState({ status: 'success', data, error: null });
       } catch (err) {
         setState({ status: 'error', data: null, error: err });
         throw err;
       }
     },
-    [debouncedQ]
+    [debouncedQ, filterKategori]
   );
 
   useEffect(() => {
@@ -84,7 +79,7 @@ export default function DaftarBarangPage() {
   const displayRows = useMemo(() => {
     const groupLabel = (r) => {
       const k = kategoriById[r.kategori_id]?.nama || 'Tanpa Kategori';
-      const b = brandOf(r.nama);
+      const b = operatorOf(r.kode, r.nama, k);
       return b ? `${k} · ${b}` : k;
     };
     const sorted = [...rows].sort((a, b) => {
@@ -321,6 +316,14 @@ export default function DaftarBarangPage() {
         <Field label="Cari produk (kode / nama)">
           <Input type="search" value={q} placeholder="Ketik kode atau nama…" onChange={(e) => setQ(e.target.value)} />
         </Field>
+        <Field label="Filter Kategori">
+          <Select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)}>
+            <option value="">Semua kategori</option>
+            {kategoriList.filter((k) => !k.deleted_at).map((k) => (
+              <option key={k.id} value={k.id}>{k.nama}{!k.lacak_stok ? ' (non-stok)' : ''}</option>
+            ))}
+          </Select>
+        </Field>
       </div>
 
       {state.status === 'error' ? (
@@ -387,6 +390,16 @@ export default function DaftarBarangPage() {
                 },
               },
               { key: 'harga', header: 'Harga Jual', align: 'right', render: (r) => <span className="num">{formatRupiah(r.harga)}</span> },
+              {
+                key: 'laba',
+                header: 'Laba',
+                align: 'right',
+                render: (r) => {
+                  const laba = (Number(r.harga) || 0) - (Number(r.harga_modal) || 0);
+                  const cls = laba < 0 ? 'text-danger' : laba === 0 ? 'text-warning' : 'text-success';
+                  return <span className={`num ${cls}`}>{formatRupiah(laba)}</span>;
+                },
+              },
               {
                 key: 'stok',
                 header: 'Stok',
@@ -701,8 +714,8 @@ function ProductForm({ initial, kategoriList, onCancel, onSaved }) {
     kode: initial?.kode || '',
     nama: initial?.nama || '',
     kategori_id: initial?.kategori_id ?? '',
-    harga: initial?.harga ?? '',
-    harga_modal: initial?.harga_modal ?? '',
+    harga: initial?.harga != null ? formatRupiahInput(String(initial.harga)) : '',
+    harga_modal: initial?.harga_modal != null ? formatRupiahInput(String(initial.harga_modal)) : '',
     stok: initial?.stok ?? '',
     stok_minimum: initial?.stok_minimum ?? '',
     satuan: initial?.satuan || 'pcs',
@@ -746,6 +759,8 @@ function ProductForm({ initial, kategoriList, onCancel, onSaved }) {
     }
   };
 
+  const labaForm = (parseRupiah(form.harga) || 0) - (parseRupiah(form.harga_modal) || 0);
+
   return (
     <form onSubmit={submit}>
       <div className="flex flex-col gap-4">
@@ -772,6 +787,11 @@ function ProductForm({ initial, kategoriList, onCancel, onSaved }) {
           </Field>
           <Field label="Harga modal (Rp, opsional)" hint="Dipakai menghitung laba di Laporan.">
             <Input type="text" inputMode="numeric" value={form.harga_modal} onChange={setNominal('harga_modal')} />
+          </Field>
+          <Field label="Laba (otomatis)" hint="Harga jual − modal. Tidak disimpan terpisah.">
+            <span className={`num font-bold ${labaForm < 0 ? 'text-danger' : labaForm === 0 ? 'text-warning' : 'text-success'}`}>
+              {formatRupiah(labaForm)}
+            </span>
           </Field>
         </div>
 

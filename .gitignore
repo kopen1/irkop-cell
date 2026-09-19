@@ -33,3 +33,5 @@ frontend/docs/
 # Nested repo artefact (source sudah di-flatten ke root)
 Revisi/
 native-preview/
+# Data bisnis lokal (produk/harga) — jangan di-commit
+daftar-barang-lama.csv

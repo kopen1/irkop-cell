@@ -5,6 +5,7 @@ import { METODE_PEMBAYARAN, formatRupiah, todayWIB, formatRupiahInput, parseRupi
 import { Button } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Field';
 import { Icon } from '../ui/Icon';
+import { operatorOf } from '../../lib/operator';
 
 const JENIS_OPTIONS = [
   { value: '', label: '-- Pilih Jenis --' },
@@ -25,13 +26,6 @@ const SUB_JENIS_AKUN_MAP = {
   dana: 'DANA',
   transfer: 'SeaBank',
 };
-
-// Operator/brand untuk grouping pemilih produk (dibaca dari nama).
-const BRANDS = ['Indosat', 'Telkomsel', 'Smartfren', 'Tri', 'XL', 'Axis', 'by.U', 'Dana', 'GoPay', 'OVO', 'ShopeePay', 'PLN'];
-function brandOf(nama) {
-  const n = String(nama || '').toLowerCase();
-  return BRANDS.find((b) => n.includes(b.toLowerCase())) || '';
-}
 
 const ADMIN_PRESETS = [
   { value: '', label: 'Preset' },
@@ -276,7 +270,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     if (!hasilPenjualan || hasilPenjualan.length === 0) return null;
     const label = (p) => {
       const k = kategoriList.find((x) => x.id === p.kategori_id)?.nama || 'Tanpa Kategori';
-      const b = brandOf(p.nama);
+      const b = operatorOf(p.kode, p.nama, k);
       return b ? `${k} · ${b}` : k;
     };
     const sorted = [...hasilPenjualan].sort((a, b) => {

@@ -61,7 +61,29 @@ test('GET /api/harga-server/perbandingan: status naik / sama / baru', async () =
 
   const naik = r.data.items.find((x) => x.kode_produk === 'Vi1005');
   assert.equal(naik.status, 'naik');
-  assert.equal(naik.selisih, 2500);
+  assert.equal(naik.biaya, 500, 'Indosat biaya fisik 500');
+  assert.equal(naik.harga_server_efektif, 18000);
+  assert.equal(naik.selisih, 3000); // (17500 + 500) - 15000
+});
+
+test('perbandingan: biaya fisik beda per operator (Telkomsel 800, Three 600)', async () => {
+  const { env, token } = await bootstrap();
+  await seedProduk(env, { kode: 'Vs6', nama: 'Telkomsel', harga: 60000, harga_modal: 40000 });
+  await seedProduk(env, { kode: 'Vt8', nama: 'Three', harga: 50000, harga_modal: 30000 });
+  await call(env, '/api/harga-server', {
+    method: 'POST', token,
+    body: { items: [
+      { kode: 'Vs6', nama: 'Telkomsel', kategori: 'cetak_voucher', harga: 50000 },
+      { kode: 'Vt8', nama: 'Three', kategori: 'cetak_voucher', harga: 40000 },
+    ] },
+  });
+  const r = await call(env, '/api/harga-server/perbandingan', { token });
+  const vs = r.data.items.find((x) => x.kode_produk === 'Vs6');
+  const vt = r.data.items.find((x) => x.kode_produk === 'Vt8');
+  assert.equal(vs.biaya, 800);
+  assert.equal(vs.harga_server_efektif, 50800);
+  assert.equal(vt.biaya, 600);
+  assert.equal(vt.harga_server_efektif, 40600);
 });
 
 test('POST /api/harga-server/update-modal: modal berubah, margin jual dipertahankan', async () => {
@@ -83,8 +105,8 @@ test('POST /api/harga-server/update-modal: modal berubah, margin jual dipertahan
   assert.equal(r.data.updated_count, 1);
 
   const row = await env.DB.prepare('SELECT harga_modal, harga FROM produk WHERE id = ?').bind(produkId).first();
-  assert.equal(row.harga_modal, 17500); // modal ikut server
-  assert.equal(row.harga, 20500); // margin lama 3000 dipertahankan → 17500 + 3000
+  assert.equal(row.harga_modal, 18000); // 17500 (server) + 500 (biaya fisik Indosat)
+  assert.equal(row.harga, 21000); // margin lama 3000 dipertahankan → 18000 + 3000
 });
 
 test('POST /api/harga-server/update-modal all_naik: hanya update yang naik', async () => {

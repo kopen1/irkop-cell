@@ -12,6 +12,16 @@ export function AppShell() {
   const { ready } = useAuth();
   const location = useLocation();
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => typeof localStorage !== 'undefined' && localStorage.getItem('irkop_sidebar_collapsed') === '1'
+  );
+  const toggleSidebar = () => {
+    setSidebarCollapsed((v) => {
+      const next = !v;
+      try { localStorage.setItem('irkop_sidebar_collapsed', next ? '1' : '0'); } catch { /* abaikan */ }
+      return next;
+    });
+  };
 
   const route = resolveByPath(location.pathname);
   const siteName = useSiteName();
@@ -21,9 +31,9 @@ export function AppShell() {
 
   return (
     <div className="shell">
-      <Sidebar />
+      <Sidebar collapsed={sidebarCollapsed} />
       <div className="shell-main">
-        <Topbar title={title} onOpenMenu={() => setDrawerOpen(true)} />
+        <Topbar title={title} onOpenMenu={() => setDrawerOpen(true)} onToggleSidebar={toggleSidebar} sidebarCollapsed={sidebarCollapsed} />
         <main className="shell-content">
           <Outlet />
         </main>

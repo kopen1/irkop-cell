@@ -34,11 +34,11 @@ export function NavList({ onNavigate }) {
   );
 }
 
-export function Sidebar({ onNavigate }) {
+export function Sidebar({ onNavigate, collapsed = false }) {
   const { user, logout } = useAuth();
   const siteName = useSiteName();
   return (
-    <aside className="sidebar sidebar-desktop">
+    <aside className={`sidebar sidebar-desktop ${collapsed ? 'sidebar-collapsed' : ''}`}>
       <div className="sidebar-brand">
         <span className="sidebar-logo">IK</span>
         <div>

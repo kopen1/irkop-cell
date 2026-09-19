@@ -103,3 +103,15 @@
   --positive: #26734b;
   --negative: #b13a2e;
 }
+/* Desktop: skala layout sedikit lebih lega (ukuran teks root diatur di base.css). */
+@media (min-width: 768px) {
+  :root {
+    --sidebar-width: 264px;
+    --topbar-height: 64px;
+    --container-max: 1280px;
+    --space-3: 13px;
+    --space-4: 18px;
+    --space-5: 26px;
+    --space-6: 34px;
+  }
+}

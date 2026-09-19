@@ -3,6 +3,29 @@ import { readBody } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { nowIso } from '../lib/time.js';
 
+// Biaya tambahan pembelian voucher FISIK (cetak) di atas harga server digital.
+// Berbeda per operator: Telkomsel 800, Three 600, lainnya 500.
+export const BIAYA_VOUCHER = { Telkomsel: 800, Three: 600 };
+export const BIAYA_VOUCHER_DEFAULT = 500;
+
+export function operatorDariKode(kode) {
+  const k = String(kode || '').toUpperCase();
+  if (k.startsWith('VSM')) return 'Smartfren';
+  if (k.startsWith('VT')) return 'Three';
+  if (k.startsWith('VS')) return 'Telkomsel';
+  if (k.startsWith('VX')) return 'XL';
+  if (k.startsWith('VI')) return 'Indosat';
+  if (k.startsWith('VA')) return 'Axis';
+  return '';
+}
+
+// Hanya cetak voucher (fisik) yang punya biaya tambahan.
+export function biayaVoucher(kode, kategori) {
+  if (String(kategori || '').toLowerCase() !== 'cetak_voucher') return 0;
+  const op = operatorDariKode(kode);
+  return BIAYA_VOUCHER[op] || BIAYA_VOUCHER_DEFAULT;
+}
+
 // GET /api/harga-server
 export async function listHargaServer(db, request, ctx) {
   const url = new URL(request.url);
@@ -25,40 +48,46 @@ export async function listHargaServer(db, request, ctx) {
 }
 
 // GET /api/harga-server/perbandingan
+// Harga server = harga digital; untuk cetak voucher ditambah biaya fisik per
+// operator, lalu dibandingkan dengan modal Daftar Barang.
 export async function perbandinganHarga(db, request, ctx) {
   const rows = await db.many(`
-    SELECT 
-      hs.*,
-      p.nama AS nama_produk_daftar,
-      p.harga_modal AS modal_daftar,
-      p.harga AS harga_jual_daftar,
-      (hs.harga_server - COALESCE(p.harga_modal, 0)) AS selisih,
-      CASE 
-        WHEN p.harga_modal IS NULL THEN 'baru'
-        WHEN hs.harga_server > p.harga_modal THEN 'naik'
-        WHEN hs.harga_server < p.harga_modal THEN 'turun'
-        ELSE 'sama'
-      END AS status
-    FROM harga_server hs
-    LEFT JOIN produk p ON p.kode = hs.kode_produk AND p.deleted_at IS NULL
-    ORDER BY 
-      CASE 
-        WHEN p.harga_modal IS NULL THEN 1
-        WHEN hs.harga_server > p.harga_modal THEN 0
-        ELSE 2
-      END,
-      hs.kode_produk
+    SELECT hs.*, p.nama AS nama_produk_daftar, p.harga_modal AS modal_daftar, p.harga AS harga_jual_daftar
+      FROM harga_server hs
+      LEFT JOIN produk p ON p.kode = hs.kode_produk AND p.deleted_at IS NULL
+     ORDER BY hs.kode_produk
   `);
 
+  const items = rows.map((r) => {
+    const biaya = biayaVoucher(r.kode_produk, r.kategori);
+    const efektif = Number(r.harga_server) + biaya;
+    const modal = r.modal_daftar == null ? null : Number(r.modal_daftar);
+    let status;
+    if (modal == null) status = 'baru';
+    else if (efektif > modal) status = 'naik';
+    else if (efektif < modal) status = 'turun';
+    else status = 'sama';
+    return {
+      ...r,
+      biaya,
+      harga_server_efektif: efektif,
+      selisih: modal == null ? null : efektif - modal,
+      status,
+    };
+  });
+
+  const order = { naik: 0, baru: 1, turun: 2, sama: 3 };
+  items.sort((a, b) => (order[a.status] - order[b.status]) || String(a.kode_produk).localeCompare(String(b.kode_produk)));
+
   const summary = {
-    total: rows.length,
-    naik: rows.filter(r => r.status === 'naik').length,
-    turun: rows.filter(r => r.status === 'turun').length,
-    sama: rows.filter(r => r.status === 'sama').length,
-    baru: rows.filter(r => r.status === 'baru').length,
+    total: items.length,
+    naik: items.filter((r) => r.status === 'naik').length,
+    turun: items.filter((r) => r.status === 'turun').length,
+    sama: items.filter((r) => r.status === 'sama').length,
+    baru: items.filter((r) => r.status === 'baru').length,
   };
 
-  return { items: rows, summary };
+  return { items, summary };
 }
 
 // GET /api/harga-server/alerts
@@ -239,10 +268,10 @@ export async function updateModalFromServer(db, request, ctx) {
       ...targets
     );
   } else {
+    // all_naik: ambil semua yang punya produk, filter efektif > modal di bawah.
     serverRows = await db.many(
       `SELECT hs.* FROM harga_server hs
-         JOIN produk p ON p.kode = hs.kode_produk AND p.deleted_at IS NULL
-        WHERE hs.harga_server > p.harga_modal`
+         JOIN produk p ON p.kode = hs.kode_produk AND p.deleted_at IS NULL`
     );
   }
 
@@ -258,14 +287,21 @@ export async function updateModalFromServer(db, request, ctx) {
       skipped.push({ kode: hs.kode_produk, reason: 'Produk tidak ada di Daftar Barang' });
       continue;
     }
-    if (p.harga_modal === hs.harga_server) {
+    // Modal = harga server + biaya fisik (khusus cetak voucher).
+    const biaya = biayaVoucher(hs.kode_produk, hs.kategori);
+    const newModal = Number(hs.harga_server) + biaya;
+
+    if (targets === null && newModal <= (p.harga_modal || 0)) {
+      skipped.push({ kode: hs.kode_produk, reason: 'Tidak naik' });
+      continue;
+    }
+    if (p.harga_modal === newModal) {
       skipped.push({ kode: hs.kode_produk, reason: 'Harga modal sudah sama' });
       continue;
     }
 
     // Pertahankan margin lama: harga_jual - harga_modal
     const margin = (p.harga || 0) - (p.harga_modal || 0);
-    const newModal = hs.harga_server;
     const newHarga = newModal + margin;
 
     await db.exec(
@@ -284,6 +320,7 @@ export async function updateModalFromServer(db, request, ctx) {
     updated.push({
       kode: hs.kode_produk,
       nama: p.nama,
+      biaya,
       modal_lama: p.harga_modal,
       modal_baru: newModal,
       harga_jual: newHarga,

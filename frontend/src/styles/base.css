@@ -16,13 +16,16 @@ body {
   max-width: 100%;
 }
 
+/* Basis ukuran teks (rem mengikuti root). Desktop vs mobile dibedakan. */
+html { font-size: 175%; } /* desktop — relatif ke default browser (mis. 16px → 28px) */
+
 body {
   margin: 0;
   font-family: var(--font-base);
   background: var(--bg-body);
   color: var(--text-primary);
   line-height: 1.5;
-  -webkit-font-smoothing: antialiased;
+  -webkit-font-smoothing: auto;
   transition: background-color 0.2s ease, color 0.2s ease;
 }
 
@@ -106,6 +109,7 @@ a {
 ::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 767px) {
+  html { font-size: 100%; } /* mobile base — beda dari desktop */
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
   .grid-2 > *, .grid-3 > * { min-width: 0; }
 }

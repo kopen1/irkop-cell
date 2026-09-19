@@ -209,6 +209,7 @@ export default function HargaServerPage() {
             { key: 'nama_produk', header: 'Nama', render: (r) => <span className="text-sm">{r.nama_produk}</span> },
             { key: 'kategori', header: 'Kategori', render: (r) => <Badge tone="info">{r.kategori}</Badge> },
             { key: 'harga_server', header: 'Harga Server', align: 'right', render: (r) => <span className="num" style={{ fontWeight: 600 }}>{formatRupiah(r.harga_server)}</span> },
+            { key: 'biaya', header: 'Biaya Fisik', align: 'right', render: (r) => (r.biaya ? <span className="num text-muted">+{formatRupiah(r.biaya)}</span> : <span className="text-muted">—</span>) },
             { key: 'modal_daftar', header: 'Modal Daftar', align: 'right', render: (r) => r.modal_daftar ? <span className="num">{formatRupiah(r.modal_daftar)}</span> : <span className="text-muted">—</span> },
             { key: 'harga_jual_daftar', header: 'Harga Jual', align: 'right', render: (r) => r.harga_jual_daftar ? <span className="num">{formatRupiah(r.harga_jual_daftar)}</span> : <span className="text-muted">—</span> },
             { key: 'selisih', header: 'Selisih', align: 'right', render: (r) => {
