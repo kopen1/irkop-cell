@@ -53,6 +53,7 @@ function UmumTab() {
   const [strukHeader, setStrukHeader] = useState('');
   const [strukAlamat, setStrukAlamat] = useState('');
   const [strukFooter, setStrukFooter] = useState('');
+  const [biayaVoucher, setBiayaVoucher] = useState({ telkomsel: '', three: '', default: '' });
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
 
@@ -62,6 +63,11 @@ function UmumTab() {
       setStrukHeader(s.struk_header || '');
       setStrukAlamat(s.struk_alamat || '');
       setStrukFooter(s.struk_footer || '');
+      setBiayaVoucher({
+        telkomsel: s.biaya_voucher_telkomsel ?? '',
+        three: s.biaya_voucher_three ?? '',
+        default: s.biaya_voucher_default ?? '',
+      });
       if (s.default_theme) setTheme(s.default_theme);
     }).catch(() => {}).finally(() => setLoaded(true));
   }, [setTheme]);
@@ -71,13 +77,17 @@ function UmumTab() {
   const save = async () => {
     setBusy(true);
     try {
-      await api.put('/settings', {
+      const payload = {
         nama_website: nama.trim(),
         default_theme: theme,
         struk_header: strukHeader,
         struk_alamat: strukAlamat,
         struk_footer: strukFooter,
-      });
+      };
+      if (biayaVoucher.telkomsel !== '') payload.biaya_voucher_telkomsel = Number(biayaVoucher.telkomsel);
+      if (biayaVoucher.three !== '') payload.biaya_voucher_three = Number(biayaVoucher.three);
+      if (biayaVoucher.default !== '') payload.biaya_voucher_default = Number(biayaVoucher.default);
+      await api.put('/settings', payload);
       setSiteNameCache(nama.trim());
       await refreshSettings();
       toast.success('Pengaturan umum disimpan.');
@@ -117,6 +127,19 @@ function UmumTab() {
             </Field>
             <Field label="Footer struk" hint="Mis. 'Terima kasih, sampai jumpa'. Kosongkan untuk default.">
               <Input type="text" value={strukFooter} onChange={(e) => setStrukFooter(e.target.value)} />
+            </Field>
+          </div>
+        </Card>
+        <Card title="Biaya Voucher Fisik" hint="Ditambahkan saat Update Modal dari Harga Server (modal = harga server + biaya).">
+          <div className="grid-3">
+            <Field label="Telkomsel (Rp)">
+              <Input type="number" min="0" value={biayaVoucher.telkomsel} placeholder="800" onChange={(e) => setBiayaVoucher((b) => ({ ...b, telkomsel: e.target.value }))} />
+            </Field>
+            <Field label="Three (Rp)">
+              <Input type="number" min="0" value={biayaVoucher.three} placeholder="600" onChange={(e) => setBiayaVoucher((b) => ({ ...b, three: e.target.value }))} />
+            </Field>
+            <Field label="Lainnya (Rp)">
+              <Input type="number" min="0" value={biayaVoucher.default} placeholder="500" onChange={(e) => setBiayaVoucher((b) => ({ ...b, default: e.target.value }))} />
             </Field>
           </div>
         </Card>

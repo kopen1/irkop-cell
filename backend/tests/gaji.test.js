@@ -183,6 +183,23 @@ test('GAJI owner: akru otomatis saat Closing (upah ikut jam buka + 50% service),
   assert.equal(again.status, 400, 'tidak ada lagi yang belum dibayar');
 });
 
+test('GAJI list: filter month hanya menampilkan bulan itu', async () => {
+  const { env, adminToken, karyawanId } = await setup();
+  const today = todayWib();
+  const bulan = today.slice(0, 7);
+  await call(env, '/api/gaji', { method: 'POST', token: adminToken, body: { user_id: karyawanId, tanggal: today, nominal: 50000 } });
+  await call(env, '/api/gaji', { method: 'POST', token: adminToken, body: { user_id: karyawanId, tanggal: '2020-01-15', nominal: 40000 } });
+
+  const thisMonth = await call(env, `/api/gaji?month=${bulan}`, { token: adminToken });
+  assert.equal(thisMonth.status, 200);
+  assert.ok(thisMonth.data.items.every((g) => g.tanggal.startsWith(bulan)), 'hanya bulan ini');
+  assert.ok(thisMonth.data.items.some((g) => g.tanggal === today));
+
+  const other = await call(env, '/api/gaji?month=2020-01', { token: adminToken });
+  assert.equal(other.data.items.length, 1);
+  assert.equal(other.data.items[0].tanggal, '2020-01-15');
+});
+
 test('GAJI auto: admin buka kasir -> TIDAK dibuat baris gaji untuk admin', async () => {
   const { env, adminToken } = await setup();
   const today = todayWib();

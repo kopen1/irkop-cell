@@ -36,7 +36,7 @@ export async function updateSettings(db, request, ctx) {
   const admin = requireAdmin(ctx);
   const body = await readBody(request);
   if (body && typeof body === 'object') {
-      const allowed = new Set(['app_timezone', 'default_theme', 'nama_website', 'notifhook_auto_input', 'theme', 'struk_header', 'struk_alamat', 'struk_footer']);
+      const allowed = new Set(['app_timezone', 'default_theme', 'nama_website', 'notifhook_auto_input', 'theme', 'struk_header', 'struk_alamat', 'struk_footer', 'biaya_voucher_telkomsel', 'biaya_voucher_three', 'biaya_voucher_default']);
     // Terima format flat: { notifhook_auto_input: true }
     // Atau format object: { notifhook: { auto_input: true } }
     const flat = { ...body };

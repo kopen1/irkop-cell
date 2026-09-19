@@ -13,7 +13,17 @@ export async function listGaji(db, request, ctx) {
   const params = url.searchParams;
   const where = ['1=1'];
   const bind = [];
-  if (params.has('tanggal')) {
+  if (params.has('month')) {
+    const m = /^(\d{4})-(\d{2})$/.exec(params.get('month') || '');
+    if (!m) throw err(400, 'invalid_filter', 'month harus format YYYY-MM');
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    if (mo < 1 || mo > 12) throw err(400, 'invalid_filter', 'month tidak valid');
+    const start = `${m[1]}-${m[2]}-01`;
+    const end = `${m[1]}-${m[2]}-${String(new Date(Date.UTC(y, mo, 0)).getUTCDate()).padStart(2, '0')}`;
+    where.push('g.tanggal >= ? AND g.tanggal <= ?');
+    bind.push(start, end);
+  } else if (params.has('tanggal')) {
     const d = params.get('tanggal');
     if (!isValidCalendarDate(d)) throw err(400, 'invalid_filter', 'tanggal tidak valid');
     where.push('g.tanggal = ?'); bind.push(d);

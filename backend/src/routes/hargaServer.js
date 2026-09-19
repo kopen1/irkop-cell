@@ -4,9 +4,8 @@ import { writeAudit } from '../lib/audit.js';
 import { nowIso } from '../lib/time.js';
 
 // Biaya tambahan pembelian voucher FISIK (cetak) di atas harga server digital.
-// Berbeda per operator: Telkomsel 800, Three 600, lainnya 500.
-export const BIAYA_VOUCHER = { Telkomsel: 800, Three: 600 };
-export const BIAYA_VOUCHER_DEFAULT = 500;
+// Beda per operator; nilai default bisa diubah di Pengaturan.
+export const BIAYA_VOUCHER_DEFAULT_MAP = { Telkomsel: 800, Three: 600, default: 500 };
 
 export function operatorDariKode(kode) {
   const k = String(kode || '').toUpperCase();
@@ -20,10 +19,25 @@ export function operatorDariKode(kode) {
 }
 
 // Hanya cetak voucher (fisik) yang punya biaya tambahan.
-export function biayaVoucher(kode, kategori) {
+export function biayaVoucher(kode, kategori, map = BIAYA_VOUCHER_DEFAULT_MAP) {
   if (String(kategori || '').toLowerCase() !== 'cetak_voucher') return 0;
   const op = operatorDariKode(kode);
-  return BIAYA_VOUCHER[op] || BIAYA_VOUCHER_DEFAULT;
+  return map[op] != null ? map[op] : map.default;
+}
+
+// Baca biaya dari settings (kalau ada), fallback ke default.
+export async function getBiayaVoucherMap(db) {
+  const rows = await db.many(
+    "SELECT key, value FROM settings WHERE key IN ('biaya_voucher_telkomsel','biaya_voucher_three','biaya_voucher_default')"
+  );
+  const m = {};
+  for (const r of rows) m[r.key] = Number(r.value);
+  const pick = (v, d) => (Number.isFinite(v) && v >= 0 ? v : d);
+  return {
+    Telkomsel: pick(m.biaya_voucher_telkomsel, BIAYA_VOUCHER_DEFAULT_MAP.Telkomsel),
+    Three: pick(m.biaya_voucher_three, BIAYA_VOUCHER_DEFAULT_MAP.Three),
+    default: pick(m.biaya_voucher_default, BIAYA_VOUCHER_DEFAULT_MAP.default),
+  };
 }
 
 // GET /api/harga-server
@@ -58,8 +72,9 @@ export async function perbandinganHarga(db, request, ctx) {
      ORDER BY hs.kode_produk
   `);
 
+  const biayaMap = await getBiayaVoucherMap(db);
   const items = rows.map((r) => {
-    const biaya = biayaVoucher(r.kode_produk, r.kategori);
+    const biaya = biayaVoucher(r.kode_produk, r.kategori, biayaMap);
     const efektif = Number(r.harga_server) + biaya;
     const modal = r.modal_daftar == null ? null : Number(r.modal_daftar);
     let status;
@@ -277,6 +292,7 @@ export async function updateModalFromServer(db, request, ctx) {
 
   const updated = [];
   const skipped = [];
+  const biayaMap = await getBiayaVoucherMap(db);
 
   for (const hs of serverRows) {
     const p = await db.one(
@@ -288,7 +304,7 @@ export async function updateModalFromServer(db, request, ctx) {
       continue;
     }
     // Modal = harga server + biaya fisik (khusus cetak voucher).
-    const biaya = biayaVoucher(hs.kode_produk, hs.kategori);
+    const biaya = biayaVoucher(hs.kode_produk, hs.kategori, biayaMap);
     const newModal = Number(hs.harga_server) + biaya;
 
     if (targets === null && newModal <= (p.harga_modal || 0)) {
