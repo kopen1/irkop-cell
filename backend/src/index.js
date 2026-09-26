@@ -49,6 +49,7 @@ case'laporan':requirePage(ctx,'laporan');if(m==='GET'&&param==='bulan')return la
 case'tarif':{requirePage(ctx,'transaksi');const url=new URL(request.url);try{return json({provider:url.searchParams.get('provider'),nominal:Number(url.searchParams.get('nominal')),admin:await tarifRoutes.hitungAdmin(db,url.searchParams.get('provider'),url.searchParams.get('nominal'))});}catch(e){return json({error:{code:e.code||'error',message:e.message}},400);}}
 case'settings':if(m==='GET'&&!param)return settingsRoutes.getSettings(db,request,ctx);if(m==='PUT'&&!param)return settingsRoutes.updateSettings(db,request,ctx);if(m==='POST'&&param==='generate')return settingsRoutes.generateNotifhookKey(db,request,ctx);if(m==='POST'&&param==='notifhook-source')return settingsRoutes.upsertNotifhookSource(db,request,ctx);if(m==='PUT'&&param==='notifhook-source')return settingsRoutes.upsertNotifhookSource(db,request,ctx);if(m==='DELETE'&&param==='notifhook-source')return settingsRoutes.deleteNotifhookSource(db,request,ctx,route.rest?.[2]);break;
 case'logs':if(m==='GET')return logsRoutes.listLogs(db,request,ctx);break;
+case'price-check':requireAdmin(ctx);if(m==='POST'&&!param){const{default:priceCheck}=await import('./cron/priceCheck.js');return priceCheck.fetch(ctx.env);}break;
 case'harga-server':
   requireAdmin(ctx);
   if(m==='GET'&&!param)return hargaServerRoutes.listHargaServer(db,request,ctx);

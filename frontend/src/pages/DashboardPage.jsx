@@ -1,10 +1,9 @@
-// Dashboard (PRD 5.1): omzet harian, jumlah transaksi, kasbon aktif,
-// saldo kasir, transaksi terbaru.
+// Dashboard (PRD 5.1): omzet harian, laba, jumlah transaksi, status kasir,
+// saldo kasir, transaksi terbaru. (kartu "Kasbon Aktif" dihapus.)
 //
 // Sumber data = API Contract Team 1 (backend truth):
 //   GET /api/kasir/current   → saldo sistem per akun
 //   GET /api/transaksi       → items + total_nilai (agregat resmi backend)
-//   GET /api/kasbon          → daftar kasbon (filter status belum_lunas)
 // Frontend TIDAK menghitung omzet/saldo; hanya menampilkan nilai resmi backend.
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -30,34 +29,27 @@ export default function DashboardPage() {
     () => api.get('/transaksi', { date, limit: 10 }),
     { deps: [date] }
   );
-  const kasbon = useAsync(
-    () => api.get('/kasbon', { limit: 100 }).then((r) => r.items),
-    { deps: [] }
-  );
-
-  if (kasir.status === 'loading' || transaksiToday.status === 'loading' || kasbon.status === 'loading') {
+  if (kasir.status === 'loading' || transaksiToday.status === 'loading') {
     return <Loader />;
   }
 
-  const hasError = [kasir, transaksiToday, kasbon].find((s) => s.status === 'error');
+  const hasError = [kasir, transaksiToday].find((s) => s.status === 'error');
   if (hasError) {
     return (
       <div className="page">
-        <ErrorState error={hasError.error} onRetry={() => { kasir.run(); transaksiToday.run(); kasbon.run(); }} />
+        <ErrorState error={hasError.error} onRetry={() => { kasir.run(); transaksiToday.run(); }} />
       </div>
     );
   }
 
   const data = transaksiToday.data || {};
   const transaksiList = (data.items || []).slice().sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
-  const kasbonAktif = (kasbon.data || []).filter((k) => k.status === 'belum_lunas').length;
   const kasirData = kasir.data || {};
 
   const stats = [
     { label: 'Omzet Hari Ini', value: formatRupiah(data.total_nilai || 0), icon: 'money' },
     { label: 'Laba Hari Ini', value: formatRupiah(data.total_laba || 0), icon: 'money' },
     { label: 'Transaksi Hari Ini', value: String(data.total_items ?? 0), icon: 'transaksi' },
-    { label: 'Kasbon Aktif', value: String(kasbonAktif), icon: 'kasbon' },
     { label: 'Status Kasir', value: (kasirData.status && { belum_buka: 'Belum Buka', buka: 'Buka', tutup: 'Tutup' }[kasirData.status]) || '-', icon: 'kasir' },
   ];
 

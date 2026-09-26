@@ -146,8 +146,18 @@ npx wrangler deploy
 - `GET /api/harga-server/perbandingan` (join `produk.kode = harga_server.kode_produk`).
 - `POST /api/harga-server/update-modal`: samakan `produk.harga_modal` ke `harga_server`
   (margin jual lama dipertahankan). Body: `{ kode }`, `{ kode_list }`, atau `{ all_naik:true }`.
-- Cron `cron/priceCheck.js` fetch harga cetak voucher OrderKuota (Jateng) tiap Senin.
-  Pulsa/gopay/ovo/token TIDAK bisa di-fetch (harga di-load via JS).
+- Cron `cron/priceCheck.js` tiap Senin 08:00 UTC (15:00 WIB), atau manual via
+  `POST /api/price-check` (admin only, juga jalan di dev-server lokal).
+- **Bisa di-fetch** (halaman server-rendered, kolom `kode | nama | harga_beli | harga_jual`):
+  - `cetak-voucher` — 7 halaman, filter `harga < 100.000` + named "Jateng".
+  - `pulsa/{indosat,axis,xl,three,smartfren,telkomsel}` — kategori `pulsa`, filter
+    **nominal ≤ 100.000**. Kode OrderKuota = kode produk lokal (`A10`, `X5`, `T15`),
+    jadi tidak perlu auto-link.
+- **TIDAK bisa di-fetch**: DANA / GoPay / OVO / Token. `/harga/{dana,gopay,ovo,token}`
+  hanya mengembalikan halaman generik yang isinya sama dengan halaman pulsa (bukan
+  daftar harga e-wallet). Harga e-wallet harus diisi manual lewat Import.
+- Harga yang "terbaca" 0 dari OrderKuota biasanya berarti request dari IP Cloudflare
+  diblokir — cek `pulsa.fetched` pada respons `POST /api/price-check`.
 
 ## 7. Testing
 

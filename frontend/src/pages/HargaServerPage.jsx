@@ -6,6 +6,7 @@ import { formatRupiah } from '../lib/format';
 import { operatorOf, kodePrefixOf } from '../lib/operator';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
+import { PlistKat, PlistSub } from '../components/ui/PlistGroup';
 import { Field, Input, Select } from '../components/ui/Field';
 import { Modal, ConfirmDialog } from '../components/ui/Modal';
 import { Table } from '../components/ui/Table';
@@ -35,6 +36,8 @@ export default function HargaServerPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [terapkanOpen, setTerapkanOpen] = useState(false);
+  const [syncBusy, setSyncBusy] = useState(false);
+  const [syncResult, setSyncResult] = useState(null);
 
   const loadCompare = useMemo(
     () => async () => {
@@ -153,14 +156,15 @@ export default function HargaServerPage() {
     const byTindakan = (a, b) => (butuhTindakan(b) ? 1 : 0) - (butuhTindakan(a) ? 1 : 0);
     const out = [];
     for (const [kat, subs] of tree) {
-      out.push({ _kat: kat, key: `kat:${kat}` });
+      const totalKat = [...subs.values()].reduce((s2, b) => s2 + b.list.length, 0);
+      out.push({ _kat: kat, _n: totalKat, key: `kat:${kat}` });
       const arr = [...subs.entries()];
       arr.sort((a, b) => (b[1].list.length ? Math.max(...b[1].list.map((r) => Number(r.selisih) || 0)) : 0)
         - (a[1].list.length ? Math.max(...a[1].list.map((r) => Number(r.selisih) || 0)) : 0));
       for (const [sub, b] of arr) {
         if (sub) {
           const top = [...b.prefixes.entries()].sort((x, y) => y[1] - x[1])[0];
-          out.push({ _sub: sub, _prefix: top ? top[0] : '', key: `sub:${kat}:${sub}` });
+          out.push({ _sub: sub, _prefix: top ? top[0] : '', _n: b.list.length, key: `sub:${kat}:${sub}` });
         }
         b.list.sort(byTindakan);
         for (const r of b.list) out.push(r);
@@ -171,6 +175,20 @@ export default function HargaServerPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visibleItems]);
 
+  // Tarik harga dari OrderKuota sekarang (voucher + pulsa), tanpa menunggu cron.
+  const doSyncHarga = async () => {
+    setSyncBusy(true);
+    try {
+      const res = await api.post('/price-check', {});
+      setSyncResult(res);
+      toast.success(`${res.total} baru, ${res.updated} berubah${res.pulsa ? ` (pulsa ${res.pulsa.total})` : ''}.`);
+      reloadAll();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSyncBusy(false);
+    }
+  };
   return (
     <div className="page">
       <PageHeader
@@ -178,8 +196,11 @@ export default function HargaServerPage() {
         subtitle={`${summary.total || 0} produk · perbandingan modal Daftar Barang vs harga OrderKuota/DANA`}
         actions={
           <div className="page-actions-desktop">
+            <Button variant="secondary" onClick={doSyncHarga} loading={syncBusy}>
+              Tarik Harga
+            </Button>
             <Button variant="secondary" onClick={() => setMenuOpen(true)} aria-label="Menu lainnya">
- Menu
+  Menu
             </Button>
             {summary.naik > 0 && (
               <Button onClick={() => setTerapkanOpen(true)} loading={updateBusy.__all}>
@@ -189,6 +210,18 @@ export default function HargaServerPage() {
           </div>
         }
       />
+
+      {syncResult && (
+        <p className="hs-sync-result">
+          Tarik terakhir: {syncResult.total} baru, {syncResult.updated} berubah
+          {syncResult.pulsa
+            ? ` · pulsa: ${syncResult.pulsa.fetched} baris terbaca, ${syncResult.pulsa.total} baru, ${syncResult.pulsa.updated} berubah`
+            : ''}
+          {syncResult.pulsa && syncResult.pulsa.fetched === 0 && (
+            <span className="text-warning"> — OrderKuota tidak mengembalikan data (kemungkinan request diblokir).</span>
+          )}
+        </p>
+      )}
 
       {/* Alert Harga Naik */}
       {alerts.length > 0 && (
@@ -276,19 +309,14 @@ export default function HargaServerPage() {
         <>
           <div className="plist plist-hs">
             {grouped.map((r) => {
-              if (r._kat) return <div key={r.key} className="plist-kat">{r._kat}</div>;
+              if (r._kat) return <PlistKat key={r.key} jumlah={r._n}>{r._kat}</PlistKat>;
               if (r._sub) {
-                return (
-                  <div key={r.key} className="plist-sub">
-                    <span>{r._sub}</span>
-                    {r._prefix && <code className="plist-prefix">{r._prefix}*</code>}
-                  </div>
-                );
+                return <PlistSub key={r.key} nama={r._sub} prefix={r._prefix} jumlah={r._n} />;
               }
               const laba = r.modal_daftar != null && r.harga_jual_daftar != null
                 ? (Number(r.harga_jual_daftar) - Number(r.modal_daftar))
                 : null;
-              return (
+  return (
                 <div
                   key={r.id}
                   className="plist-row plist-row-hs"
@@ -574,7 +602,8 @@ function LogHarga() {
   );
 }
 
-function LinkForm({ target, onCancel, onSaved }) {  const toast = useToast();
+function LinkForm({ target, onCancel, onSaved }) {
+  const toast = useToast();
   const [q, setQ] = useState('');
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);

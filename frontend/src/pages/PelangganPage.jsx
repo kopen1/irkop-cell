@@ -1,10 +1,11 @@
 // Halaman Pelanggan (PRD 5.8): list+ranking, tambah, detail (riwayat, alias,
 // kasbon), gabung manual (merge). Tujuan utama ranking pelanggan setia.
-import { useEffect, useMemo, useState } from 'react';
+import { Fragment, useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useDebounce } from '../hooks/useDebounce';
+import { parseVCard, normalisasiTelepon, JENIS_NOMOR, tipeAliasUntuk } from '../lib/vcard';
 import { formatRupiah, formatDateTime } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
@@ -17,12 +18,10 @@ import { Icon } from '../components/ui/Icon';
 
 const LIMIT = 100;
 
-// API Kontak (navigator.contacts) hanya tersedia di browser/HTTPS tertentu.
-const contactsAvailable = typeof navigator !== 'undefined' && !!navigator.contacts && typeof navigator.contacts.select === 'function';
 
-function normalizeTel(value) {
-  return String(value || '').replace(/\D/g, '');
-}
+// Label tipe alias & sumber yang mudah dibaca (bukan nilai mentah database).
+const ALIAS_LABEL = { nama: 'Nama lain', no_rekening: 'Rekening', no_hp: 'Nomor HP' };
+const SUMBER_LABEL = { manual: 'Manual', notifhook_auto: 'Otomatis (NotifHook)' };
 
 export default function PelangganPage() {
   const { can } = useAuth();
@@ -59,9 +58,10 @@ export default function PelangganPage() {
   const [mergeBusy, setMergeBusy] = useState(false);
 
   const [importOpen, setImportOpen] = useState(false);
-  const [importStep, setImportStep] = useState('pick');
-  const [importForm, setImportForm] = useState({ nama: '', telepon: '' });
   const [importError, setImportError] = useState(null);
+  const [vcfList, setVcfList] = useState([]);
+  const [vcfResult, setVcfResult] = useState(null);
+  const [jenisPilihan, setJenisPilihan] = useState({});
   const [importBusy, setImportBusy] = useState(false);
 
   const [editTarget, setEditTarget] = useState(null);
@@ -169,63 +169,82 @@ export default function PelangganPage() {
     }
   };
 
-  // Pilih kontak via Contacts API → prefill form (nama/nomor) → edit → simpan.
-  const openImport = async () => {
-    setImportOpen(true);
+  const closeImportOpen = () => { setImportOpen(true); setImportError(null); setVcfList([]); setVcfResult(null); setJenisPilihan({}); };
+
+  // Import kontak dari file .vcf — Contact Picker API (navigator.contacts)
+  // tidak berfungsi di Android WebView (APK Capacitor).
+  const closeImport = () => {
+    setImportOpen(false);
+    setVcfList([]);
+    setVcfResult(null);
     setImportError(null);
-    setImportForm({ nama: '', telepon: '' });
-    if (!contactsAvailable) {
-      setImportStep('unavailable');
-      return;
-    }
-    setImportStep('pick');
+    setJenisPilihan({});
+  };
+
+  const pickVcf = async (e) => {
+    const file = e.target.files?.[0];
+    e.target.value = '';
+    if (!file) return;
+    setImportError(null);
+    setVcfResult(null);
     try {
-      const picked = await navigator.contacts.select(['name', 'tel'], { multiple: false });
-      const c = picked[0] || {};
-      const nama = String(c.name || '').trim();
-      const tel = String(Array.isArray(c.tel) ? c.tel[0] : c.tel || '').trim();
-      setImportForm({ nama, telepon: tel });
-      const existing = rows.find((p) => p.telepon && normalizeTel(p.telepon) === normalizeTel(tel));
-      if (tel && existing) {
-        setImportError(`Nomor "${tel}" sudah terdaftar atas nama "${existing.nama}". Tidak disimpan duplikat — ubah nomor atau gabungkan pelanggan yang ada.`);
-      } else {
-        setImportError(null);
+      const parsed = parseVCard(await file.text());
+      if (parsed.length === 0) {
+        setVcfList([]);
+        setImportError('Tidak ada kontak terbaca dari file itu. Pastikan format .vcf (vCard).');
+        return;
       }
-      setImportStep('edit');
+      setVcfList(parsed);
+      setJenisPilihan({});
     } catch (err) {
-      if (err && err.name === 'NotAllowedError') {
-        setImportError('Izin kontak ditolak. Beri akses kontak di pengaturan browser, atau tambahkan pelanggan secara manual.');
-      } else {
-        setImportError(`Gagal membaca kontak: ${err?.message || 'kesalahan tidak diketahui'}. Tambahkan pelanggan secara manual.`);
-      }
-      setImportStep('edit');
+      setVcfList([]);
+      setImportError(`Gagal membaca file: ${err?.message || 'kesalahan tidak diketahui'}.`);
     }
   };
 
-  const doImport = async (e) => {
-    e.preventDefault();
+  // Nomor utama (tipe hp) = kolom telepon; sisanya = alias.
+  const nomorKontak = (c) =>
+    c.nomor.map((n, i) => ({ ...n, key: `${c.nama}-${i}`, jenis: jenisPilihan[`${c.nama}-${i}`] || n.jenis }));
+
+  const sudahAda = (nomor) => {
+    const key = normalisasiTelepon(nomor);
+    return key ? rows.some((p) => p.telepon && normalisasiTelepon(p.telepon) === key) : false;
+  };
+
+  const siapDiimpor = vcfList.filter((c) => c.nama.trim() && nomorKontak(c).length > 0);
+
+  const doImportVcf = async () => {
+    if (siapDiimpor.length === 0) return;
+    setImportBusy(true);
     setImportError(null);
-    if (!importForm.nama.trim()) return setImportError('Nama wajib diisi.');
-    const tel = importForm.telepon.trim();
-    if (tel) {
-      const existing = rows.find((p) => p.telepon && normalizeTel(p.telepon) === normalizeTel(tel));
-      if (existing) {
-        return setImportError(`Nomor "${tel}" sudah terdaftar atas nama "${existing.nama}". Tidak disimpan duplikat.`);
+    let ok = 0;
+    const gagal = [];
+    for (const c of siapDiimpor) {
+      const semua = nomorKontak(c).filter((n) => !sudahAda(n.nomor));
+      if (semua.length === 0) continue;
+      // Nomor HP pertama jadi telepon utama; rekening/token jadi alias.
+      const utama = semua.find((n) => n.jenis === 'hp') || semua[0];
+      try {
+        const res = await api.post('/pelanggan', { nama: c.nama.trim(), telepon: utama.nomor });
+        ok += 1;
+        for (const n of semua) {
+          if (n.nomor === utama.nomor) continue;
+          try {
+            await api.post(`/pelanggan/${res.id}/alias`, { tipe: tipeAliasUntuk(n.jenis), nilai: n.nomor });
+          } catch {
+            // alias gagal (mis. duplikat) tidak menghentikan import
+          }
+        }
+      } catch (err) {
+        gagal.push(`${c.nama}: ${err.message}`);
       }
     }
-    setImportBusy(true);
-    try {
-      await api.post('/pelanggan', { nama: importForm.nama.trim(), telepon: tel || undefined });
-      toast.success('Pelanggan dari kontak disimpan.');
-      setImportOpen(false);
-      setImportStep('pick');
-      setImportForm({ nama: '', telepon: '' });
+    setVcfResult({ ok, gagal, total: siapDiimpor.length });
+    if (ok > 0) {
+      toast.success(`${ok} pelanggan diimpor dari file kontak.`);
       load().catch(() => {});
-    } catch (err) {
-      setImportError(err.message);
-    } finally {
-      setImportBusy(false);
     }
+    setImportBusy(false);
   };
 
   return (
@@ -241,9 +260,8 @@ export default function PelangganPage() {
               </Button>
               <Button
                 variant="secondary"
-                onClick={openImport}
-                disabled={!contactsAvailable}
-                title={contactsAvailable ? 'Import kontak perangkat (nama & nomor)' : 'Device/browser ini tidak mendukung API Kontak (navigator.contacts). Tambahkan pelanggan secara manual.'}
+                onClick={closeImportOpen}
+                title="Impor kontak dari file .vcf (nama & nomor HP), bisa banyak sekaligus"
               >
                 <Icon name="download" size={16} /> Import Kontak
               </Button>
@@ -310,41 +328,47 @@ export default function PelangganPage() {
                 <section>
                   <h4 className="card-title-sm mb-2">Alias / nomor</h4>
                   {detail.alias?.length ? (
-                    <ul className="flex flex-col" style={{ fontSize: '0.85rem', listStyle: 'none', padding: 0, margin: 0, gap: 10 }}>
+                    <ul className="alias-list">
                       {detail.alias.map((a) => (
-                        <li key={a.id} className="flex items-center" style={{ gap: 10 }}>
+                        <li key={a.id} className="alias-item">
                           {aliasEdit?.id === a.id ? (
-                            <>
+                            <div className="alias-form">
                               <Select
                                 value={aliasEdit.tipe}
+                                aria-label="Tipe alias"
                                 onChange={(e) => setAliasEdit((s) => ({ ...s, tipe: e.target.value }))}
-                                style={{ width: 130 }}
                               >
-                                <option value="nama">nama</option>
-                                <option value="no_rekening">no_rekening</option>
-                                <option value="no_hp">no_hp</option>
+                                <option value="nama">Nama lain</option>
+                                <option value="no_rekening">Rekening</option>
+                                <option value="no_hp">Nomor HP</option>
                               </Select>
                               <input
                                 className="input"
+                                aria-label="Nilai alias"
                                 value={aliasEdit.nilai}
                                 onChange={(e) => setAliasEdit((s) => ({ ...s, nilai: e.target.value }))}
-                                style={{ flex: 1 }}
                               />
-                              <Button size="sm" loading={aliasBusy} onClick={saveAliasEdit}>Simpan</Button>
-                              <Button size="sm" variant="secondary" onClick={() => setAliasEdit(null)}>Batal</Button>
-                            </>
+                              <div className="alias-form-aksi">
+                                <Button size="sm" loading={aliasBusy} onClick={saveAliasEdit}>Simpan</Button>
+                                <Button size="sm" variant="secondary" onClick={() => setAliasEdit(null)}>Batal</Button>
+                              </div>
+                            </div>
                           ) : (
                             <>
-                              <Badge tone={a.sumber === 'notifhook_auto' ? 'info' : 'neutral'}>{a.tipe}</Badge>
-                              <span style={{ wordBreak: 'break-all' }}>{a.nilai}</span>
-                              <span className="text-muted text-xs">{a.sumber === 'notifhook_auto' ? 'auto NotifHook' : 'manual'}</span>
-                              <span style={{ flex: 1 }} />
-                              <Button variant="ghost" size="sm" aria-label={`Edit alias ${a.nilai}`} onClick={() => setAliasEdit({ id: a.id, tipe: a.tipe, nilai: a.nilai })}>
-                                <Icon name="edit" size={14} />
-                              </Button>
-                              <Button variant="ghost" size="sm" aria-label={`Hapus alias ${a.nilai}`} onClick={() => setAliasDelete(a)}>
-                                <Icon name="trash" size={14} />
-                              </Button>
+                              <div className="alias-item-top">
+                                <Badge tone={a.tipe === 'no_rekening' ? 'info' : a.tipe === 'no_hp' ? 'success' : 'neutral'}>
+                                  {ALIAS_LABEL[a.tipe] || a.tipe}
+                                </Badge>
+                                <span className="text-xs text-muted">{SUMBER_LABEL[a.sumber] || a.sumber}</span>
+                                <span className="alias-spacer" />
+                                <Button variant="ghost" size="sm" aria-label={`Edit alias ${a.nilai}`} onClick={() => setAliasEdit({ id: a.id, tipe: a.tipe, nilai: a.nilai })}>
+                                  <Icon name="edit" size={14} />
+                                </Button>
+                                <Button variant="ghost" size="sm" aria-label={`Hapus alias ${a.nilai}`} onClick={() => setAliasDelete(a)}>
+                                  <Icon name="trash" size={14} />
+                                </Button>
+                              </div>
+                              <div className="alias-item-nilai">{a.nilai}</div>
                             </>
                           )}
                         </li>
@@ -354,26 +378,26 @@ export default function PelangganPage() {
                     <p className="text-sm text-muted">Belum ada alias.</p>
                   )}
 
-                  <div className="flex mt-3" style={{ gap: 10 }}>
+                  <div className="alias-form mt-3">
                     <Select
                       value={aliasForm.tipe}
+                      aria-label="Tipe alias baru"
                       onChange={(e) => setAliasForm((f) => ({ ...f, tipe: e.target.value }))}
-                      style={{ width: 130 }}
                     >
-                      <option value="nama">nama</option>
-                      <option value="no_rekening">no_rekening</option>
-                      <option value="no_hp">no_hp</option>
+                      <option value="nama">Nama lain</option>
+                      <option value="no_rekening">Rekening</option>
+                      <option value="no_hp">Nomor HP</option>
                     </Select>
                     <input
                       className="input"
-                      placeholder="Nilai alias (mis. nomor rekening / HP)"
+                      placeholder="Contoh: 9876543210 atau 0812…"
+                      aria-label="Nilai alias baru"
                       value={aliasForm.nilai}
                       onChange={(e) => setAliasForm((f) => ({ ...f, nilai: e.target.value }))}
-                      style={{ flex: 1 }}
                     />
-                    <Button size="sm" loading={aliasBusy} onClick={addAlias}>
-                      <Icon name="plus" size={14} /> Tambah
-                    </Button>
+                    <div className="alias-form-aksi">
+                      <Button size="sm" loading={aliasBusy} onClick={addAlias}>Tambah</Button>
+                    </div>
                   </div>
                 </section>
 
@@ -421,60 +445,134 @@ export default function PelangganPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="Belum ada pelanggan" description="Tambahkan pelanggan atau transaksi akan berjalan sebagai Umum/Tanpa Nama." icon="pelanggan" />
       ) : (
-        <Table
-          onRowClick={(r) => openDetail(r)}
-          columns={[
-            { key: 'nama', header: 'Nama', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama}</span> },
-            { key: 'telepon', header: 'Telepon', render: (r) => <span className="text-sm">{r.telepon || <span className="text-muted">—</span>}</span> },
-            { key: 'total_belanja', header: 'Total Belanja', align: 'right', render: (r) => <span className="num">{formatRupiah(r.total_belanja)}</span> },
-            { key: 'frekuensi_transaksi', header: 'Frekuensi', align: 'right', render: (r) => <span className="num">{r.frekuensi_transaksi}</span> },
-            {
-              key: 'alias',
-              header: 'Alias',
-              render: (r) =>
-                r.alias_count ? <Badge tone="info">{r.alias_count} alias</Badge> : <span className="text-muted">—</span>,
-            },
-          ]}
-          rows={rows}
-        />
+        <div className="table-fit">
+          <Table
+            onRowClick={(r) => openDetail(r)}
+            columns={[
+              {
+                key: 'nama',
+                header: 'Nama',
+                render: (r) => (
+                  <>
+                    <span style={{ fontWeight: 600 }}>{r.nama}</span>
+                    {(r.telepon || r.alias_count > 0) && (
+                      <span className="col-sub">
+                        {r.telepon || '—'}
+                        {r.alias_count > 0 && <span className="col-sub-alias"> · {r.alias_count} alias</span>}
+                      </span>
+                    )}
+                  </>
+                ),
+              },
+              { key: 'total_belanja', header: 'Total Belanja', align: 'right', render: (r) => <span className="num">{formatRupiah(r.total_belanja)}</span> },
+              { key: 'frekuensi_transaksi', header: 'Frekuensi', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.frekuensi_transaksi}</span> },
+              {
+                key: 'alias',
+                header: 'Alias',
+                className: 'hide-mobile',
+                render: (r) =>
+                  r.alias_count ? <Badge tone="info">{r.alias_count} alias</Badge> : <span className="text-muted">—</span>,
+              },
+            ]}
+            rows={rows}
+          />
+        </div>
       )}
 
-      {/* Import Kontak */}
-      <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import Kontak">
-        {importStep === 'unavailable' ? (
-          <div className="flex flex-col gap-3">
-            <p className="text-sm text-secondary">
-              Device/browser ini tidak mendukung API Kontak (<span className="num">navigator.contacts</span>).
-              Kontak hanya bisa diimpor di browser yang mendukung Contacts API (mis. Android Chrome via HTTPS).
+      {/* Import Kontak dari file .vcf */}
+      <Modal open={importOpen} onClose={closeImport} title="Import Kontak (.vcf)" size="lg">
+        <div className="flex flex-col gap-3">
+          <p className="text-sm text-secondary">
+            Pilih file <b>.vcf</b> dari perangkat. Di HP: Kontak → pilih kontak →
+            Bagikan / Ekspor → <b>Simpan sebagai vCard</b> (atau ekspor semua kontak
+            dari Google Contacts). Semua kontak dalam 1 file akan bisa diimpor sekaligus.
+          </p>
+
+          <label className="btn btn-secondary" style={{ cursor: 'pointer', alignSelf: 'flex-start' }}>
+            <Icon name="download" size={15} /> Pilih File .vcf…
+            <input type="file" accept=".vcf,text/vcard,text/x-vcard,text/plain" style={{ display: 'none' }} onChange={pickVcf} />
+          </label>
+
+          {vcfList.length > 0 && (
+            <>
+              <p className="text-sm">
+                Terbaca <b>{vcfList.length}</b> kontak · <b>{siapDiimpor.length}</b> siap diimpor
+                {siapDiimpor.length < vcfList.length && ' (sisanya tanpa nama atau tanpa nomor)'}
+                . Nomor HP jadi telepon, rekening &amp; token listrik disimpan sebagai alias — jenisnya
+                bisa diubah di bawah ini.
+              </p>
+              <div className="table-wrap" style={{ maxHeight: 300, overflowY: 'auto' }}>
+                <table className="table" style={{ minWidth: 0 }}>
+                  <thead>
+                    <tr>
+                      <th>Nama</th>
+                      <th>Nomor</th>
+                      <th>Jenis</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vcfList.map((c, ci) => (
+                      <Fragment key={`kontak-${ci}`}>
+                        {nomorKontak(c).length === 0 ? (
+                          <tr>
+                            <td className="text-sm">{c.nama || <span className="text-muted">(tanpa nama)</span>}</td>
+                            <td className="num text-sm"><span className="text-muted">—</span></td>
+                            <td className="text-sm"><span className="text-muted">—</span></td>
+                            <td><Badge tone="neutral">Tanpa nomor</Badge></td>
+                          </tr>
+                        ) : (
+                          nomorKontak(c).map((n, ni) => {
+                            const dup = sudahAda(n.nomor);
+                            return (
+                              <tr key={n.key}>
+                                <td className="text-sm">{ni === 0 ? (c.nama || <span className="text-muted">(tanpa nama)</span>) : ''}</td>
+                                <td className="num text-sm">{n.nomor}</td>
+                                <td>
+                                  <Select
+                                    value={n.jenis}
+                                    aria-label={`Jenis nomor ${n.nomor}`}
+                                    onChange={(e) => setJenisPilihan((p) => ({ ...p, [n.key]: e.target.value }))}
+                                    style={{ padding: '2px 6px', fontSize: '0.8rem' }}
+                                  >
+                                    {JENIS_NOMOR.map((j) => (
+                                      <option key={j.value} value={j.value}>{j.label}</option>
+                                    ))}
+                                  </Select>
+                                </td>
+                                <td>{dup ? <Badge tone="warning">Sudah ada</Badge> : <Badge tone="success">Siap</Badge>}</td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </Fragment>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
+          )}
+
+          {vcfResult && (
+            <p className="text-sm">
+              {vcfResult.ok} berhasil disimpan.
+              {vcfResult.gagal.length > 0 && (
+                <span className="text-danger"> {vcfResult.gagal.length} gagal: {vcfResult.gagal.slice(0, 3).join('; ')}</span>
+              )}
             </p>
-            <p className="text-sm text-secondary">Gunakan tombol "Tambah Pelanggan" untuk mencatat pelanggan secara manual.</p>
-            <div className="flex justify-end">
-              <Button variant="secondary" onClick={() => setImportOpen(false)}>Tutup</Button>
-            </div>
+          )}
+
+          {importError && <p className="field-error" role="alert">{importError}</p>}
+
+          <div className="flex justify-end gap-2">
+            <Button variant="secondary" onClick={closeImport}>Tutup</Button>
+            {siapDiimpor.length > 0 && (
+              <Button onClick={doImportVcf} loading={importBusy}>
+                Import {siapDiimpor.length} Pelanggan
+              </Button>
+            )}
           </div>
-        ) : importStep === 'pick' ? (
-          <div className="flex items-center gap-3">
-            <Loader />
-            <span className="text-sm text-secondary">Memilih kontak…</span>
-          </div>
-        ) : (
-          <form onSubmit={doImport} className="flex flex-col gap-4">
-            <p className="text-sm text-secondary">
-              Data kontak sudah diisi otomatis. Periksa/edit sebelum disimpan.
-            </p>
-            <Field label="Nama" required>
-              <Input type="text" value={importForm.nama} onChange={(e) => setImportForm((f) => ({ ...f, nama: e.target.value }))} />
-            </Field>
-            <Field label="Telepon / nomor (opsional)">
-              <Input type="tel" value={importForm.telepon} onChange={(e) => setImportForm((f) => ({ ...f, telepon: e.target.value }))} />
-            </Field>
-            {importError && <p className="field-error" role="alert">{importError}</p>}
-            <div className="flex justify-end gap-2">
-              <Button variant="secondary" type="button" onClick={() => setImportOpen(false)}>Batal</Button>
-              <Button type="submit" loading={importBusy}>Simpan</Button>
-            </div>
-          </form>
-        )}
+        </div>
       </Modal>
 
       {/* Edit Pelanggan */}

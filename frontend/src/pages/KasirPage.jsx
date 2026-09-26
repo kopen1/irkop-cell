@@ -274,9 +274,6 @@ export default function KasirPage() {
                 <Button type="submit" loading={openingBusy} disabled={!opening?.length}>
                   <Icon name="wallet" size={16} /> Buka Kasir
                 </Button>
-                <p className="field-hint mt-3">
-                  Jika dibuka oleh Karyawan, sistem otomatis mencatat gaji harian (berdasarkan rate hari ini) dan mengirim notifikasi ke Admin.
-                </p>
               </div>
             </div>
           </form>

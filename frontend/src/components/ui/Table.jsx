@@ -7,7 +7,11 @@ export function Table({ columns, rows, empty, loading, onRowClick }) {
         <thead>
           <tr>
             {columns.map((c) => (
-              <th key={c.key} className={c.align === 'right' ? 'col-right' : ''} style={c.width ? { width: c.width } : undefined}>
+              <th
+                key={c.key}
+                className={`${c.align === 'right' ? 'col-right' : ''} ${c.className || ''}`.trim()}
+                style={c.width ? { width: c.width } : undefined}
+              >
                 {c.header}
               </th>
             ))}

@@ -4,6 +4,10 @@
 // =====================================================================
 
 const BASE_URL = 'https://www.orderkuota.com/harga/cetak-voucher';
+// Halaman harga pulsa (server-rendered, berbeda endpoint dari cetak-voucher).
+const PULSA_BASE_URL = 'https://www.orderkuota.com/harga/pulsa';
+// Batas nominal pulsa yang diambil: 100.000 ke bawah.
+const PULSA_MAX_NOMINAL = 100000;
 const EXCLUDE_KW = ['jabo', 'jabodetabek', 'jatim', 'jabar', 'jakarta', 'sukabumi', 'sumatera', 'kalimantan', 'sulawesi'];
 
 const PAGES = [
@@ -14,6 +18,16 @@ const PAGES = [
   { op: 'telkomsel', slug: 'tsel-cetak-voucher-jateng' },
   { op: 'xl', slug: 'xl-cetak-voucher-flex' },
   { op: 'xl', slug: 'xl-cetak-voucher-flex-mini' },
+];
+
+// Pulsa: kolom kode OrderKuota (I5, A10, T15, SM20, ...) = kode produk lokal.
+const PULSA_PAGES = [
+  { op: 'indosat', slug: 'indosat' },
+  { op: 'axis', slug: 'axis' },
+  { op: 'xl', slug: 'xl' },
+  { op: 'three', slug: 'three' },
+  { op: 'smartfren', slug: 'smartfren' },
+  { op: 'telkomsel', slug: 'telkomsel' },
 ];
 
 function genKode(op, produk, hari) {
@@ -68,14 +82,92 @@ async function fetchHarga(slug) {
   }
 }
 
+// --- Pulsa -----------------------------------------------------------------
+// Nama produk memuat nominal, mis. "Indosat 25.000" -> 25000. Kalau nominal
+// tidak terbaca, fall back ke harga agar tetap bisa disaring <= 100k.
+function parseNominal(produk) {
+  const cleaned = String(produk || '').replace(/\./g, '');
+  const m = cleaned.match(/(\d{3,7})\s*$/);
+  if (m) return parseInt(m[1], 10);
+  const first = cleaned.match(/(\d{3,7})/);
+  return first ? parseInt(first[1], 10) : null;
+}
+
+// Baris tabel: [kode, nama, harga_beli, harga_jual]. Harga yang dipakai untuk
+// modal adalah kolom "harga beli" (kolom 3).
+function parsePulsaRows(html) {
+  const tbodyMatch = html.match(/<tbody>([\s\S]*?)<\/tbody>/);
+  if (!tbodyMatch) return [];
+  const rows = tbodyMatch[1].match(/<tr>([\s\S]*?)<\/tr>/g) || [];
+  const out = [];
+  for (const row of rows) {
+    const cells = row.match(/<td[^>]*>([\s\S]*?)<\/td>/g) || [];
+    if (cells.length < 3) continue;
+    const kode = cells[0].replace(/<[^>]+>/g, '').trim().toUpperCase();
+    const produk = cells[1].replace(/<[^>]+>/g, '').trim();
+    const harga = parseInt(cells[2].replace(/[^0-9]/g, ''), 10);
+    if (!kode || !produk || !harga) continue;
+    const nominal = parseNominal(produk);
+    if ((nominal != null ? nominal : harga) > PULSA_MAX_NOMINAL) continue;
+    out.push({ kode, produk, harga, nominal });
+  }
+  return out;
+}
+
+async function fetchHargaPulsa(slug) {
+  try {
+    const resp = await fetch(`${PULSA_BASE_URL}/${slug}`, {
+      headers: { 'User-Agent': 'Mozilla/5.0 Linux Android 13 Chrome/120' }
+    });
+    if (!resp.ok) return [];
+    return parsePulsaRows(await resp.text());
+  } catch {
+    return [];
+  }
+}
+
+// Tulis hasil fetch pulsa ke harga_server (kategori 'pulsa'), sama seperti
+// voucher: insert bila baru, log + alert bila harga berubah.
+async function syncPulsa(db, now) {
+  let total = 0, updated = 0, alerts = 0, fetched = 0;
+  for (const page of PULSA_PAGES) {
+    const products = await fetchHargaPulsa(page.slug);
+    fetched += products.length;
+    for (const p of products) {
+      const kode = p.kode;
+      const existing = await db.prepare('SELECT * FROM harga_server WHERE kode_produk = ?').bind(kode).first();
+      if (existing) {
+        if (existing.harga_server !== p.harga) {
+          await db.prepare('UPDATE harga_server SET harga_sebelumnya = harga_server, harga_server = ?, updated_at = ? WHERE kode_produk = ?')
+            .bind(p.harga, now, kode).run();
+          await db.prepare('INSERT INTO harga_server_log (kode_produk, nama_produk, harga_lama, harga_baru, selisih, tipe, fetched_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .bind(kode, p.produk, existing.harga_server, p.harga, p.harga - existing.harga_server, 'update', now).run();
+          if (p.harga > existing.harga_server) {
+            await db.prepare('INSERT INTO harga_alert (kode_produk, nama_produk, harga_lama, harga_baru, selisih) VALUES (?, ?, ?, ?, ?)')
+              .bind(kode, p.produk, existing.harga_server, p.harga, p.harga - existing.harga_server).run();
+            alerts++;
+          }
+          updated++;
+        }
+      } else {
+        await db.prepare('INSERT INTO harga_server (kode_produk, sumber, kategori, operator, nama_produk, harga_server, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .bind(kode, 'orderkuota', 'pulsa', page.op, p.produk, p.harga, now).run();
+        total++;
+      }
+    }
+  }
+  return { total, updated, alerts, fetched };
+}
+
 export default {
   async scheduled(event, env, ctx) {
     const db = env.DB;
     const now = new Date().toISOString();
-    let total = 0, updated = 0, alerts = 0;
+    let total = 0, updated = 0, alerts = 0, voucherFetched = 0;
 
     for (const page of PAGES) {
       const products = await fetchHarga(page.slug);
+      voucherFetched += products.length;
       for (const p of products) {
         const kode = genKode(page.op, p.produk, p.hari);
         const existing = await db.prepare('SELECT * FROM harga_server WHERE kode_produk = ?').bind(kode).first();
@@ -100,17 +192,23 @@ export default {
       }
     }
 
-    console.log(`[PriceCheck] ${total} baru, ${updated} update, ${alerts} alerts`);
+    const pulsa = await syncPulsa(db, now);
+    total += pulsa.total;
+    updated += pulsa.updated;
+    alerts += pulsa.alerts;
+
+    console.log(`[PriceCheck] ${total} baru, ${updated} update, ${alerts} alerts (terbaca: voucher ${voucherFetched}, pulsa ${pulsa.fetched})`);
   },
 
   async fetch(env) {
     // Manual trigger via POST /api/price-check
     const db = env.DB;
     const now = new Date().toISOString();
-    let total = 0, updated = 0, alerts = 0;
+    let total = 0, updated = 0, alerts = 0, voucherFetched = 0;
 
     for (const page of PAGES) {
       const products = await fetchHarga(page.slug);
+      voucherFetched += products.length;
       for (const p of products) {
         const kode = genKode(page.op, p.produk, p.hari);
         const existing = await db.prepare('SELECT * FROM harga_server WHERE kode_produk = ?').bind(kode).first();
@@ -135,6 +233,14 @@ export default {
       }
     }
 
-    return { total, updated, alerts };
+    const pulsa = await syncPulsa(db, now);
+    return {
+      total: total + pulsa.total,
+      updated: updated + pulsa.updated,
+      alerts: alerts + pulsa.alerts,
+      fetched: voucherFetched + pulsa.fetched,
+      voucher: { fetched: voucherFetched },
+      pulsa,
+    };
   }
 };

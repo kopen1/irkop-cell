@@ -19,6 +19,7 @@ import { Modal, ConfirmDialog } from '../components/ui/Modal';
 import { Loader, ErrorState, EmptyState } from '../components/ui/States';
 import { Badge } from '../components/ui/Badge';
 import { Icon } from '../components/ui/Icon';
+import { PlistKat, PlistSub } from '../components/ui/PlistGroup';
 
 const SORT_OPTIONS = [
   { value: 'harga_asc', label: 'Harga jual: termurah' },
@@ -107,7 +108,8 @@ export default function DaftarBarangPage() {
     const hargaMin = (list) => list.reduce((min, r) => Math.min(min, Number(r.harga) || 0), Infinity);
     const out = [];
     for (const kat of cats) {
-      out.push({ _kat: kat, key: `kat:${kat}` });
+      const totalKat = [...tree.get(kat).values()].reduce((s2, b) => s2 + b.list.length, 0);
+      out.push({ _kat: kat, _n: totalKat, key: `kat:${kat}` });
       const subs = [...tree.get(kat).entries()].map(([sub, bucket]) => {
         bucket.list.sort(cmp);
         return [sub, bucket];
@@ -115,7 +117,7 @@ export default function DaftarBarangPage() {
       subs.sort((a, b) => hargaMin(a[1].list) - hargaMin(b[1].list));
       for (const [sub, bucket] of subs) {
         const top = [...bucket.prefixes.entries()].sort((x, y) => y[1] - x[1])[0];
-        out.push({ _sub: sub, _prefix: top ? top[0] : '', key: `sub:${kat}:${sub}` });
+        out.push({ _sub: sub, _prefix: top ? top[0] : '', _n: bucket.list.length, key: `sub:${kat}:${sub}` });
         for (const r of bucket.list) out.push(r);
       }
     }
@@ -340,9 +342,6 @@ export default function DaftarBarangPage() {
       )}
 
       <div className="plist-search">
-        <button type="button" className="plist-filter-btn mobile-only" onClick={() => setFilterOpen(true)} aria-label="Filter dan urutkan produk">
-          <Icon name="sort" size={22} />
-        </button>
         <div className="plist-search-box">
           <Icon name="search" size={18} />
           <input
@@ -353,6 +352,9 @@ export default function DaftarBarangPage() {
             aria-label="Cari nama atau kode barang"
           />
         </div>
+        <button type="button" className="plist-filter-btn mobile-only" onClick={() => setFilterOpen(true)} aria-label="Filter dan urutkan produk">
+          <Icon name="sort" size={22} />
+        </button>
         <div className="desktop-only" style={{ flex: '0 0 230px' }}>
           <Select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)} aria-label="Filter kategori">
             <option value="">Semua kategori</option>
@@ -390,18 +392,9 @@ export default function DaftarBarangPage() {
 
           <div className="plist">
             {groupedRows.map((r) => {
-              if (r._kat) {
-                return (
-                  <div key={r.key} className="plist-kat">{r._kat}</div>
-                );
-              }
+              if (r._kat) return <PlistKat key={r.key} jumlah={r._n}>{r._kat}</PlistKat>;
               if (r._sub) {
-                return (
-                  <div key={r.key} className="plist-sub">
-                    <span>{r._sub}</span>
-                    {r._prefix && <code className="plist-prefix">{r._prefix}*</code>}
-                  </div>
-                );
+                return <PlistSub key={r.key} nama={r._sub} prefix={r._prefix} jumlah={r._n} />;
               }
               const tag = stokTag(r);
               const laba = (Number(r.harga) || 0) - (Number(r.harga_modal) || 0);
@@ -410,7 +403,7 @@ export default function DaftarBarangPage() {
               return (
                 <div
                   key={r.id}
-                  className="plist-row"
+                  className={`plist-row${selectMode ? ' plist-row-check' : ''}`}
                   role="button"
                   tabIndex={0}
                   onClick={() => {
@@ -424,7 +417,7 @@ export default function DaftarBarangPage() {
                     }
                   }}
                 >
-                  {selectMode ? (
+                  {selectMode && (
                     <span className="plist-check">
                       <input
                         type="checkbox"
@@ -434,8 +427,6 @@ export default function DaftarBarangPage() {
                         aria-label={`Pilih ${r.nama}`}
                       />
                     </span>
-                  ) : (
-                    <span className="plist-avatar">{initials(r.nama)}</span>
                   )}
                   <span className="plist-body">
                     <span className="plist-name">{r.nama}</span>
@@ -783,12 +774,6 @@ function KategoriEditForm({ initial, onSaved, onCancel }) {
 function parseCsvNumber(v) {
   const s = String(v == null ? '' : v).replace(/[^0-9]/g, '');
   return s === '' ? null : Number(s);
-}
-
-// Avatar list mobile: 2 karakter pertama nama (mis. "1,5GB" -> "1,", "10GB" -> "10").
-function initials(nama) {
-  const s = String(nama || '').trim();
-  return (s.slice(0, 2) || '?').toUpperCase();
 }
 
 // Tag di sisi kanan list mobile = stok. Kategori non-stok ditandai "∞".

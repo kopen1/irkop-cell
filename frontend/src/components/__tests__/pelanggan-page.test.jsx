@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, cleanup } from '@testing-library/react';
+import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import PelangganPage from '../../pages/PelangganPage.jsx';
 
 const getMock = vi.fn();
@@ -46,10 +46,19 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 describe('PelangganPage Import Kontak (item 11)', () => {
-  it('tombol Import Kontak disabled di environment tanpa Contacts API + ada penjelasan', async () => {
+  // Impor memakai file .vcf, bukan Contact Picker API (tidak berfungsi di
+  // Android WebView / APK), jadi tombol harus selalu bisa dipakai.
+  it('tombol Import Kontak aktif dan membuka pemilih file .vcf', async () => {
     render(<PelangganPage />);
     const btn = await screen.findByRole('button', { name: /Import Kontak/ });
-    expect(btn.disabled).toBe(true);
-    expect(btn.title).toMatch(/tidak mendukung API Kontak/);
+    expect(btn.disabled).toBe(false);
+
+    fireEvent.click(btn);
+    // Modal .vcf terbuka: ada input file (accept .vcf) + petunjuk cara ekspor.
+    expect(await screen.findByText('Import Kontak (.vcf)')).toBeTruthy();
+    const file = document.querySelector('input[type="file"]');
+    expect(file).toBeTruthy();
+    expect(file.getAttribute('accept')).toContain('.vcf');
+    expect(screen.getByText(/Simpan sebagai vCard/i)).toBeTruthy();
   });
 });
