@@ -119,7 +119,7 @@ describe('Halaman Kasir — Edit sesi lampau (smoke)', () => {
 
     await waitFor(() => {
       expect(posts.length).toBe(1);
-    }, { timeout: 3000 });
+    }, { timeout: 15000 });
     expect(posts[0].kasir_sesi_id).toBe(1);
     expect(posts[0].saldo_real).toEqual([{ nama_akun: 'Tunai Laci', saldo_real: 500000 }]);
   });

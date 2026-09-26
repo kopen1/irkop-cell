@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { operatorOf } from '../operator.js';
+import { operatorOf, kodePrefixOf } from '../operator.js';
 
 describe('operatorOf', () => {
   it('kode voucher menentukan operator', () => {
@@ -9,6 +9,7 @@ describe('operatorOf', () => {
     expect(operatorOf('VX7', 'XL', 'Voucher')).toBe('XL');
     expect(operatorOf('Vsm7', 'Smart', 'Voucher')).toBe('Smartfren');
     expect(operatorOf('VA7', 'Axis', 'Voucher')).toBe('Axis');
+    expect(operatorOf('LA5', 'Lyca 5GB', 'Voucher')).toBe('Lyca');
   });
 
   it('nama dengan kata "perdana" tidak dianggap Dana', () => {
@@ -24,5 +25,19 @@ describe('operatorOf', () => {
   it('Dana asli tetap terdeteksi', () => {
     expect(operatorOf('', 'Dana 50k', 'Saldo')).toBe('Dana');
     expect(operatorOf('', 'GoPay 100k', 'Saldo')).toBe('GoPay');
+  });
+});
+
+describe('kodePrefixOf', () => {
+  it('prefix voucher untuk label grup', () => {
+    expect(kodePrefixOf('VI1005', 'Voucher')).toBe('vi');
+    expect(kodePrefixOf('VA7', 'Voucher')).toBe('va');
+    expect(kodePrefixOf('LA5', 'Voucher')).toBe('la');
+    expect(kodePrefixOf('VSMKTI12', 'Voucher')).toBe('vsm');
+  });
+
+  it('di luar voucher tidak ada prefix', () => {
+    expect(kodePrefixOf('D50', 'Saldo')).toBe('');
+    expect(kodePrefixOf('PLS-001', 'Aksesoris')).toBe('');
   });
 });

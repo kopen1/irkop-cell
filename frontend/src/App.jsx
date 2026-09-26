@@ -9,6 +9,7 @@ import TransaksiPage from './pages/TransaksiPage';
 import KasirPage from './pages/KasirPage';
 import LaporanPage from './pages/LaporanPage';
 import DaftarBarangPage from './pages/DaftarBarangPage';
+import ProdukFormPage from './pages/ProdukFormPage';
 import ServiceHpPage from './pages/ServiceHpPage';
 import KasbonPage from './pages/KasbonPage';
 import PelangganPage from './pages/PelangganPage';
@@ -54,6 +55,8 @@ export default function App() {
         <Route path="/kasir" element={<RequirePermission permission="kasir"><KasirPage /></RequirePermission>} />
         <Route path="/laporan" element={<RequirePermission permission="laporan"><LaporanPage /></RequirePermission>} />
         <Route path="/daftar-barang" element={<RequirePermission permission="daftar_barang"><DaftarBarangPage /></RequirePermission>} />
+        <Route path="/daftar-barang/tambah" element={<RequirePermission permission="daftar_barang"><ProdukFormPage /></RequirePermission>} />
+        <Route path="/daftar-barang/edit/:id" element={<RequirePermission permission="daftar_barang"><ProdukFormPage /></RequirePermission>} />
         <Route path="/service-hp" element={<RequirePermission permission="laporan_service_hp"><ServiceHpPage /></RequirePermission>} />
         <Route path="/kasbon" element={<RequirePermission permission="kasbon"><KasbonPage /></RequirePermission>} />
         <Route path="/pelanggan" element={<RequirePermission permission="pelanggan"><PelangganPage /></RequirePermission>} />

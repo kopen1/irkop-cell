@@ -34,6 +34,7 @@ const paths = {
   database: ['M12 8c4.4 0 8-1.3 8-3s-3.6-3-8-3-8 1.3-8 3 3.6 3 8 3z', 'M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5', 'M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3'],
   home: ['M3 9.5 12 3l9 6.5', 'M5 10v10h14V10'],
   transfer: ['M7 4v13', 'M7 4l-3 3M7 4l3 3', 'M17 20V7', 'M17 20l-3-3M17 20l3-3'],
+  sort: ['M12 20V5', 'M12 5l-5 5M12 5l5 5', 'M4 7h4M4 12h7M4 17h10'],
 };
 
 export function Icon({ name, size = 18, className = '', strokeWidth = 1.8, ...rest }) {

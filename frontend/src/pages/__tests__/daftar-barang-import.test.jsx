@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import DaftarBarangPage from '../DaftarBarangPage.jsx';
 
 const getMock = vi.fn();
@@ -29,8 +30,8 @@ vi.mock('../../context/ToastContext', () => ({
 
 const katalog = {
   items: [
-    { id: 1, kode: 'P-001', nama: 'Toner', kategori_id: 1, kategori_nama: 'Fisik', lacak_stok: 1, harga: 100000, harga_modal: 70000, stok: 50, stok_minimum: 5, satuan: 'pcs', deleted_at: null },
-    { id: 2, kode: 'P-002', nama: 'Pulsa', kategori_id: 2, kategori_nama: 'Digital', lacak_stok: 0, harga: 12000, harga_modal: 11000, stok: 0, stok_minimum: 0, satuan: 'pcs', deleted_at: null },
+    { id: 1, kode: 'P-001', nama: 'Toner', kategori_id: 1, kategori_nama: 'Fisik', kategori_lacak_stok: 1, harga: 100000, harga_modal: 70000, stok: 50, stok_minimum: 5, satuan: 'pcs', deleted_at: null },
+    { id: 2, kode: 'P-002', nama: 'Pulsa', kategori_id: 2, kategori_nama: 'Digital', kategori_lacak_stok: 0, harga: 12000, harga_modal: 11000, stok: 0, stok_minimum: 0, satuan: 'pcs', deleted_at: null },
   ],
 };
 const kategori = {
@@ -52,7 +53,11 @@ beforeEach(() => {
 afterEach(() => cleanup());
 
 async function renderPage() {
-  const utils = render(<DaftarBarangPage />);
+  const utils = render(
+    <MemoryRouter>
+      <DaftarBarangPage />
+    </MemoryRouter>
+  );
   await screen.findByText('Daftar Barang');
   return utils;
 }

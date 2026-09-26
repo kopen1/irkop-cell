@@ -3,15 +3,13 @@ import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
 import { formatRupiah } from '../lib/format';
-import { kategoriColor } from '../lib/kategoriColor';
+import { operatorOf, kodePrefixOf } from '../lib/operator';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
-import { Modal } from '../components/ui/Modal';
+import { Modal, ConfirmDialog } from '../components/ui/Modal';
 import { Table } from '../components/ui/Table';
 import { Loader, ErrorState, EmptyState } from '../components/ui/States';
-import { Badge } from '../components/ui/Badge';
-import { Icon } from '../components/ui/Icon';
 
 const KATEGORI_OPTIONS = [
   { value: '', label: 'Semua Kategori' },
@@ -25,7 +23,6 @@ const KATEGORI_OPTIONS = [
 
 export default function HargaServerPage() {
   const toast = useToast();
-  const [state, setState] = useState({ status: 'idle', data: null, error: null });
   const [compareState, setCompareState] = useState({ status: 'idle', data: null, error: null });
   const [alerts, setAlerts] = useState([]);
   const [filterKategori, setFilterKategori] = useState('');
@@ -35,21 +32,9 @@ export default function HargaServerPage() {
   const [updateBusy, setUpdateBusy] = useState({});
   const [linkTarget, setLinkTarget] = useState(null);
   const [autoLinkBusy, setAutoLinkBusy] = useState(false);
-
-  const load = useMemo(
-    () => async () => {
-      setState((s) => ({ ...s, status: 'loading' }));
-      try {
-        let url = '/harga-server';
-        if (filterKategori) url += `?kategori=${filterKategori}`;
-        const data = await api.get(url);
-        setState({ status: 'success', data, error: null });
-      } catch (err) {
-        setState({ status: 'error', data: null, error: err });
-      }
-    },
-    [filterKategori]
-  );
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [showAll, setShowAll] = useState(false);
+  const [terapkanOpen, setTerapkanOpen] = useState(false);
 
   const loadCompare = useMemo(
     () => async () => {
@@ -73,9 +58,9 @@ export default function HargaServerPage() {
     }
   };
 
-  useEffect(() => { load(); loadCompare(); loadAlerts(); }, [load, loadCompare]);
+  useEffect(() => { loadCompare(); loadAlerts(); }, [loadCompare]);
 
-  const reloadAll = () => { load(); loadCompare(); loadAlerts(); };
+  const reloadAll = () => { loadCompare(); loadAlerts(); };
 
   // Update modal 1 produk di Daftar Barang dari harga server
   const doUpdateModal = async (row) => {
@@ -123,37 +108,85 @@ export default function HargaServerPage() {
     }
   };
 
-  const data = state.data || {};
-  const items = data.items || [];
-  const compareData = compareState.data || {};
-  const compareItems = compareData.items || [];
-  const summary = compareData.summary || {};
+  const compareItems = useMemo(() => compareState.data?.items || [], [compareState.data]);
+  const summary = compareState.data?.summary || {};
+
+  const KAT_LABEL = { cetak_voucher: 'Voucher', pulsa: 'Pulsa', dana: 'DANA', gopay: 'GoPay', ovo: 'OVO', token: 'Token' };
+
+  // Daftar fokus = yang perlu tindakan: harga naik/turun atau belum terhubung
+  // ke produk lokal. Sisanya disembunyikan di balik "tampilkan semua".
+  const butuhTindakan = (r) =>
+    r.status === 'naik' || r.status === 'turun' || !r.nama_produk_daftar;
+
+  const filteredItems = useMemo(
+    () => (filterKategori ? compareItems.filter((r) => r.kategori === filterKategori) : compareItems),
+    [compareItems, filterKategori]
+  );
+
+  const visibleItems = useMemo(
+    () => (showAll ? filteredItems : filteredItems.filter(butuhTindakan)),
+    [filteredItems, showAll]
+  );
+
+  const belumCount = useMemo(() => filteredItems.filter((r) => !r.nama_produk_daftar).length, [filteredItems]);
+  const samaCount = (summary.sama || 0) + (summary.turun || 0);
+  const totalNaik = useMemo(
+    () => filteredItems.filter((r) => r.status === 'naik').reduce((s, r) => s + (Number(r.selisih) || 0), 0),
+    [filteredItems]
+  );
+
+  // Grouping dua tingkat: kategori OrderKuota -> sub-grup operator/kode (Voucher).
+  const grouped = useMemo(() => {
+    const tree = new Map();
+    for (const r of visibleItems) {
+      const kat = KAT_LABEL[r.kategori] || r.kategori || 'Lainnya';
+      const isVoucher = r.kategori === 'cetak_voucher';
+      const sub = isVoucher ? (operatorOf(r.kode_produk, r.nama_produk, 'Voucher') || 'Lainnya') : '';
+      if (!tree.has(kat)) tree.set(kat, new Map());
+      const subs = tree.get(kat);
+      if (!subs.has(sub)) subs.set(sub, { list: [], prefixes: new Map() });
+      const b = subs.get(sub);
+      b.list.push(r);
+      const pfx = kodePrefixOf(r.kode_produk, 'Voucher');
+      if (pfx) b.prefixes.set(pfx, (b.prefixes.get(pfx) || 0) + 1);
+    }
+    const byTindakan = (a, b) => (butuhTindakan(b) ? 1 : 0) - (butuhTindakan(a) ? 1 : 0);
+    const out = [];
+    for (const [kat, subs] of tree) {
+      out.push({ _kat: kat, key: `kat:${kat}` });
+      const arr = [...subs.entries()];
+      arr.sort((a, b) => (b[1].list.length ? Math.max(...b[1].list.map((r) => Number(r.selisih) || 0)) : 0)
+        - (a[1].list.length ? Math.max(...a[1].list.map((r) => Number(r.selisih) || 0)) : 0));
+      for (const [sub, b] of arr) {
+        if (sub) {
+          const top = [...b.prefixes.entries()].sort((x, y) => y[1] - x[1])[0];
+          out.push({ _sub: sub, _prefix: top ? top[0] : '', key: `sub:${kat}:${sub}` });
+        }
+        b.list.sort(byTindakan);
+        for (const r of b.list) out.push(r);
+      }
+    }
+    out.sort(byTindakan);
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visibleItems]);
 
   return (
     <div className="page">
       <PageHeader
         title="Harga Server"
-        subtitle="Perbandingan harga modal vs harga dari OrderKuota/DANA"
+        subtitle={`${summary.total || 0} produk · perbandingan modal Daftar Barang vs harga OrderKuota/DANA`}
         actions={
-          <>
+          <div className="page-actions-desktop">
+            <Button variant="secondary" onClick={() => setMenuOpen(true)} aria-label="Menu lainnya">
+ Menu
+            </Button>
             {summary.naik > 0 && (
-              <Button onClick={doUpdateAllNaik} loading={updateBusy.__all}>
-                <Icon name="refresh" size={16} /> Update Modal Naik ({summary.naik})
+              <Button onClick={() => setTerapkanOpen(true)} loading={updateBusy.__all}>
+ Terapkan ({summary.naik})
               </Button>
             )}
-            <Button variant="secondary" onClick={doAutoLink} loading={autoLinkBusy}>
-              <Icon name="refresh" size={16} /> Auto-link
-            </Button>
-            <Button variant="secondary" onClick={() => setLogOpen(true)}>
-              <Icon name="clock" size={16} /> Log
-            </Button>
-            <Button variant="secondary" onClick={() => setImportOpen(true)}>
-              <Icon name="download" size={16} /> Import
-            </Button>
-            <Button variant="secondary" onClick={reloadAll}>
-              <Icon name="refresh" size={16} /> Refresh
-            </Button>
-          </>
+          </div>
         }
       />
 
@@ -162,7 +195,7 @@ export default function HargaServerPage() {
         <div className="card" style={{ borderLeft: '4px solid var(--danger)', marginBottom: 'var(--space-3)' }}>
           <div className="flex items-center justify-between mb-2">
             <span style={{ fontWeight: 600, color: 'var(--danger)' }}>
-              <Icon name="alert" size={16} /> {alerts.length} Harga Naik
+ {alerts.length} Harga Naik
             </span>
             <Button variant="ghost" size="sm" onClick={async () => {
               await api.put('/harga-server/alerts/read');
@@ -181,31 +214,32 @@ export default function HargaServerPage() {
         </div>
       )}
 
-      {/* Summary */}
+      {/* Bar proporsi + total dampak (ganti 4 kartu angka) */}
       {compareState.status === 'success' && (
-        <div className="g2" style={{ marginBottom: 'var(--space-3)' }}>
-          <div className="stat" style={{ background: 'var(--info-soft)' }}>
-            <div className="lb">Total Produk</div>
-            <div className="vl">{summary.total || 0}</div>
+        <div className="hs-bar-wrap">
+          <div className="hs-bar">
+            <span className="hs-bar-seg hs-seg-ok" style={{ flexGrow: (summary.sama || 0) + (summary.turun || 0) || 0.0001 }} />
+            <span className="hs-bar-seg hs-seg-up" style={{ flexGrow: summary.naik || 0.0001 }} />
+            <span className="hs-bar-seg hs-seg-new" style={{ flexGrow: summary.baru || 0.0001 }} />
           </div>
-          <div className="stat" style={{ background: 'var(--danger-soft)' }}>
-            <div className="lb">Harga Naik</div>
-            <div className="vl" style={{ color: 'var(--danger)' }}>{summary.naik || 0}</div>
+          <div className="hs-legend">
+            <span><i className="hs-dot hs-seg-ok" /> {samaCount} sama</span>
+            <span><i className="hs-dot hs-seg-up" /> {summary.naik || 0} naik</span>
+            <span><i className="hs-dot hs-seg-new" /> {summary.baru || 0} baru</span>
+            {belumCount > 0 && <span><i className="hs-dot hs-seg-link" /> {belumCount} belum terhubung</span>}
           </div>
-          <div className="stat" style={{ background: 'var(--success-soft)' }}>
-            <div className="lb">Sama / Turun</div>
-            <div className="vl" style={{ color: 'var(--success)' }}>{(summary.sama || 0) + (summary.turun || 0)}</div>
-          </div>
-          <div className="stat" style={{ background: 'var(--warning-soft)' }}>
-            <div className="lb">Baru</div>
-            <div className="vl" style={{ color: 'var(--warning)' }}>{summary.baru || 0}</div>
-          </div>
+          {summary.naik > 0 && (
+            <p className="hs-impact">
+              <span><b>{summary.naik} harga naik</b> · total +{formatRupiah(totalNaik)}</span>
+              <Button size="sm" onClick={() => setTerapkanOpen(true)}>Terapkan</Button>
+            </p>
+          )}
         </div>
       )}
 
       {/* Filter */}
       <div className="filter-bar">
-        <Field label="Filter Kategori">
+        <Field label="Kategori OrderKuota">
           <Select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)}>
             {KATEGORI_OPTIONS.map((k) => (
               <option key={k.value} value={k.value}>{k.label}</option>
@@ -214,61 +248,148 @@ export default function HargaServerPage() {
         </Field>
       </div>
 
+      <ConfirmDialog
+        open={terapkanOpen}
+        title="Terapkan Harga Naik"
+        message={`${summary.naik || 0} produk akan modal Daftar Barang disamakan dengan harga server (harga jual dipertahankan, jadi margin aman). Total perubahan +${formatRupiah(totalNaik)}. Lanjutkan?`}
+        confirmLabel={`Terapkan ${summary.naik || 0}`}
+        loading={updateBusy.__all}
+        onCancel={() => setTerapkanOpen(false)}
+        onConfirm={async () => {
+          await doUpdateAllNaik();
+          setTerapkanOpen(false);
+        }}
+      />
+
       {/* Tabel Perbandingan */}
       {compareState.status === 'error' ? (
         <ErrorState error={compareState.error} onRetry={() => { loadCompare(); loadAlerts(); }} />
       ) : compareState.status === 'loading' ? (
         <Loader />
-      ) : compareItems.length === 0 ? (
-        <EmptyState title="Belum ada data harga server" description="Import harga dari OrderKuota/DANA terlebih dahulu." icon="wallet" />
+      ) : grouped.length === 0 ? (
+        compareItems.length === 0 ? (
+          <EmptyState title="Belum ada data harga server" description="Import harga dari OrderKuota/DANA terlebih dahulu." icon="wallet" />
+        ) : (
+          <EmptyState title="Semua sudah beres" description="Tidak ada harga naik atau produk yang belum terhubung." icon="check" />
+        )
       ) : (
-        <Table
-          columns={[
-            { key: 'kode_produk', header: 'Kode', render: (r) => <span className="font-mono text-sm" style={{ fontWeight: 600 }}>{r.kode_produk}</span> },
-            { key: 'nama_produk', header: 'Nama', render: (r) => <span className="text-sm">{r.nama_produk}</span> },
-            { key: 'lokal', header: 'Produk Lokal', render: (r) => (r.nama_produk_daftar ? <span className="text-sm">{r.nama_produk_daftar}</span> : <Badge tone="warning">Belum</Badge>) },
-            { key: 'kategori', header: 'Kategori', render: (r) => { const c = kategoriColor(r.kategori); return <span className="badge" style={{ background: c.bg, color: c.fg, fontWeight: 700 }}>{r.kategori}</span>; } },
-            { key: 'harga_server', header: 'Harga Server', align: 'right', render: (r) => <span className="num" style={{ fontWeight: 600 }}>{formatRupiah(r.harga_server)}</span> },
-            { key: 'biaya', header: 'Biaya Fisik', align: 'right', render: (r) => (r.biaya ? <span className="num text-muted">+{formatRupiah(r.biaya)}</span> : <span className="text-muted">—</span>) },
-            { key: 'modal_daftar', header: 'Modal Daftar', align: 'right', render: (r) => r.modal_daftar ? <span className="num">{formatRupiah(r.modal_daftar)}</span> : <span className="text-muted">—</span> },
-            { key: 'harga_jual_daftar', header: 'Harga Jual', align: 'right', render: (r) => r.harga_jual_daftar ? <span className="num">{formatRupiah(r.harga_jual_daftar)}</span> : <span className="text-muted">—</span> },
-            { key: 'selisih', header: 'Selisih', align: 'right', render: (r) => {
-              if (r.status === 'baru') return <Badge tone="warning">Baru</Badge>;
-              if (r.selisih > 0) return <span className="num" style={{ color: 'var(--danger)', fontWeight: 600 }}>+{formatRupiah(r.selisih)}</span>;
-              if (r.selisih < 0) return <span className="num" style={{ color: 'var(--success)' }}>{formatRupiah(r.selisih)}</span>;
-              return <span className="num" style={{ color: 'var(--success)' }}>Sama</span>;
-            }},
-            { key: 'status', header: 'Status', render: (r) => {
-              if (r.status === 'naik') return <Badge tone="danger">Naik</Badge>;
-              if (r.status === 'turun') return <Badge tone="success">Turun</Badge>;
-              if (r.status === 'baru') return <Badge tone="warning">Baru</Badge>;
-              return <Badge tone="success">OK</Badge>;
-            }},
-            { key: 'aksi', header: '', render: (r) => (
-              <div className="row-actions">
-                {(r.status === 'naik' || r.status === 'turun') && (
-                  <Button
-                    variant="secondary"
-                    size="sm"
-                    loading={updateBusy[r.kode_produk]}
-                    onClick={() => doUpdateModal(r)}
-                    title="Samakan modal Daftar Barang dengan harga server (margin jual dipertahankan)"
-                  >
-                    <Icon name="refresh" size={13} /> Update Modal
-                  </Button>
-                )}
-                <Button variant="secondary" size="sm" onClick={() => setLinkTarget(r)} title="Hubungkan ke produk lokal">
-                  Link
-                </Button>
-                <Button variant="ghost" size="sm" onClick={() => setEditTarget(r)} title="Edit harga server">
-                  <Icon name="edit" size={15} />
-                </Button>
-              </div>
-            )},
-          ]}
-          rows={compareItems.map((r) => ({ ...r, key: r.id }))}
-        />
+        <>
+          <div className="plist plist-hs">
+            {grouped.map((r) => {
+              if (r._kat) return <div key={r.key} className="plist-kat">{r._kat}</div>;
+              if (r._sub) {
+                return (
+                  <div key={r.key} className="plist-sub">
+                    <span>{r._sub}</span>
+                    {r._prefix && <code className="plist-prefix">{r._prefix}*</code>}
+                  </div>
+                );
+              }
+              const laba = r.modal_daftar != null && r.harga_jual_daftar != null
+                ? (Number(r.harga_jual_daftar) - Number(r.modal_daftar))
+                : null;
+              return (
+                <div
+                  key={r.id}
+                  className="plist-row plist-row-hs"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setEditTarget(r)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); e.currentTarget.click(); }
+                  }}
+                >
+                  <span className="plist-body">
+                    <span className="plist-name">{r.nama_produk}</span>
+                    <span className="plist-kode">
+                      {r.kode_produk}
+                      {r.nama_produk_daftar
+                        ? <> · <span style={{ color: 'var(--success)' }}>→ {r.nama_produk_daftar}</span></>
+                        : <> · <button type="button" className="hs-link-btn" onClick={(e) => { e.stopPropagation(); setLinkTarget(r); }}>Hubungkan</button></>}
+                    </span>
+                  </span>
+                  <span className="hs-selisih">
+                    {r.status === 'baru' ? (
+                      <span className="badge badge-warning">Baru</span>
+                    ) : r.selisih > 0 ? (
+                      <span className="num" style={{ color: 'var(--danger)', fontWeight: 700 }}>+{formatRupiah(r.selisih)}</span>
+                    ) : r.selisih < 0 ? (
+                      <span className="num" style={{ color: 'var(--success)', fontWeight: 700 }}>{formatRupiah(r.selisih)}</span>
+                    ) : (
+                      <span className="num" style={{ color: 'var(--success)' }}>Sama</span>
+                    )}
+                  </span>
+                  <span className="plist-side">
+                    <span className="plist-tagline">
+                      <span className={`plist-tag plist-tag-${statusTone(r.status)}`}>{statusLabel(r.status)}</span>
+                      {laba != null && (
+                        <span className={`plist-laba ${laba < 0 ? 'text-danger' : laba === 0 ? 'text-warning' : 'text-success'}`}>
+                          Laba {formatRupiah(laba)}
+                        </span>
+                      )}
+                    </span>
+                    <span className="plist-price hs-prices">
+                      <span className="hs-pv hs-server">
+                        <span className="hs-lbl">Server</span> {formatRupiah(r.harga_server)}
+                        {r.biaya ? <span className="hs-biaya"> +{formatRupiah(r.biaya)}</span> : null}
+                      </span>
+                      <span className="hs-daftar">
+                        <span className="hs-pv"><span className="hs-lbl">Modal</span> {formatRupiah(r.modal_daftar)}</span>
+                        {' • '}
+                        <span className="hs-pv"><span className="hs-lbl">Jual</span> {formatRupiah(r.harga_jual_daftar)}</span>
+                      </span>
+                    </span>
+                  </span>
+                  <span className="plist-row-actions">
+                    {(r.status === 'naik' || r.status === 'turun') && (
+                      <Button variant="secondary" size="sm" loading={updateBusy[r.kode_produk]} onClick={(e) => { e.stopPropagation(); doUpdateModal(r); }} title="Samakan modal Daftar Barang dengan harga server">
+ Terapkan
+                      </Button>
+                    )}
+                    <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); setLinkTarget(r); }} title="Hubungkan ke produk lokal">Link</Button>
+                    <Button variant="ghost" size="sm" aria-label={`Edit ${r.nama_produk}`} onClick={(e) => { e.stopPropagation(); setEditTarget(r); }}>
+                    </Button>
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+
+          {filteredItems.length > visibleItems.length && (
+            <div className="hs-showmore">
+              <Button variant="ghost" onClick={() => setShowAll(true)}>
+                Tampilkan {filteredItems.length - visibleItems.length} lainnya
+              </Button>
+            </div>
+          )}
+          {showAll && (
+            <div className="hs-showmore">
+              <Button variant="ghost" onClick={() => setShowAll(false)}>Kembali ke yang perlu tindakan</Button>
+            </div>
+          )}
+        </>
       )}
+
+      {/* Menu lainnya (pengganti 4 tombol di header) */}
+      <Modal open={menuOpen} onClose={() => setMenuOpen(false)} title="Menu Harga Server">
+        <div className="flex flex-col gap-2">
+          <Button variant="secondary" onClick={() => { setMenuOpen(false); doAutoLink(); }} loading={autoLinkBusy}>
+ Auto-link ke produk lokal
+          </Button>
+          <Button variant="secondary" onClick={() => { setMenuOpen(false); setImportOpen(true); }}>
+ Import Harga Server
+          </Button>
+          <Button variant="secondary" onClick={() => { setMenuOpen(false); setLogOpen(true); }}>
+ Log Perubahan Harga
+          </Button>
+          <Button variant="secondary" onClick={() => { setMenuOpen(false); reloadAll(); }}>
+ Muat Ulang
+          </Button>
+          <div className="flex justify-end" style={{ marginTop: 'var(--space-2)' }}>
+            <Button variant="secondary" onClick={() => setMenuOpen(false)}>Tutup</Button>
+          </div>
+        </div>
+      </Modal>
 
       {/* Import Modal */}
       <Modal open={importOpen} onClose={() => setImportOpen(false)} title="Import Harga Server">
@@ -453,8 +574,7 @@ function LogHarga() {
   );
 }
 
-function LinkForm({ target, onCancel, onSaved }) {
-  const toast = useToast();
+function LinkForm({ target, onCancel, onSaved }) {  const toast = useToast();
   const [q, setQ] = useState('');
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
@@ -522,4 +642,12 @@ function LinkForm({ target, onCancel, onSaved }) {
       </div>
     </div>
   );
+}
+
+function statusLabel(status) {
+  return { naik: 'Naik', turun: 'Turun', baru: 'Baru' }[status] || 'OK';
+}
+
+function statusTone(status) {
+  return { naik: 'warn', turun: 'muted', baru: 'muted' }[status] || 'accent';
 }

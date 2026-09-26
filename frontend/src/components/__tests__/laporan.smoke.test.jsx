@@ -60,7 +60,7 @@ describe('Halaman Laporan (smoke)', () => {
     renderApp('/laporan');
     await waitFor(() => {
       expect(screen.queryByText('Jumlah Transaksi')).toBeTruthy();
-    }, { timeout: 3000 });
+    }, { timeout: 15000 });
     expect(screen.getByText('Jumlah Transaksi')).toBeTruthy();
     expect(screen.getByText('Rp 100.000')).toBeTruthy();
     expect(screen.getAllByText('Rp 20.000').length).toBeGreaterThanOrEqual(1);

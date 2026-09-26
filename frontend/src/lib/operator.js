@@ -5,6 +5,7 @@
 const NAME_BRANDS = [
   { re: /\bindosat\b|\bisat\b/, name: 'Indosat' },
   { re: /\btelkomsel\b|\btsel\b/, name: 'Telkomsel' },
+  { re: /\blyca\b/, name: 'Lyca' },
   { re: /\bsmartfren\b|\bsmart\b|\bsm\b/, name: 'Smartfren' },
   { re: /\bthree\b|\btri\b/, name: 'Three' },
   { re: /\bxl\b/, name: 'XL' },
@@ -31,6 +32,15 @@ export function operatorOf(kode, nama, kategoriNama = '') {
     if (k.startsWith('VX')) return 'XL';
     if (k.startsWith('VI')) return 'Indosat';
     if (k.startsWith('VA')) return 'Axis';
+    if (k.startsWith('LA')) return 'Lyca';
   }
   return brandDariNama(nama);
+}
+
+// Prefix kode voucher untuk label grup (mis. "vi", "va", "la", "vsm").
+export function kodePrefixOf(kode, kategoriNama = '') {
+  const k = String(kode || '').toUpperCase();
+  if (!/voucher/i.test(String(kategoriNama))) return '';
+  if (k.startsWith('VSM')) return 'vsm';
+  return k.slice(0, 2).toLowerCase();
 }

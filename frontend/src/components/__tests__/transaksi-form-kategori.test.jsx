@@ -52,10 +52,12 @@ describe('TransaksiForm — Filter Kategori & keranjang', () => {
     setJenisPenjualan();
     const filter = await screen.findByLabelText('Filter Kategori');
     expect(filter).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'Semua kategori' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'Tanpa kategori' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'Fisik' })).toBeTruthy();
-    expect(screen.getByRole('option', { name: 'Digital (non-stok)' })).toBeTruthy();
+    // Opsi berasal dari GET /kategori (async) — pakai findByRole agar menunggu
+    // render selesai, bukan getByRole yang bisa gagal saat perangkat lambat.
+    expect(await screen.findByRole('option', { name: 'Semua kategori' })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'Tanpa kategori' })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'Fisik' })).toBeTruthy();
+    expect(await screen.findByRole('option', { name: 'Digital (non-stok)' })).toBeTruthy();
     expect(getMock).toHaveBeenCalledWith('/kategori');
   });
 

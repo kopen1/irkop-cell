@@ -34,8 +34,11 @@ describe('resolveByPath', () => {
 });
 
 describe('MAIN_NAV_MOBILE', () => {
-  it('hanya berisi 4 menu utama (PRD 4)', () => {
-    expect(MAIN_NAV_MOBILE.map((n) => n.key)).toEqual(['dashboard', 'transaksi', 'kasir', 'laporan']);
+  it('hanya berisi 4 menu utama, Laporan diganti Daftar Barang', () => {
+    expect(MAIN_NAV_MOBILE.map((n) => n.key)).toEqual(['dashboard', 'transaksi', 'kasir', 'daftar_barang']);
+  });
+  it('label mobile Daftar Barang disingkat jadi "Barang"', () => {
+    expect(MAIN_NAV_MOBILE.find((n) => n.key === 'daftar_barang')?.label).toBe('Barang');
   });
 });
 

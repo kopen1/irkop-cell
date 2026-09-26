@@ -90,6 +90,19 @@ export async function listProduk(db, request, ctx) {
   return { items: rows };
 }
 
+export async function getProduk(db, request, ctx, idStr) {
+  const id = parseInt(idStr);
+  if (!id) throw err(400, 'invalid_value', 'ID tidak valid');
+  const row = await db.one(
+    `SELECT p.*, k.nama AS kategori_nama, k.lacak_stok AS kategori_lacak_stok
+       FROM produk p LEFT JOIN kategori_produk k ON k.id = p.kategori_id
+      WHERE p.id = ? AND p.deleted_at IS NULL`,
+    id
+  );
+  if (!row) throw err(404, 'not_found', 'Produk tidak ditemukan');
+  return { item: row };
+}
+
 export async function createProduk(db, request, ctx) {
   const { user } = ctx.auth;
   const body = await readBody(request);

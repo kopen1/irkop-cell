@@ -3,58 +3,48 @@
 // - Kategori: GET/POST/PUT/DELETE /api/kategori/:id (CRUD lengkap).
 // - Kategori non-stok (lacak_stok=0) → produk tidak punya field stok (PRD 5.5).
 // - stok_minimum → alert stok <= ambang.
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { useAsync } from '../hooks/useAsync';
-import { useDebounce } from '../hooks/useDebounce';
-import { formatRupiah, formatRupiahInput, parseRupiah, todayWIB } from '../lib/format';
+import { useProdukCache, invalidateProdukCache } from '../hooks/useProdukCache';
+import { formatRupiah, todayWIB } from '../lib/format';
 import { buildCsv, parseCsv, rowsToObjects, CSV_HEADERS } from '../lib/csv';
-import { operatorOf } from '../lib/operator';
-import { kategoriColor } from '../lib/kategoriColor';
+import { operatorOf, kodePrefixOf } from '../lib/operator';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
 import { Modal, ConfirmDialog } from '../components/ui/Modal';
-import { Table } from '../components/ui/Table';
 import { Loader, ErrorState, EmptyState } from '../components/ui/States';
 import { Badge } from '../components/ui/Badge';
 import { Icon } from '../components/ui/Icon';
 
-const LIMIT = 100;
+const SORT_OPTIONS = [
+  { value: 'harga_asc', label: 'Harga jual: termurah' },
+  { value: 'harga_desc', label: 'Harga jual: termahal' },
+  { value: 'laba_desc', label: 'Laba: terbesar' },
+  { value: 'stok_asc', label: 'Stok: tersedikit' },
+  { value: 'nama', label: 'Nama (A-Z)' },
+];
 
 export default function DaftarBarangPage() {
   const { can } = useAuth();
   const toast = useToast();
+  const navigate = useNavigate();
   const [q, setQ] = useState('');
   const [filterKategori, setFilterKategori] = useState('');
-  const debouncedQ = useDebounce(q, 300);
 
-  const kategori = useAsync(() => api.get('/kategori'), { deps: [] });
-  const [state, setState] = useState({ status: 'idle', data: null, error: null });
+  // Data produk + kategori di-cache modul (hooks/useProdukCache.js): pindah
+  // halaman bolak-balik tidak memicu request ulang. Pencarian & filter
+  // dijalankan di sisi klien karena backend mengirim seluruh katalog.
+  const { cache, loading, error, reload } = useProdukCache();
+  const load = useCallback(async () => {
+    invalidateProdukCache();
+    return reload();
+  }, [reload]);
 
-  const load = useMemo(
-    () => async () => {
-      setState((s) => ({ ...s, status: 'loading' }));
-      try {
-        const data = await api.get('/produk', { q: debouncedQ, kategori_id: filterKategori || undefined, limit: LIMIT });
-        setState({ status: 'success', data, error: null });
-      } catch (err) {
-        setState({ status: 'error', data: null, error: err });
-        throw err;
-      }
-    },
-    [debouncedQ, filterKategori]
-  );
-
-  useEffect(() => {
-    load().catch(() => {});
-  }, [load]);
-
-  const [createOpen, setCreateOpen] = useState(false);
   const [scanBusy, setScanBusy] = useState(false);
-  const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
@@ -67,42 +57,71 @@ export default function DaftarBarangPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [sort, setSort] = useState('harga_asc');
+  const [selectMode, setSelectMode] = useState(false);
 
-  const data = state.data || {};
-  const rows = (data.items || []).map((p) => ({ ...p, key: p.id }));
-  const kategoriList = kategori.data?.items || [];
+  const kategoriList = cache?.kategori || [];
+  const rows = useMemo(() => {
+    const needle = q.trim().toLowerCase();
+    const kat = filterKategori ? Number(filterKategori) : null;
+    return (cache?.items || [])
+      .filter((p) => {
+        if (kat && p.kategori_id !== kat) return false;
+        if (!needle) return true;
+        return (
+          String(p.nama || '').toLowerCase().includes(needle) ||
+          String(p.kode || '').toLowerCase().includes(needle)
+        );
+      })
+      .map((p) => ({ ...p, key: p.id }));
+  }, [cache, q, filterKategori]);
   const kategoriById = useMemo(
-    () => Object.fromEntries((kategori.data?.items || []).map((k) => [k.id, k])),
-    [kategori.data]
+    () => Object.fromEntries((cache?.kategori || []).map((k) => [k.id, k])),
+    [cache]
   );
-  const lowStock = rows.filter((p) => p.lacak_stok !== 0 && p.stok_minimum > 0 && p.stok <= p.stok_minimum);
+  const lowStock = rows.filter((p) => p.kategori_lacak_stok !== 0 && p.stok_minimum > 0 && p.stok <= p.stok_minimum);
 
   // Grouping tampilan: per Kategori · Operator, urut harga termurah.
-  const displayRows = useMemo(() => {
-    const groupLabel = (r) => {
-      const k = kategoriById[r.kategori_id]?.nama || 'Tanpa Kategori';
-      const b = operatorOf(r.kode, r.nama, k);
-      return b ? `${k} · ${b}` : k;
-    };
-    const sorted = [...rows].sort((a, b) => {
-      const ga = groupLabel(a);
-      const gb = groupLabel(b);
-      if (ga !== gb) return ga.localeCompare(gb);
-      return (Number(a.harga) || 0) - (Number(b.harga) || 0);
-    });
+
+  // List mobile dikelompokkan dua tingkat: Kategori -> sub-grup operator/kode
+  // (pada Voucher: vi, va, la, vsm, ...). Urutan pilihan dipakai DI DALAM tiap grup.
+  const groupedRows = useMemo(() => {
+    const cmp = comparatorFor(sort);
+    const katOrder = new Map(kategoriList.map((k, i) => [k.nama, i]));
+    const tree = new Map();
+    for (const r of rows) {
+      const kat = kategoriById[r.kategori_id]?.nama || 'Tanpa Kategori';
+      const sub = operatorOf(r.kode, r.nama, kat) || 'Lainnya';
+      if (!tree.has(kat)) tree.set(kat, new Map());
+      const subs = tree.get(kat);
+      if (!subs.has(sub)) subs.set(sub, { list: [], prefixes: new Map() });
+      const bucket = subs.get(sub);
+      bucket.list.push(r);
+      const pfx = kodePrefixOf(r.kode, kat);
+      if (pfx) bucket.prefixes.set(pfx, (bucket.prefixes.get(pfx) || 0) + 1);
+    }
+    const cats = [...tree.keys()].sort(
+      (a, b) => (katOrder.get(a) ?? 999) - (katOrder.get(b) ?? 999) || a.localeCompare(b, 'id')
+    );
+    const hargaMin = (list) => list.reduce((min, r) => Math.min(min, Number(r.harga) || 0), Infinity);
     const out = [];
-    let last = null;
-    for (const r of sorted) {
-      const g = groupLabel(r);
-      if (g !== last) {
-        out.push({ _group: g, key: `group:${g}` });
-        last = g;
+    for (const kat of cats) {
+      out.push({ _kat: kat, key: `kat:${kat}` });
+      const subs = [...tree.get(kat).entries()].map(([sub, bucket]) => {
+        bucket.list.sort(cmp);
+        return [sub, bucket];
+      });
+      subs.sort((a, b) => hargaMin(a[1].list) - hargaMin(b[1].list));
+      for (const [sub, bucket] of subs) {
+        const top = [...bucket.prefixes.entries()].sort((x, y) => y[1] - x[1])[0];
+        out.push({ _sub: sub, _prefix: top ? top[0] : '', key: `sub:${kat}:${sub}` });
+        for (const r of bucket.list) out.push(r);
       }
-      out.push(r);
     }
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rows, kategoriById]);
+  }, [rows, kategoriById, kategoriList, sort]);
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
@@ -111,14 +130,6 @@ export default function DaftarBarangPage() {
       else next.add(id);
       return next;
     });
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedIds.size === rows.length) {
-      setSelectedIds(new Set());
-    } else {
-      setSelectedIds(new Set(rows.map((r) => r.id)));
-    }
   };
 
   const handleBulkDelete = async () => {
@@ -167,11 +178,10 @@ export default function DaftarBarangPage() {
 
   const handleExport = async () => {
     try {
-      const dataFull = await api.get('/produk');
-      const items = (dataFull.items || []).filter((p) => !p.deleted_at);
+      const items = (cache?.items || []).filter((p) => !p.deleted_at);
       const csvRows = items.map((p) => {
         const kategoriNama = p.kategori_nama || kategoriById[p.kategori_id]?.nama || '';
-        const nonStok = p.lacak_stok === 0;
+        const nonStok = p.kategori_lacak_stok === 0;
         return {
           kode: p.kode,
           nama: p.nama,
@@ -226,8 +236,7 @@ export default function DaftarBarangPage() {
         return;
       }
 
-      const catalog = await api.get('/produk');
-      const existingKode = new Set((catalog.items || []).map((p) => String(p.kode).toLowerCase()));
+      const existingKode = new Set((cache?.items || []).map((p) => String(p.kode).toLowerCase()));
       const kategoriByName = new Map(kategoriList.map((k) => [k.nama.toLowerCase(), k]));
 
       const issues = [];
@@ -301,7 +310,7 @@ export default function DaftarBarangPage() {
         subtitle="Kelola produk & kategori. Kategori non-stok (pulsa/saldo digital) tidak menampilkan field stok."
         actions={
           can('daftar_barang') && (
-            <>
+            <div className="page-actions-desktop desktop-only">
               <Button variant="secondary" onClick={() => setKategoriOpen(true)}>
                 <Icon name="plus" size={16} /> Tambah Kategori
               </Button>
@@ -314,10 +323,10 @@ export default function DaftarBarangPage() {
               <Button variant="secondary" onClick={handleScan} loading={scanBusy}>
                 <Icon name="refresh" size={16} /> Scan Produk
               </Button>
-              <Button onClick={() => { setEditItem(null); setCreateOpen(true); }}>
+              <Button onClick={() => navigate('/daftar-barang/tambah')}>
                 <Icon name="plus" size={16} /> Tambah Produk
               </Button>
-            </>
+            </div>
           )
         }
       />
@@ -330,23 +339,33 @@ export default function DaftarBarangPage() {
         </div>
       )}
 
-      <div className="filter-bar">
-        <Field label="Cari produk (kode / nama)">
-          <Input type="search" value={q} placeholder="Ketik kode atau nama…" onChange={(e) => setQ(e.target.value)} />
-        </Field>
-        <Field label="Filter Kategori">
-          <Select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)}>
+      <div className="plist-search">
+        <button type="button" className="plist-filter-btn mobile-only" onClick={() => setFilterOpen(true)} aria-label="Filter dan urutkan produk">
+          <Icon name="sort" size={22} />
+        </button>
+        <div className="plist-search-box">
+          <Icon name="search" size={18} />
+          <input
+            type="search"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            placeholder="Cari nama atau kode barang"
+            aria-label="Cari nama atau kode barang"
+          />
+        </div>
+        <div className="desktop-only" style={{ flex: '0 0 230px' }}>
+          <Select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)} aria-label="Filter kategori">
             <option value="">Semua kategori</option>
             {kategoriList.filter((k) => !k.deleted_at).map((k) => (
               <option key={k.id} value={k.id}>{k.nama}{!k.lacak_stok ? ' (non-stok)' : ''}</option>
             ))}
           </Select>
-        </Field>
+        </div>
       </div>
 
-      {state.status === 'error' ? (
-        <ErrorState error={state.error} onRetry={() => load().catch(() => {})} />
-      ) : state.status === 'loading' && !data.items ? (
+      {error ? (
+        <ErrorState error={error} onRetry={() => load().catch(() => {})} />
+      ) : loading ? (
         <Loader />
       ) : rows.length === 0 ? (
         <EmptyState title="Belum ada produk" description="Tambahkan produk pertama untuk mulai menjual." icon="barang" />
@@ -354,7 +373,7 @@ export default function DaftarBarangPage() {
         <>
           {/* Bulk Actions Bar */}
           {selectedIds.size > 0 && (
-            <div className="flex items-center gap-3 mb-3" style={{ padding: 'var(--space-3) var(--space-4)', background: 'var(--primary-soft)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--primary)' }}>
+            <div className="flex items-center gap-3 mb-3" style={{ padding: 'var(--space-3) var(--space-4)', background: 'var(--accent-soft)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--accent-border)' }}>
               <span className="text-sm font-bold">{selectedIds.size} produk dipilih</span>
               <span className="text-sm text-muted">|</span>
               <Button variant="ghost" size="sm" onClick={handleBulkExport}>
@@ -369,92 +388,140 @@ export default function DaftarBarangPage() {
             </div>
           )}
 
-          <Table
-            columns={[
-              {
-                key: 'select',
-                header: (
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.size === rows.length && rows.length > 0}
-                    onChange={toggleSelectAll}
-                    style={{ cursor: 'pointer' }}
-                  />
-                ),
-                render: (r) => (
-                  <input
-                    type="checkbox"
-                    checked={selectedIds.has(r.id)}
-                    onChange={() => toggleSelect(r.id)}
-                    style={{ cursor: 'pointer' }}
-                  />
-                ),
-              },
-              { key: 'kode', header: 'Kode', render: (r) => <span className="num text-sm">{r.kode}</span> },
-              { key: 'nama', header: 'Nama' },
-              {
-                key: 'kategori_id',
-                header: 'Kategori',
-                render: (r) => {
-                  const k = kategoriById[r.kategori_id];
-                  if (!k) return <span className="text-muted">—</span>;
-                  const c = kategoriColor(k.nama);
-                  return (
-                    <span className="badge" style={{ background: c.bg, color: c.fg, fontWeight: 700 }}>
-                      {k.nama}
-                      {!k.lacak_stok && <span> · non-stok</span>}
+          <div className="plist">
+            {groupedRows.map((r) => {
+              if (r._kat) {
+                return (
+                  <div key={r.key} className="plist-kat">{r._kat}</div>
+                );
+              }
+              if (r._sub) {
+                return (
+                  <div key={r.key} className="plist-sub">
+                    <span>{r._sub}</span>
+                    {r._prefix && <code className="plist-prefix">{r._prefix}*</code>}
+                  </div>
+                );
+              }
+              const tag = stokTag(r);
+              const laba = (Number(r.harga) || 0) - (Number(r.harga_modal) || 0);
+              const labaCls = laba < 0 ? 'text-danger' : laba === 0 ? 'text-warning' : 'text-success';
+              const selected = selectedIds.has(r.id);
+              return (
+                <div
+                  key={r.id}
+                  className="plist-row"
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => {
+                    if (selectMode) toggleSelect(r.id);
+                    else navigate(`/daftar-barang/edit/${r.id}`);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                      e.preventDefault();
+                      e.currentTarget.click();
+                    }
+                  }}
+                >
+                  {selectMode ? (
+                    <span className="plist-check">
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={() => toggleSelect(r.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        aria-label={`Pilih ${r.nama}`}
+                      />
                     </span>
-                  );
-                },
-              },
-              { key: 'harga', header: 'Harga Jual', align: 'right', render: (r) => <span className="num">{formatRupiah(r.harga)}</span> },
-              {
-                key: 'laba',
-                header: 'Laba',
-                align: 'right',
-                render: (r) => {
-                  const laba = (Number(r.harga) || 0) - (Number(r.harga_modal) || 0);
-                  const cls = laba < 0 ? 'text-danger' : laba === 0 ? 'text-warning' : 'text-success';
-                  return <span className={`num ${cls}`}>{formatRupiah(laba)}</span>;
-                },
-              },
-              {
-                key: 'stok',
-                header: 'Stok',
-                align: 'right',
-                render: (r) =>
-                  r.lacak_stok === 0 ? (
-                    <span className="text-muted">—</span>
                   ) : (
-                    <span className={`num ${r.stok_minimum > 0 && r.stok <= r.stok_minimum ? 'text-warning font-bold' : ''}`}>
-                      {r.stok}
-                      {r.stok_minimum > 0 && <span className="text-xs text-muted"> / min {r.stok_minimum}</span>}
-                    </span>
-                  ),
-              },
-              {
-                key: 'aksi',
-                header: '',
-                align: 'right',
-                render: (r) => (
-                <div className="row-actions">
-                  {can('daftar_barang') && (
-                    <>
-                      <Button variant="ghost" size="sm" aria-label={`Edit ${r.nama}`} onClick={(e) => { e.stopPropagation(); setEditItem(r); setCreateOpen(true); }}>
-                        <Icon name="edit" size={15} />
-                      </Button>
-                      <Button variant="ghost" size="sm" aria-label={`Hapus ${r.nama}`} onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
-                        <Icon name="trash" size={15} />
-                      </Button>
-                    </>
+                    <span className="plist-avatar">{initials(r.nama)}</span>
                   )}
+                  <span className="plist-body">
+                    <span className="plist-name">{r.nama}</span>
+                    <span className="plist-kode">{r.kode}</span>
+                  </span>
+                  <span className="plist-side">
+                    <span className="plist-tagline">
+                      <span className={`plist-tag plist-tag-${tag.tone}`}>{tag.label}</span>
+                      <span className={`plist-laba ${labaCls}`}>Laba {formatRupiah(laba)}</span>
+                    </span>
+                    <span className="plist-price">
+                      {r.harga_modal != null && (
+                        <>
+                          <span className="plist-modal">{formatRupiah(r.harga_modal)}</span>
+                          <span> • </span>
+                        </>
+                      )}
+                      <span className="plist-jual">{formatRupiah(r.harga)}</span>
+                    </span>
+                  </span>
+                  <span className="plist-row-actions desktop-only">
+                    <Button variant="ghost" size="sm" aria-label={`Edit ${r.nama}`} onClick={(e) => { e.stopPropagation(); navigate(`/daftar-barang/edit/${r.id}`); }}>
+                      <Icon name="edit" size={15} />
+                    </Button>
+                    <Button variant="ghost" size="sm" aria-label={`Hapus ${r.nama}`} onClick={(e) => { e.stopPropagation(); setDeleteTarget(r); }}>
+                      <Icon name="trash" size={15} />
+                    </Button>
+                  </span>
                 </div>
-              ),
-            },
-          ]}
-          rows={displayRows}
-        />
+              );
+            })}
+          </div>
         </>
+      )}
+
+      {/* Filter & urutan (mobile) */}
+      <Modal open={filterOpen} onClose={() => setFilterOpen(false)} title="Filter & Urutkan">
+        <div className="flex flex-col gap-4">
+          <Field label="Urutkan">
+            <Select value={sort} onChange={(e) => setSort(e.target.value)}>
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </Select>
+          </Field>
+          <Field label="Kategori">
+            <Select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)}>
+              <option value="">Semua kategori</option>
+              {kategoriList.filter((k) => !k.deleted_at).map((k) => (
+                <option key={k.id} value={k.id}>{k.nama}{!k.lacak_stok ? ' (non-stok)' : ''}</option>
+              ))}
+            </Select>
+          </Field>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" checked={selectMode} onChange={(e) => setSelectMode(e.target.checked)} />
+            Mode pilih beberapa (untuk export/hapus massal)
+          </label>
+          {can('daftar_barang') && (
+            <>
+              <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: 0 }} />
+              <div className="flex flex-col gap-2">
+                <Button variant="secondary" onClick={() => { setFilterOpen(false); setKategoriOpen(true); }}>
+                  <Icon name="plus" size={16} /> Tambah Kategori
+                </Button>
+                <Button variant="secondary" onClick={() => { setFilterOpen(false); handleExport(); }}>
+                  <Icon name="download" size={16} /> Export CSV
+                </Button>
+                <Button variant="secondary" onClick={() => { setFilterOpen(false); setImportResult(null); setImportOpen(true); }}>
+                  <Icon name="database" size={16} /> Import CSV
+                </Button>
+                <Button variant="secondary" onClick={() => { setFilterOpen(false); handleScan(); }} loading={scanBusy}>
+                  <Icon name="refresh" size={16} /> Scan Produk
+                </Button>
+              </div>
+            </>
+          )}
+          <div className="flex justify-end">
+            <Button variant="secondary" onClick={() => setFilterOpen(false)}>Selesai</Button>
+        </div>
+      </div>
+      </Modal>
+
+      {can('daftar_barang') && (
+        <button type="button" className="fab mobile-only" onClick={() => navigate('/daftar-barang/tambah')} aria-label="Tambah produk">
+          <Icon name="plus" size={26} />
+        </button>
       )}
 
       {/* Form kategori (CRUD lengkap: GET/POST/PUT/DELETE) */}
@@ -497,7 +564,7 @@ export default function DaftarBarangPage() {
               initial={editKategori}
               onSaved={() => {
                 setEditKategori(null);
-                kategori.run();
+                load().catch(() => {});
                 toast.success('Kategori diperbarui.');
               }}
               onCancel={() => setEditKategori(null)}
@@ -506,27 +573,12 @@ export default function DaftarBarangPage() {
             <KategoriForm
               onSaved={() => {
                 setKategoriOpen(false);
-                kategori.run();
+                load().catch(() => {});
                 toast.success('Kategori ditambahkan.');
               }}
             />
           )}
         </div>
-      </Modal>
-
-      {/* Form produk */}
-      <Modal open={createOpen} onClose={() => { setCreateOpen(false); setEditItem(null); }} title={editItem ? 'Edit Produk' : 'Tambah Produk'} size="lg">
-        <ProductForm
-          initial={editItem}
-          kategoriList={kategoriList}
-          onCancel={() => { setCreateOpen(false); setEditItem(null); }}
-          onSaved={() => {
-            setCreateOpen(false);
-            setEditItem(null);
-            toast.success(editItem ? 'Produk diperbarui.' : 'Produk ditambahkan.');
-            load().catch(() => {});
-          }}
-        />
       </Modal>
 
       {/* Import produk dari CSV */}
@@ -635,7 +687,7 @@ export default function DaftarBarangPage() {
             await api.del(`/kategori/${deleteKategori.id}`);
             setDeleteKategori(null);
             toast.success('Kategori dihapus.');
-            kategori.run();
+            load().catch(() => {});
             load().catch(() => {});
           } catch (err) {
             toast.error(err.message);
@@ -727,119 +779,34 @@ function KategoriEditForm({ initial, onSaved, onCancel }) {
   );
 }
 
-function ProductForm({ initial, kategoriList, onCancel, onSaved }) {
-  const [form, setForm] = useState(() => ({
-    kode: initial?.kode || '',
-    nama: initial?.nama || '',
-    kategori_id: initial?.kategori_id ?? '',
-    harga: initial?.harga != null ? formatRupiahInput(String(initial.harga)) : '',
-    harga_modal: initial?.harga_modal != null ? formatRupiahInput(String(initial.harga_modal)) : '',
-    stok: initial?.stok ?? '',
-    stok_minimum: initial?.stok_minimum ?? '',
-    satuan: initial?.satuan || 'pcs',
-  }));
-  const [error, setError] = useState(null);
-  const [busy, setBusy] = useState(false);
-
-  const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.value }));
-  const setNominal = (k) => (e) => setForm((f) => ({ ...f, [k]: formatRupiahInput(e.target.value) }));
-  const kategori = kategoriList.find((k) => String(k.id) === String(form.kategori_id));
-  const nonStok = Boolean(kategori && !kategori.lacak_stok);
-
-  const submit = async (e) => {
-    e.preventDefault();
-    setError(null);
-    if (!form.kode.trim()) return setError('Kode produk wajib diisi.');
-    if (!form.nama.trim()) return setError('Nama produk wajib diisi.');
-    if (!form.harga || parseRupiah(form.harga) <= 0) return setError('Harga jual wajib diisi (lebih dari 0).');
-
-    const body = {
-      kode: form.kode.trim(),
-      nama: form.nama.trim(),
-      kategori_id: form.kategori_id ? Number(form.kategori_id) : null,
-      harga: parseRupiah(form.harga),
-      harga_modal: form.harga_modal ? parseRupiah(form.harga_modal) : null,
-      satuan: form.satuan || 'pcs',
-      ...(!nonStok
-        ? { stok: Number(form.stok) || 0, stok_minimum: Number(form.stok_minimum) || 0 }
-        : { lacak_stok: 0 }),
-    };
-
-    setBusy(true);
-    try {
-      if (initial?.id) await api.put(`/produk/${initial.id}`, body);
-      else await api.post('/produk', body);
-      onSaved();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const labaForm = (parseRupiah(form.harga) || 0) - (parseRupiah(form.harga_modal) || 0);
-
-  return (
-    <form onSubmit={submit}>
-      <div className="flex flex-col gap-4">
-        <div className="grid-2">
-          <Field label="Kode produk" required>
-            <Input type="text" value={form.kode} onChange={set('kode')} placeholder="mis. PLS-001" />
-          </Field>
-          <Field label="Nama" required>
-            <Input type="text" value={form.nama} onChange={set('nama')} />
-          </Field>
-          <Field label="Kategori">
-            <Select value={form.kategori_id} onChange={set('kategori_id')}>
-              <option value="">Tanpa kategori</option>
-              {kategoriList.map((k) => (
-                <option key={k.id} value={k.id}>{k.nama}{!k.lacak_stok ? ' (non-stok)' : ''}</option>
-              ))}
-            </Select>
-          </Field>
-          <Field label="Satuan">
-            <Input type="text" value={form.satuan} onChange={set('satuan')} />
-          </Field>
-          <Field label="Harga jual (Rp)" required>
-            <Input type="text" inputMode="numeric" value={form.harga} onChange={setNominal('harga')} />
-          </Field>
-          <Field label="Harga modal (Rp, opsional)" hint="Dipakai menghitung laba di Laporan.">
-            <Input type="text" inputMode="numeric" value={form.harga_modal} onChange={setNominal('harga_modal')} />
-          </Field>
-          <Field label="Laba (otomatis)" hint="Harga jual − modal. Tidak disimpan terpisah.">
-            <span className={`num font-bold ${labaForm < 0 ? 'text-danger' : labaForm === 0 ? 'text-warning' : 'text-success'}`}>
-              {formatRupiah(labaForm)}
-            </span>
-          </Field>
-        </div>
-
-        {nonStok ? (
-          <p className="text-sm text-muted">
-            Kategori <strong>{kategori.nama}</strong> tidak melacak stok — field stok disembunyikan (PRD 5.5).
-          </p>
-        ) : (
-          <div className="grid-2">
-            <Field label="Stok">
-              <Input type="number" inputMode="numeric" value={form.stok} onChange={set('stok')} />
-            </Field>
-            <Field label="Stok minimum (alert)" hint="Peringatan saat stok sudah ≤ ambang ini. 0 = tanpa alert.">
-              <Input type="number" inputMode="numeric" value={form.stok_minimum} onChange={set('stok_minimum')} />
-            </Field>
-          </div>
-        )}
-
-        {error && <p className="field-error" role="alert">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button variant="secondary" type="button" onClick={onCancel}>Batal</Button>
-          <Button type="submit" loading={busy}>{initial?.id ? 'Simpan Perubahan' : 'Simpan'}</Button>
-        </div>
-      </div>
-    </form>
-  );
-}
-
 // Angka CSV: terima hanya digit (toleransi pemisah ribuan "1.500" / spasi); non-numerik → null.
 function parseCsvNumber(v) {
   const s = String(v == null ? '' : v).replace(/[^0-9]/g, '');
   return s === '' ? null : Number(s);
+}
+
+// Avatar list mobile: 2 karakter pertama nama (mis. "1,5GB" -> "1,", "10GB" -> "10").
+function initials(nama) {
+  const s = String(nama || '').trim();
+  return (s.slice(0, 2) || '?').toUpperCase();
+}
+
+// Tag di sisi kanan list mobile = stok. Kategori non-stok ditandai "∞".
+function stokTag(p) {
+  if (p.kategori_lacak_stok === 0) return { label: '∞', tone: 'muted' };
+  const stok = Number(p.stok) || 0;
+  const min = Number(p.stok_minimum) || 0;
+  if (min > 0 && stok <= min) return { label: `Stok ${stok}`, tone: 'warn' };
+  return { label: `Stok ${stok}`, tone: 'accent' };
+}
+
+// Pembanding urut di dalam tiap grup.
+function comparatorFor(sort) {
+  const harga = (r) => Number(r.harga) || 0;
+  const laba = (r) => harga(r) - (Number(r.harga_modal) || 0);
+  if (sort === 'harga_asc') return (a, b) => harga(a) - harga(b);
+  if (sort === 'harga_desc') return (a, b) => harga(b) - harga(a);
+  if (sort === 'laba_desc') return (a, b) => laba(b) - laba(a);
+  if (sort === 'stok_asc') return (a, b) => (Number(a.stok) || 0) - (Number(b.stok) || 0);
+  return (a, b) => String(a.nama || '').localeCompare(String(b.nama || ''), 'id');
 }

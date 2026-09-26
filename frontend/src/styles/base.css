@@ -109,7 +109,7 @@ a {
 ::-webkit-scrollbar-track { background: transparent; }
 
 @media (max-width: 767px) {
-  html { font-size: 100%; } /* mobile base — beda dari desktop */
+ html { font-size: 100%; } /* mobile base — beda dari desktop */
   .grid-2, .grid-3 { grid-template-columns: minmax(0, 1fr); }
   .grid-2 > *, .grid-3 > * { min-width: 0; }
 }
