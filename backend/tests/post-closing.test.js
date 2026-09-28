@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupEnv, call, login, createUserRaw, createKategoriRaw, createProdukRaw } from './helpers.js';
+import { setupEnv, call, login, createUserRaw, setPermission, createKategoriRaw, createProdukRaw } from './helpers.js';
 
 function wibNow() { return new Date(new Date().getTime() + 7 * 3600 * 1000); }
 function currentBulan() {
@@ -115,4 +115,56 @@ test('Export CSV memuat baris BELI_STOK & TRANSFER_SALDO', async () => {
   const text = await res.text();
   assert.match(text, /BELI_STOK/);
   assert.match(text, /TRANSFER_SALDO/);
+});
+
+test('kasir/reopen: karyawan DITOLAK (admin only)', async () => {
+  const { env } = await bootstrap();
+  const idKar = await createUserRaw(env, { nama: 'Kar', username: 'kar', password: 'kar12345', role: 'karyawan' });
+  await setPermission(env, idKar, 'kasir');
+  const tokenKar = await login(env, 'kar', 'kar12345');
+
+  const r = await call(env, '/api/kasir/reopen', { method: 'POST', token: tokenKar, body: {} });
+  assert.equal(r.status, 403, `harus 403, dapat ${r.status}: ${JSON.stringify(r.data)}`);
+  assert.equal(r.data?.error?.code, 'forbidden');
+});
+
+test('kasir/reopen: karyawan DITOLAK walau body menyertakan tanggal lampau', async () => {
+  const { env } = await bootstrap();
+  const idKar = await createUserRaw(env, { nama: 'Kar', username: 'kar', password: 'kar12345', role: 'karyawan' });
+  await setPermission(env, idKar, 'kasir');
+  const tokenKar = await login(env, 'kar', 'kar12345');
+
+  const r = await call(env, '/api/kasir/reopen', { method: 'POST', token: tokenKar, body: { tanggal: '2026-09-20' } });
+  assert.equal(r.status, 403, 'harus 403 walau body punya tanggal');
+});
+
+test('kasir/reopen: admin bisa buka ulang sesi lampau lewat { tanggal }', async () => {
+  const { env, token } = await bootstrap();
+  const day = '2026-09-20';
+
+  // Buat sesi pada tanggal lampau lalu tutup.
+  const idSesi = await env.DB.prepare(
+    `INSERT INTO kasir_sesi (tanggal, status, dibuka_oleh, dibuka_at, ditutup_at, ditutup_oleh)
+     VALUES (?, 'tutup', 1, ?, ?, 1)`
+  ).bind(day, new Date().toISOString(), new Date().toISOString()).run();
+  await env.DB.prepare(
+    `INSERT INTO kasir_saldo (kasir_sesi_id, nama_akun, tipe, saldo_sistem, saldo_real)
+     VALUES (?, 'Tunai Laci', 'closing', 500000, 500000)`
+  ).bind(idSesi.meta.last_row_id).run();
+
+  const sebelum = await call(env, '/api/kasir/current?tanggal=' + day, { token });
+  assert.equal(sebelum.data.status, 'tutup');
+
+  const r = await call(env, '/api/kasir/reopen', { method: 'POST', token, body: { tanggal: day } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.tanggal, day);
+  assert.equal(r.data.status, 'buka');
+
+  // Closing lama dihapus, sesi kembali bisa dipakai.
+  const sesudah = await call(env, '/api/kasir/current?tanggal=' + day, { token });
+  assert.equal(sesudah.data.status, 'buka');
+  const closing = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM kasir_saldo WHERE kasir_sesi_id = ? AND tipe = 'closing'`
+  ).bind(idSesi.meta.last_row_id).first();
+  assert.equal(Number(closing.n), 0, 'closing lama harus terhapus');
 });

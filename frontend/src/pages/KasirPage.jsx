@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { useAsync } from '../hooks/useAsync';
 import { todayWIB, formatRupiah, formatDateTime, formatSignedRupiah, formatRupiahInput, parseRupiah } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -17,6 +18,8 @@ import { Icon } from '../components/ui/Icon';
 
 export default function KasirPage() {
   const toast = useToast();
+  const { user } = useAuth();
+  const isAdmin = user?.role === 'admin';
   const [date] = useState(todayWIB());
 
   const sesi = useAsync(() => api.get('/kasir/current'), { deps: [] });
@@ -37,6 +40,8 @@ export default function KasirPage() {
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState(null);
   const [reopenBusy, setReopenBusy] = useState(false);
+  const [reopenTgl, setReopenTgl] = useState('');
+  const [reopenLampauBusy, setReopenLampauBusy] = useState(false);
 
   useEffect(() => {
     if (sesi.status === 'error') return;
@@ -169,6 +174,31 @@ export default function KasirPage() {
     }
   };
 
+  // Buka ulang sesi kasir tanggal lampau (admin). Backend menerima { tanggal }.
+  const doReopenLampau = async () => {
+    const tgl = reopenTgl;
+    if (!tgl) {
+      toast.error('Pilih tanggal sesi yang mau dibuka ulang.');
+      return;
+    }
+    setReopenLampauBusy(true);
+    try {
+      const info = await api.get('/kasir/current', { tanggal: tgl });
+      if (!info?.kasir_sesi_id) throw new Error(`Tidak ada sesi kasir pada ${tgl}.`);
+      if (info.status === 'buka') throw new Error(`Sesi ${tgl} masih berstatus buka — tidak perlu dibuka ulang.`);
+      if (!window.confirm(`Buka ulang sesi kasir ${tgl}? Hasil closing lama akan dihapus, sehingga sesi bisa dipakai untuk edit transaksi pada tanggal tersebut.`)) return;
+      await api.post('/kasir/reopen', { tanggal: tgl });
+      toast.success(`Sesi kasir ${tgl} dibuka ulang.`);
+      setReopenTgl('');
+      sesi.run();
+      reminder.run();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setReopenLampauBusy(false);
+    }
+  };
+
   const saveEdit = async () => {
     if (!editSesi?.kasir_sesi_id) return;
     setEditErr(null);
@@ -239,6 +269,24 @@ export default function KasirPage() {
                 </div>
               )}
             </div>
+          </div>
+        </Card>
+      )}
+
+      {isAdmin && (
+        <Card className="mb-4" title="Buka Ulang Sesi Lampau (Admin)">
+          <p className="field-hint mb-2">
+            Dipakai saat perlu mengoreksi transaksi pada tanggal yang sesinya sudah ditutup. Sesi yang dibuka ulang
+            akan menghapus hasil closing lama, jadi setelah selesai edit transaksi lamanya, tutup kembali
+            sesinya di halaman ini.
+          </p>
+          <div className="flex items-end gap-2">
+            <Field label="Tanggal Sesi" style={{ flex: 1 }}>
+              <Input type="date" value={reopenTgl} max={date} onChange={(e) => setReopenTgl(e.target.value)} />
+            </Field>
+            <Button variant="secondary" onClick={doReopenLampau} loading={reopenLampauBusy} disabled={!reopenTgl}>
+              <Icon name="refresh" size={14} /> Buka Ulang
+            </Button>
           </div>
         </Card>
       )}

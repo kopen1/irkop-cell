@@ -54,7 +54,7 @@ export async function requireOpenSession(db, date = wibDateToday()) {
     throw err(409, 'session_not_open', `Kasir belum dibuka pada ${date}`);
   }
   if (sesi.status !== 'buka') {
-    throw err(409, 'session_closed', `Sesi kasir ${date} sudah ditutup — buka ulang sesi itu dari halaman Kasir`);
+    throw err(409, 'session_closed', `Sesi kasir ${date} sudah ditutup — minta admin membuka ulang sesi tersebut dari halaman Kasir`);
   }
   return sesi;
 }

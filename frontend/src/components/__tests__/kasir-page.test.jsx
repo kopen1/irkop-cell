@@ -3,7 +3,7 @@
 // & catatan → POST /kasir/closing dengan kasir_sesi_id (tanpa mutasi baru).
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
-import { render, screen, waitFor, within, fireEvent } from '@testing-library/react';
+import { render, screen, waitFor, within, fireEvent, cleanup } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '../../context/ThemeContext';
 import { ToastProvider } from '../../context/ToastContext';
@@ -60,7 +60,7 @@ describe('Halaman Kasir — Edit sesi lampau (smoke)', () => {
     localStorage.setItem('irkop_cell_token', 'test-token');
     localStorage.setItem('irkop_cell_user', JSON.stringify(user));
   });
-  afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
+  afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 
   it('reminder menampilkan sesi lampau dengan tombol Edit', async () => {
     global.fetch = vi.fn().mockImplementation((url) => {
@@ -122,5 +122,66 @@ describe('Halaman Kasir — Edit sesi lampau (smoke)', () => {
     }, { timeout: 15000 });
     expect(posts[0].kasir_sesi_id).toBe(1);
     expect(posts[0].saldo_real).toEqual([{ nama_akun: 'Tunai Laci', saldo_real: 500000 }]);
+  });
+});
+
+describe('Halaman Kasir — Buka Ulang Sesi Lampau (admin only)', () => {
+  const userKaryawan = { id: 9, username: 'kar', role: 'karyawan', permissions: ['kasir'] };
+
+  function mockFetch(ketuk, calls) {
+    global.fetch = vi.fn().mockImplementation((url, opts) => {
+      const s = String(url);
+      const method = opts?.method || 'GET';
+      if (method === 'POST' && s.includes('/kasir/reopen')) calls.push(JSON.parse(opts.body || '{}'));
+      if (s.includes('/auth/me')) return Promise.resolve(jsonResponse({ user: ketuk }));
+      if (s.includes('/kasir/current')) {
+        if (s.includes('tanggal=2026-08-16')) {
+          return Promise.resolve(jsonResponse({ ...currentPast, status: 'tutup' }));
+        }
+        return Promise.resolve(jsonResponse(currentToday));
+      }
+      if (s.includes('/akun')) return Promise.resolve(jsonResponse(akun));
+      if (s.includes('/kasir/reminder-closing')) return Promise.resolve(jsonResponse(reminder));
+      if (s.includes('/kasir/reopen')) return Promise.resolve(jsonResponse({ ok: true, status: 'buka' }));
+      return Promise.resolve(jsonResponse({ error: { code: 'not_found', message: 'unknown' } }, 404));
+    });
+  }
+
+  beforeEach(() => {
+    localStorage.setItem('irkop_cell_token', 'test-token');
+    window.confirm = vi.fn().mockReturnValue(true);
+  });
+  afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
+
+  it('admin MELIHAT kartu "Buka Ulang Sesi Lampau"', async () => {
+    localStorage.setItem('irkop_cell_user', JSON.stringify(user));
+    mockFetch(user, []);
+    renderApp('/kasir');
+    await waitFor(() => {
+      expect(screen.getByText(/Buka Ulang Sesi Lampau/i)).toBeTruthy();
+    }, { timeout: 8000 });
+  });
+
+  it('karyawan TIDAK melihat kartu itu', async () => {
+    localStorage.setItem('irkop_cell_user', JSON.stringify(userKaryawan));
+    mockFetch(userKaryawan, []);
+    renderApp('/kasir');
+    await waitFor(() => {
+      expect(screen.getByText('Perlu Closing — Ada Sesi Lampau')).toBeTruthy();
+    }, { timeout: 8000 });
+    expect(screen.queryByText(/Buka Ulang Sesi Lampau/i)).toBeNull();
+  });
+
+  it('admin: pilih tanggal lalu Buka Ulang -> POST /kasir/reopen { tanggal }', async () => {
+    localStorage.setItem('irkop_cell_user', JSON.stringify(user));
+    const calls = [];
+    mockFetch(user, calls);
+    renderApp('/kasir');
+    const input = await screen.findByLabelText(/Tanggal Sesi/i, {}, { timeout: 8000 });
+    fireEvent.change(input, { target: { value: '2026-08-16' } });
+    fireEvent.click(screen.getByRole('button', { name: /Buka Ulang/i }));
+    await waitFor(() => {
+      expect(calls).toEqual([{ tanggal: '2026-08-16' }]);
+    }, { timeout: 8000 });
   });
 });
