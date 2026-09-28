@@ -25,6 +25,16 @@ import PaymentForm from '../components/transaksi/PaymentForm';
 
 const LIMIT = 50;
 
+// Label & urutan jenis transaksi untuk pengelompokan list.
+const JENIS_LABEL = {
+  produk: 'Penjualan Produk',
+  produkdigital: 'Produk Digital',
+  service: 'Service HP',
+  tariktunai: 'Tarik Tunai',
+  transfer: 'Transfer',
+};
+const JENIS_ORDER = ['produk', 'produkdigital', 'service', 'tariktunai', 'transfer'];
+
 export default function TransaksiPage() {
   const { can } = useAuth();
   const toast = useToast();
@@ -154,6 +164,40 @@ export default function TransaksiPage() {
   const data = state.data || {};
   const rows = (data.items || []).map((t) => ({ ...t, key: t.id }));
 
+  // Kelompokkan baris per jenis transaksi; tiap header Bringing jumlah transaksi
+  // dan laba kelompoknya (dihitung dari baris yang sedang tampil).
+  const groupedRows = useMemo(() => {
+    const byJenis = new Map();
+    for (const r of rows) {
+      const key = r.jenis || 'produk';
+      if (!byJenis.has(key)) byJenis.set(key, []);
+      byJenis.get(key).push(r);
+    }
+    const rank = (k) => {
+      const i = JENIS_ORDER.indexOf(k);
+      return i === -1 ? JENIS_ORDER.length : i;
+    };
+    const out = [];
+    for (const key of [...byJenis.keys()].sort((a, b) => rank(a) - rank(b))) {
+      const list = byJenis.get(key);
+      const laba = list.reduce((sum, r) => sum + (Number(r.laba) || 0), 0);
+      out.push({
+        _group: (
+          <span className="tx-grup">
+            <b>{JENIS_LABEL[key] || key}</b>
+            <span className="tx-grup-count">{list.length} transaksi</span>
+            <span className={`tx-grup-laba ${laba < 0 ? 'text-danger' : laba === 0 ? 'text-warning' : 'text-success'}`}>
+              Laba {formatRupiah(laba)}
+            </span>
+          </span>
+        ),
+        key: `grup:${key}`,
+      });
+      for (const r of list) out.push({ ...r, key: r.id ?? r.transaksi_id });
+    }
+    return out;
+  }, [rows]);
+
   // Full-page form mode
   if (showForm) {
     return (
@@ -262,6 +306,16 @@ export default function TransaksiPage() {
             <div className="summary-value">{formatRupiah(data.total_nilai || 0)}</div>
           </div>
           <div className="summary-item">
+            <div className="summary-label">Total laba</div>
+            <div
+              className={`summary-value ${
+                (data.total_laba || 0) < 0 ? 'text-danger' : (data.total_laba || 0) === 0 ? 'text-warning' : 'text-success'
+              }`}
+            >
+              {formatRupiah(data.total_laba || 0)}
+            </div>
+          </div>
+          <div className="summary-item">
             <div className="summary-label">Periode</div>
             <div className="summary-value">{mode === 'single' ? (date ? dateDisplay(date) : '-') : `${dateDisplay(dateFrom)} → ${dateDisplay(dateTo)}`}</div>
           </div>
@@ -281,9 +335,21 @@ export default function TransaksiPage() {
         />
       ) : (
         <>
+          <div className="table-fit">
           <Table
             columns={[
-              { key: 'created_at', header: 'Tanggal/Jam (WIB)', render: (r) => <span className="text-sm">{formatDateTime(r.created_at)}</span> },
+              {
+                key: 'created_at',
+                header: 'Tanggal/Jam (WIB)',
+                render: (r) => (
+                  <>
+                    <span className="text-sm">{formatDateTime(r.created_at)}</span>
+                    {r.tanggal_transaksi && r.tanggal_transaksi !== r.created_at?.slice(0, 10) && (
+                      <span className="col-sub">Transaksi: {r.tanggal_transaksi}</span>
+                    )}
+                  </>
+                ),
+              },
               {
                 key: 'items',
                 header: 'Item',
@@ -299,12 +365,24 @@ export default function TransaksiPage() {
                   return <span className="text-sm text-muted">-</span>;
                 },
               },
-              { key: 'konfirmasi_pembayaran', header: 'Status', render: (r) => <KonfirmasiBadge status={r.konfirmasi_pembayaran} /> },
+              { key: 'konfirmasi_pembayaran', header: 'Status', className: 'hide-mobile', render: (r) => <KonfirmasiBadge status={r.konfirmasi_pembayaran} /> },
               { key: 'total', header: 'Total', align: 'right', render: (r) => <span className="num">{formatRupiah(r.total)}</span> },
+              {
+                key: 'laba',
+                header: 'Laba',
+                align: 'right',
+                render: (r) => {
+                  const l = Number(r.laba);
+                  if (!Number.isFinite(l)) return <span className="text-muted">—</span>;
+                  const cls = l < 0 ? 'text-danger' : l === 0 ? 'text-warning' : 'text-success';
+                  return <span className={`num ${cls}`} style={{ fontWeight: 600 }}>{formatRupiah(l)}</span>;
+                },
+              },
             ]}
-            rows={rows}
-            onRowClick={(r) => openDetail(r.id)}
+            rows={groupedRows}
+            onRowClick={(r) => !r._group && openDetail(r.id)}
           />
+          </div>
           <Pagination offset={offset} total={data.total_items || 0} limit={LIMIT} onPage={setOffset} />
         </>
       )}

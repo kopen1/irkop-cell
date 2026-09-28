@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupEnv, call, login, createUserRaw, createKategoriRaw, createProdukRaw } from './helpers.js';
+import { setupEnv, call, login, createUserRaw, createKategoriRaw, createProdukRaw, sisipSesiTanggal } from './helpers.js';
 
 function wibNow() {
   return new Date(new Date().getTime() + 7 * 3600 * 1000);
@@ -29,7 +29,7 @@ function tomorrowWib() {
 
 async function bootstrapManual() {
   const { env } = setupEnv();
-  await createUserRaw(env, { nama: 'Admin', username: 'admin', password: 'admin1234', role: 'admin' });
+  const adminId = await createUserRaw(env, { nama: 'Admin', username: 'admin', password: 'admin1234', role: 'admin' });
   const token = await login(env, 'admin', 'admin1234');
   const k1 = await createKategoriRaw(env, 'Fisik', 1);
   const p1 = await createProdukRaw(env, { kode: 'P-001', nama: 'Toner', kategori_id: k1, harga: 100000, harga_modal: 60000, stok: 50 });
@@ -38,12 +38,13 @@ async function bootstrapManual() {
     body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 500000 }] },
   });
   const pel = await call(env, '/api/pelanggan', { method: 'POST', token, body: { nama: 'Budi' } });
-  return { env, token, p1, pel: pel.data.id };
+  return { env, token, adminId, p1, pel: pel.data.id };
 }
 
 test('Manual transaksi backdate: ID dari tanggal lampau + masuk laporan bulan tsb, bukan bulan sekarang', async () => {
-  const { env, token, p1 } = await bootstrapManual();
+  const { env, token, adminId, p1 } = await bootstrapManual();
   const day = `${prevBulan()}-15`;
+  await sisipSesiTanggal(env, adminId, day, { saldo: 500000 });
   const r = await call(env, '/api/transaksi', {
     method: 'POST', token,
     body: { items: [{ produk_id: p1, qty: 1 }], metode_bayar: 'tunai', manual_entry: true, tanggal_transaksi: day },
@@ -77,8 +78,9 @@ test('Manual transaksi: tanggal_transaksi di masa depan ditolak', async () => {
 });
 
 test('PUT transaksi: pindah tanggal bisnis → ID baru & berpindah bulan laporan', async () => {
-  const { env, token, p1 } = await bootstrapManual();
+  const { env, token, adminId, p1 } = await bootstrapManual();
   const dayOld = `${prevBulan()}-15`;
+  await sisipSesiTanggal(env, adminId, dayOld, { saldo: 500000 });
   const created = await call(env, '/api/transaksi', {
     method: 'POST', token,
     body: { items: [{ produk_id: p1, qty: 2 }], metode_bayar: 'tunai', manual_entry: true, tanggal_transaksi: dayOld },
@@ -99,8 +101,9 @@ test('PUT transaksi: pindah tanggal bisnis → ID baru & berpindah bulan laporan
 });
 
 test('Kasbon dari transaksi manual backdate: tanggal ikut tanggal_transaksi', async () => {
-  const { env, token, p1, pel } = await bootstrapManual();
+  const { env, token, adminId, p1, pel } = await bootstrapManual();
   const day = `${prevBulan()}-20`;
+  await sisipSesiTanggal(env, adminId, day, { saldo: 500000 });
   const r = await call(env, '/api/transaksi', {
     method: 'POST', token,
     body: { items: [{ produk_id: p1, qty: 1 }], metode_bayar: 'bon', pelanggan_id: pel, manual_entry: true, tanggal_transaksi: day },

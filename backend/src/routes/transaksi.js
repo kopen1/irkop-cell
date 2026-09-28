@@ -533,9 +533,11 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
 
   // Admin fee: gunakan dari body jika diisi manual, jika tidak hitung dari tarif_admin
   const admin = (body.admin != null && Number(body.admin) >= 0) ? Number(body.admin) : await hitungAdmin(db, mitra, nominal);
-  const sesi = await requireOpenSession(db);
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
+  // Sesi kasir ditentukan dari tanggal transaksi, bukan hari ini: mutasi harus
+  // masuk ke buku kasir tanggal itu.
   const tanggalTx = resolveTanggalTransaksi(body);
+  const sesi = await requireOpenSession(db, tanggalTx);
   const kode = await generateTransaksiKode(db, tanggalTx);
   const now = nowIso();
   const total = jenis === 'transfer' ? nominal + admin : nominal;
@@ -634,7 +636,9 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     }
   }
 
-  const sesi = await requireOpenSession(db);
+  // Sesi kasir mengikuti tanggal transaksi (bukan hari ini) supaya mutasi
+  // masuk ke buku kasir tanggal tersebut.
+  const sesi = await requireOpenSession(db, resolveTanggalTransaksi(body));
 
   // Service HP: create service_hp record lalu masukkan sebagai item
   let servicePartEntries = [];
@@ -706,9 +710,14 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     total = subtotal;
   }
 
-  // Produk Digital: laba = admin_fee dari body
+  // Produk Digital: laba = admin_fee dari body.
+  // admin_fee bersifat per-unit (FE = harga_jual - modal), jadi dikali total qty
+  // agar konsisten dengan total dan potong modal yang sama-sama ikut qty.
   if (body.admin_fee != null && body.admin_fee !== '') {
     laba = Number(body.admin_fee);
+    if (jenis === 'produkdigital') {
+      laba *= itemRows.reduce((s, it) => s + (Number(it.qty) || 0), 0);
+    }
   }
 
   // Produk Digital: potong modal dari akun sumber
@@ -897,7 +906,8 @@ export async function softDeleteTransaksi(db, body, ctx, idStr) {
   if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
 
   const reason = body.deleted_reason || 'manual soft-delete';
-  const sesi = await requireOpenSession(db);
+  // Reversal harus masuk ke sesi tanggal transaksi, bukan sesi hari ini.
+  const sesi = await requireOpenSession(db, tx.tanggal_transaksi);
   const actionKey = ctx.idempotencyKey || `del-${tx.id}-${Date.now()}`;
 
   const reversalResult = await reverseFullSource(db, {
@@ -936,7 +946,13 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   if (!Array.isArray(body.items) || body.items.length === 0) {
     throw err(400, 'missing_field', 'items wajib diisi minimal 1 produk');
   }
-  const sesi = await requireOpenSession(db);
+  // Tanggal target: body mengubah tanggal, atau sama dengan tanggal aslinya.
+  const tanggalTarget = body.tanggal_transaksi !== undefined && body.tanggal_transaksi !== tx.tanggal_transaksi
+    ? resolveTanggalTransaksi(body)
+    : tx.tanggal_transaksi;
+  // WAJIB pakai tanggal transaksi: reversal + mutasi baru harus masuk ke sesi
+  // tanggal itu, bukan sesi hari ini.
+  const sesi = await requireOpenSession(db, tanggalTarget);
   const actionKey = ctx.idempotencyKey || `upd-${tx.id}-${Date.now()}`;
 
   const produkMap = await loadProducts(db, body.items);

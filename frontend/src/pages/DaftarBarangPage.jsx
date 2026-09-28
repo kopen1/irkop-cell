@@ -83,6 +83,33 @@ export default function DaftarBarangPage() {
   );
   const lowStock = rows.filter((p) => p.kategori_lacak_stok !== 0 && p.stok_minimum > 0 && p.stok <= p.stok_minimum);
 
+  // Ringkasan mengikuti produk yang sedang tampil (mengikuti pencarian & filter).
+  // Nilai dihitung dari stok fisik: kategori non-stok (pulsa/saldo) tidak ada barangnya.
+  const rekap = useMemo(() => {
+    let unit = 0, modal = 0, jual = 0;
+    let produkStok = 0, produkStokNol = 0, produkNonStok = 0;
+    // Diagnostik: produk berstok tanpa harga modal membuat laba terlihat overstated.
+    let tanpaModal = 0, jualTanpaModal = 0;
+    for (const p of rows) {
+      if (p.kategori_lacak_stok === 0) { produkNonStok += 1; continue; }
+      const qty = Number(p.stok) || 0;
+      const h = Number(p.harga) || 0;
+      const hm = Number(p.harga_modal) || 0;
+      unit += qty;
+      modal += qty * hm;
+      jual += qty * h;
+      if (qty > 0) {
+        produkStok += 1;
+        if (!hm) { tanpaModal += 1; jualTanpaModal += qty * h; }
+      } else produkStokNol += 1;
+    }
+    return {
+      unit, modal, jual, laba: jual - modal,
+      produkStok, produkStokNol, produkNonStok, total: rows.length,
+      tanpaModal, jualTanpaModal,
+    };
+  }, [rows]);
+
   // Grouping tampilan: per Kategori · Operator, urut harga termurah.
 
   // List mobile dikelompokkan dua tingkat: Kategori -> sub-grup operator/kode
@@ -339,6 +366,61 @@ export default function DaftarBarangPage() {
           <span className="text-sm">{lowStock.length} produk pada/bawah stok minimum:</span>
           <strong className="text-sm">{lowStock.slice(0, 3).map((p) => p.nama).join(', ')}{lowStock.length > 3 ? '…' : ''}</strong>
         </div>
+      )}
+
+      {rekap.total > 0 && (
+        <details className="plist-summary">
+          <summary className="plist-summary-head">
+            <span className="plist-summary-top">
+              <b className="num">{rekap.total}</b> produk
+              <span className="plist-summary-dot">·</span>
+              <b className="num">{rekap.unit}</b> unit stok
+              <span className="plist-summary-dot">·</span>
+              Laba <b className={`num ${rekap.laba < 0 ? 'text-danger' : rekap.laba === 0 ? 'text-warning' : 'text-success'}`}>
+                {formatRupiah(rekap.laba)}
+              </b>
+            </span>
+            <span className="plist-summary-toggle">Rincian</span>
+          </summary>
+
+          <div className="plist-summary-body">
+            <div className="plist-summary-pecah">
+              <span><b className="num">{rekap.produkStok}</b> produk ada barangnya</span>
+              {rekap.produkStokNol > 0 && (
+                <>
+                  <span className="plist-summary-dot">·</span>
+                  <span className="text-muted">{rekap.produkStokNol} produk stok 0</span>
+                </>
+              )}
+              {rekap.produkNonStok > 0 && (
+                <>
+                  <span className="plist-summary-dot">·</span>
+                  <span className="text-muted">{rekap.produkNonStok} produk non-stok</span>
+                </>
+              )}
+            </div>
+            <div className="plist-summary-nilai">
+              <span><span className="plist-summary-lbl">Modal</span> <b className="num">{formatRupiah(rekap.modal)}</b></span>
+              <span><span className="plist-summary-lbl">Jual</span> <b className="num">{formatRupiah(rekap.jual)}</b></span>
+              <span>
+                <span className="plist-summary-lbl">Laba</span>{' '}
+                <b className={`num ${rekap.laba < 0 ? 'text-danger' : rekap.laba === 0 ? 'text-warning' : 'text-success'}`}>
+                  {formatRupiah(rekap.laba)}
+                </b>
+              </span>
+            </div>
+            {rekap.tanpaModal > 0 && (
+              <p className="plist-summary-waspada">
+                <Icon name="alert" size={14} />
+                <span>
+                  <b>{rekap.tanpaModal} produk berstok tanpa harga modal</b> (total jual
+                  {' '}{formatRupiah(rekap.jualTanpaModal)}) — laba di atas belum tentu akurat
+                  sampai modalnya diisi.
+                </span>
+              </p>
+            )}
+          </div>
+        </details>
       )}
 
       <div className="plist-search">

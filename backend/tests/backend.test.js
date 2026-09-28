@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { setupEnv, call, login, createUserRaw, setPermission, createKategoriRaw, createProdukRaw } from './helpers.js';
+import { setupEnv, call, login, createUserRaw, setPermission, createKategoriRaw, createProdukRaw, sisipSesiTanggal } from './helpers.js';
 
 async function bootstrap() {
   const { sqliteDb, env } = setupEnv();
@@ -624,8 +624,9 @@ test('R3: update bon 100k -> 50k, nominal kasbon turun', async () => {
 });
 
 test('R3: update tanggal saja -> tanggal kasbon ikut, nominal tetap', async () => {
-  const { env, adminToken, p1 } = await bootstrap();
+  const { env, adminToken, adminId, p1 } = await bootstrap();
   await openKasir(env, adminToken);
+  await sisipSesiTanggal(env, adminId, '2026-08-01', { saldo: 1000000 });
   const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3d' } });
   const r = await createBonTx(env, adminToken, pel.data.id, p1, 1);
   const oldDate = (await getKasbonForTx(env, r.data.id))[0].tanggal;
@@ -640,8 +641,9 @@ test('R3: update tanggal saja -> tanggal kasbon ikut, nominal tetap', async () =
 });
 
 test('R3: update nominal + tanggal -> keduanya sinkron', async () => {
-  const { env, adminToken, p1, k1 } = await bootstrap();
+  const { env, adminToken, adminId, p1, k1 } = await bootstrap();
   await openKasir(env, adminToken);
+  await sisipSesiTanggal(env, adminId, '2026-08-01', { saldo: 1000000 });
   const pel = await call(env, '/api/pelanggan', { method: 'POST', token: adminToken, body: { nama: 'Budi R3e' } });
   const p150 = await createProdukRaw(env, { kode: `P-150-${Date.now()}`, nama: 'Item 150k', kategori_id: k1, harga: 150000 });
   const r = await createBonTx(env, adminToken, pel.data.id, p1, 1); // total 100000

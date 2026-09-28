@@ -59,3 +59,25 @@ export async function createProdukRaw(env, { kode, nama, kategori_id, harga, har
   ).bind(kode, nama, kategori_id, harga, harga_modal, stok, 'pcs', new Date().toISOString()).run();
   return res.meta.last_row_id;
 }
+
+// POST /kasir/opening hanya membuka sesi HARI INI. Test (dan alur reopen) yang
+// memakai transaksi ber tanggal lampau butuh sesi pada tanggal tuannya; sisipkan
+// langsung karena tidak ada endpoint opening untuk tanggal lalu.
+export async function sisipSesiTanggal(env, adminId, tanggal, { status = 'buka', saldo = 0, nama_akun = 'Tunai Laci' } = {}) {
+  const now = new Date().toISOString();
+  const res = await env.DB
+    .prepare(
+      `INSERT INTO kasir_sesi (tanggal, dibuka_oleh, dibuka_at, ditutup_oleh, ditutup_at, status)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    )
+    .bind(tanggal, adminId, now, status === 'tutup' ? adminId : null, status === 'tutup' ? now : null, status)
+    .run();
+  const sesiId = res.meta.lastRowId;
+  if (saldo > 0) {
+    await env.DB
+      .prepare(`INSERT INTO kasir_saldo (kasir_sesi_id, nama_akun, saldo_sistem, tipe) VALUES (?, ?, ?, 'opening')`)
+      .bind(sesiId, nama_akun, saldo)
+      .run();
+  }
+  return sesiId;
+}

@@ -28,6 +28,17 @@ const SUB_JENIS_AKUN_MAP = {
   transfer: 'SeaBank',
 };
 
+// Tebak sub jenis produk digital dari kode/nama, supaya akun sumber ikut terisi
+// otomatis saat produk dipilih (mis. "Dana 10.000" -> sub jenis dana -> akun DANA).
+function tebakSubJenisDigital(p) {
+  const kode = String(p?.kode || '').toLowerCase();
+  const nama = String(p?.nama || '').toLowerCase();
+  const teks = `${kode} ${nama}`;
+  if (/\b(dana|gopay|ovo|shopeepay|linkaja|doku|wallet)\b/.test(teks) || /^d\d/.test(kode)) return 'dana';
+  if (/\b(transfer|seabank|bank)\b/.test(teks) || /\btf\b/.test(teks) || /^b\d/.test(kode)) return 'transfer';
+  return 'pulsa';
+}
+
 const ADMIN_PRESETS = [
   { value: '', label: 'Preset' },
   { value: '0', label: '0' },
@@ -343,6 +354,13 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
     setAdminFeeDigital(String(a > 0 ? a : ''));
     setAdminPresetDigital('');
     setSearchDigital('');
+    // Produk digital: samakan sub jenis & akun sumber dengan produk yang dipilih.
+    if (jenis === 'produkdigital') {
+      const tebakan = tebakSubJenisDigital(p);
+      setSubJenis(tebakan);
+      const akun = SUB_JENIS_AKUN_MAP[tebakan];
+      if (akun && bankAkun.some((a2) => a2.nama_akun === akun)) setAkunBankDigital(akun);
+    }
   };
 
   const hargaJualNum = parseRupiah(hargaJualDigital) || 0;
@@ -378,6 +396,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
   };
 
   const labaDigital = hargaJualNum - modalDigitalNum;
+  const labaDigitalTotal = labaDigital * qtyDigital;
   const totalDigital = hargaJualNum * qtyDigital;
   const saldoDigital = getSaldo(akunBankDigital);
   const saldoAfterDigital = saldoDigital - modalDigitalNum * qtyDigital;
@@ -984,7 +1003,10 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
                 <span className="field-hint">Otomatis terhitung, atau input manual</span>
               </Field>
               <Field label="Laba">
-                <LabaDisplay value={labaDigital} />
+                <LabaDisplay value={labaDigitalTotal} />
+                {qtyDigital > 1 && labaDigital > 0 && (
+                  <span className="text-sm text-muted">{qtyDigital}x {formatRupiah(labaDigital)}</span>
+                )}
               </Field>
             </div>
 

@@ -51,10 +51,10 @@ export async function getSessionById(db, kasirSesiId) {
 export async function requireOpenSession(db, date = wibDateToday()) {
   const sesi = await getTodaySession(db, { date });
   if (!sesi) {
-    throw err(409, 'session_not_open', 'Kasir belum dibuka hari ini');
+    throw err(409, 'session_not_open', `Kasir belum dibuka pada ${date}`);
   }
   if (sesi.status !== 'buka') {
-    throw err(409, 'session_closed', 'Sesi kasir hari ini sudah ditutup');
+    throw err(409, 'session_closed', `Sesi kasir ${date} sudah ditutup — buka ulang sesi itu dari halaman Kasir`);
   }
   return sesi;
 }

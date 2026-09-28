@@ -2,8 +2,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
-import { formatRupiah } from '../lib/format';
-import { operatorOf, kodePrefixOf } from '../lib/operator';
+import { formatRupiah, formatRupiahInput, parseRupiah } from '../lib/format';
+import { operatorOf, kodePrefixOf, kodeLokalDariServer } from '../lib/operator';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { PlistKat, PlistSub } from '../components/ui/PlistGroup';
@@ -11,6 +11,16 @@ import { Field, Input, Select } from '../components/ui/Field';
 import { Modal, ConfirmDialog } from '../components/ui/Modal';
 import { Table } from '../components/ui/Table';
 import { Loader, ErrorState, EmptyState } from '../components/ui/States';
+
+// Peta kategori OrderKuota -> nama kategori produk di Daftar Barang.
+const HS_KAT_NAMA = {
+  cetak_voucher: 'Voucher',
+  pulsa: 'Pulsa',
+  dana: 'DANA',
+  gopay: 'GoPay',
+  ovo: 'OVO',
+  token: 'Token',
+};
 
 const KATEGORI_OPTIONS = [
   { value: '', label: 'Semua Kategori' },
@@ -374,7 +384,13 @@ export default function HargaServerPage() {
  Terapkan
                       </Button>
                     )}
-                    <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); setLinkTarget(r); }} title="Hubungkan ke produk lokal">Link</Button>
+                    {!r.nama_produk_daftar ? (
+                      <Button size="sm" onClick={(e) => { e.stopPropagation(); setLinkTarget(r); }} title="Buat produk baru di Daftar Barang dari data server ini">
+                        Buat
+                      </Button>
+                    ) : (
+                      <Button variant="secondary" size="sm" onClick={(e) => { e.stopPropagation(); setLinkTarget(r); }} title="Ganti produk lokal yang terhubung">Link</Button>
+                    )}
                     <Button variant="ghost" size="sm" aria-label={`Edit ${r.nama_produk}`} onClick={(e) => { e.stopPropagation(); setEditTarget(r); }}>
                     </Button>
                   </span>
@@ -607,6 +623,40 @@ function LinkForm({ target, onCancel, onSaved }) {
   const [q, setQ] = useState('');
   const [items, setItems] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [kategoriList, setKategoriList] = useState([]);
+  const [buat, setBuat] = useState(null);
+  const [buatError, setBuatError] = useState(null);
+
+  // Isi form "buat produk" dari data server: modal = harga server + biaya fisik.
+  useEffect(() => {
+    let alive = true;
+    api.get('/kategori')
+      .then((r) => {
+        if (!alive) return;
+        const list = r.items || [];
+        setKategoriList(list);
+        const namaKat = HS_KAT_NAMA[target.kategori] || '';
+        const kat = list.find((k) => String(k.nama).toLowerCase() === namaKat.toLowerCase());
+        const modal = Number(target.harga_server || 0) + Number(target.biaya || 0);
+        setBuat({
+          kode: kodeLokalDariServer({
+            kategori: target.kategori,
+            operator: target.operator,
+            nama_produk: target.nama_produk,
+            kode_produk: target.kode_produk,
+          }),
+          kodeServer: target.kode_produk || '',
+          nama: target.nama_produk || '',
+          kategori_id: kat ? kat.id : '',
+          harga_modal: modal ? formatRupiahInput(String(modal)) : '',
+          harga: '',
+        });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+    // Isi form cukup saat target berubah, bukan saat field server ikut berubah.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [target.id]);
 
   useEffect(() => {
     if (!q.trim()) { setItems([]); return undefined; }
@@ -623,6 +673,33 @@ function LinkForm({ target, onCancel, onSaved }) {
       onSaved();
     } catch (err) {
       toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const buatDanHubungkan = async () => {
+    setBuatError(null);
+    if (!buat.kode.trim()) return setBuatError('Kode produk wajib diisi.');
+    if (!buat.nama.trim()) return setBuatError('Nama produk wajib diisi.');
+    if (!buat.harga.trim() || parseRupiah(buat.harga) <= 0) return setBuatError('Harga jual wajib diisi.');
+    if (!buat.harga_modal.trim()) return setBuatError('Harga modal wajib diisi.');
+    const kat = kategoriList.find((k) => String(k.id) === String(buat.kategori_id));
+    setBusy(true);
+    try {
+      await api.post('/produk', {
+        kode: buat.kode.trim(),
+        nama: buat.nama.trim(),
+        kategori_id: buat.kategori_id ? Number(buat.kategori_id) : null,
+        harga: parseRupiah(buat.harga),
+        harga_modal: parseRupiah(buat.harga_modal),
+        satuan: 'pcs',
+        ...(kat && !kat.lacak_stok ? { lacak_stok: 0 } : { stok: 0, stok_minimum: 0 }),
+      });
+      await api.post('/harga-server/link', { id: target.id, kode_lokal: buat.kode.trim() });
+      onSaved();
+    } catch (err) {
+      setBuatError(err.message);
     } finally {
       setBusy(false);
     }
@@ -649,6 +726,42 @@ function LinkForm({ target, onCancel, onSaved }) {
           <Button variant="ghost" size="sm" onClick={unlink} disabled={busy}>Lepas</Button>
         </p>
       )}
+      {!target.nama_produk_daftar && buat && (
+        <div className="hs-buat">
+          <p className="card-title-sm">Belum ada produknya? Buat dari data server</p>
+          <div className="grid-2">
+            <Field
+              label="Kode produk"
+              required
+              hint={buat.kodeServer && buat.kodeServer !== buat.kode ? `Kode server: ${buat.kodeServer} — sudah diubah ke gaya kode Anda.` : undefined}
+            >
+              <Input value={buat.kode} onChange={(e) => setBuat((b) => ({ ...b, kode: e.target.value }))} placeholder="mis. Vi7" />
+            </Field>
+            <Field label="Nama" required>
+              <Input value={buat.nama} onChange={(e) => setBuat((b) => ({ ...b, nama: e.target.value }))} />
+            </Field>
+            <Field label="Kategori">
+              <Select value={buat.kategori_id} onChange={(e) => setBuat((b) => ({ ...b, kategori_id: e.target.value }))}>
+                <option value="">Tanpa kategori</option>
+                {kategoriList.map((k) => (
+                  <option key={k.id} value={k.id}>{k.nama}{!k.lacak_stok ? ' (non-stok)' : ''}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Harga modal (Rp)" required hint="Terisi otomatis: harga server + biaya fisik.">
+              <Input inputMode="numeric" value={buat.harga_modal} onChange={(e) => setBuat((b) => ({ ...b, harga_modal: formatRupiahInput(e.target.value) }))} />
+            </Field>
+            <Field label="Harga jual (Rp)" required hint="Wajib diisi — margin ditetapkan Anda.">
+              <Input inputMode="numeric" value={buat.harga} onChange={(e) => setBuat((b) => ({ ...b, harga: formatRupiahInput(e.target.value) }))} />
+            </Field>
+          </div>
+          {buatError && <p className="field-error" role="alert">{buatError}</p>}
+          <div className="flex justify-end">
+            <Button size="sm" onClick={buatDanHubungkan} loading={busy}>Buat &amp; Hubungkan</Button>
+          </div>
+        </div>
+      )}
+
       <Field label="Cari produk lokal">
         <Input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ketik kode/nama produk lokal…" autoComplete="off" />
       </Field>
