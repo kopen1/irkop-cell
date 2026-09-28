@@ -34,6 +34,7 @@ const JENIS_LABEL = {
   transfer: 'Transfer',
 };
 const JENIS_ORDER = ['produk', 'produkdigital', 'service', 'tariktunai', 'transfer'];
+const JENIS_VALID = ['penjualan', 'produkdigital', 'tariktunai', 'service'];
 
 export default function TransaksiPage() {
   const { can } = useAuth();
@@ -101,6 +102,14 @@ export default function TransaksiPage() {
   const [detailData, setDetailData] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [lastJenis, setLastJenis] = useState(() => {
+    try {
+      const v = localStorage.getItem('irkop_cell_jenis_terakhir');
+      return v && JENIS_VALID.includes(v) ? v : '';
+    } catch {
+      return '';
+    }
+  });
   const [editItem, setEditItem] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteBusy, setDeleteBusy] = useState(false);
@@ -114,8 +123,12 @@ export default function TransaksiPage() {
     setShowForm(false);
     setEditItem(null);
   };
-  const handleSaved = () => {
+  const handleSaved = (savedJenis) => {
     const wasEdit = Boolean(editItem);
+    if (!wasEdit && savedJenis) {
+      setLastJenis(savedJenis);
+      try { localStorage.setItem('irkop_cell_jenis_terakhir', savedJenis); } catch { /* storage penuh/ditolak */ }
+    }
     closeForm();
     toast.success(wasEdit ? 'Transaksi diperbarui.' : 'Transaksi berhasil dicatat.');
     load().catch(() => {});
@@ -214,6 +227,7 @@ export default function TransaksiPage() {
         <TransaksiForm
           key={editItem ? String(editItem.id) : 'baru'}
           initial={editItem || undefined}
+          initialJenis={lastJenis}
           onCancel={closeForm}
           onSaved={handleSaved}
         />
@@ -228,9 +242,16 @@ export default function TransaksiPage() {
         subtitle="Riwayat & pencatatan transaksi. Filter tanggal menggunakan kalender WIB (Asia/Jakarta)."
         actions={
           can('transaksi') && (
-            <Button onClick={openCreate}>
-              <Icon name="plus" size={16} /> Transaksi Baru
-            </Button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              {lastJenis && (
+                <span className="badge" style={{ whiteSpace: 'nowrap' }}>
+                  Terakhir: {JENIS_LABEL[lastJenis] || lastJenis}
+                </span>
+              )}
+              <Button onClick={openCreate}>
+                <Icon name="plus" size={16} /> Transaksi Baru
+              </Button>
+            </div>
           )
         }
       />

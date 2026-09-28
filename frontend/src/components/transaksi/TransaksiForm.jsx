@@ -104,7 +104,7 @@ function LabaDisplay({ value }) {
   );
 }
 
-export default function TransaksiForm({ initial, onSaved, onCancel }) {
+export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel }) {
   const today = todayWIB();
   const maxBackdate = (() => {
     const d = new Date();
@@ -136,11 +136,8 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
   };
 
   const [jenis, setJenis] = useState(() => {
-    if (initial?.jenis === 'produkdigital') return 'produkdigital';
-    if (initial?.jenis === 'tariktunai') return 'tariktunai';
-    if (initial?.jenis === 'service') return 'service';
-    if (initial?.jenis === 'penjualan') return 'penjualan';
-    return '';
+    if (initial?.jenis) return initial.jenis;
+    return initialJenis || '';
   });
   const [tanggal, setTanggal] = useState(() => initial?.tanggal_transaksi || today);
   const [pelangganId, setPelangganId] = useState(() => initial?.pelanggan_id || '');
@@ -594,7 +591,7 @@ export default function TransaksiForm({ initial, onSaved, onCancel }) {
           }
         }
       }
-      onSaved();
+      onSaved(jenis);
     } catch (err) {
       setSubmitError(err.message);
     } finally {

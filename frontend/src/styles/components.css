@@ -1117,3 +1117,6 @@
 @media (max-width: 767px) {
   .tx-grup-laba { margin-left: 0; }
 }
+
+.btn-compact { padding: 3px 8px; font-size: 0.74rem; gap: 4px; }
+.btn-compact svg { width: 12px; height: 12px; }

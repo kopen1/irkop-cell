@@ -470,13 +470,14 @@ export default function LaporanPage() {
 
               <Card className="mt-4" title="Rincian Harian">
                 <Table
+                  className="table-fit"
                   columns={[
                     { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
-                    { key: 'jumlah_transaksi', header: 'Trx', align: 'right', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
+                    { key: 'jumlah_transaksi', header: 'Trx', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
                     { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
                     { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
-                    { key: 'pengeluaran', header: 'Pengeluaran', align: 'right', render: (r) => <span className="num text-danger">{formatRupiah(r.pengeluaran)}</span> },
-                    { key: 'beli_stok', header: 'Beli Stok', align: 'right', render: (r) => <span className="num text-muted">{formatRupiah(r.beli_stok)}</span> },
+                    { key: 'pengeluaran', header: 'Pengeluaran', align: 'right', className: 'hide-mobile', render: (r) => <span className="num text-danger">{formatRupiah(r.pengeluaran)}</span> },
+                    { key: 'beli_stok', header: 'Beli Stok', align: 'right', className: 'hide-mobile', render: (r) => <span className="num text-muted">{formatRupiah(r.beli_stok)}</span> },
                     { key: 'net', header: 'Net', align: 'right', render: (r) => <span className="num">{formatSignedRupiah(r.net)}</span> },
                   ]}
                   rows={harianRows}
@@ -485,20 +486,20 @@ export default function LaporanPage() {
               </Card>
 
               <Card className="mt-4" title="Arus Dana (bukan omzet)">
-                <div className="table-wrap">
-                  <table className="table">
-                    <thead>
-                      <tr><th>Jenis</th><th className="col-right">Nominal</th></tr>
-                    </thead>
-                    <tbody>
-                      <tr><td>Kirim uang (nominal titipan)</td><td className="col-right num">{formatRupiah(data.arus_dana?.kirim_uang || 0)}</td></tr>
-                      <tr><td>Tarik tunai</td><td className="col-right num">{formatRupiah(data.arus_dana?.tarik_tunai || 0)}</td></tr>
-                      <tr><td>Transfer</td><td className="col-right num">{formatRupiah(data.arus_dana?.transfer || 0)}</td></tr>
-                      <tr><td style={{ fontWeight: 700 }}>Total Arus Dana</td><td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(data.arus_dana?.total || 0)}</td></tr>
-                      <tr><td>Pendapatan admin (fee)</td><td className="col-right num">{formatRupiah(data.pendapatan_admin || 0)}</td></tr>
-                    </tbody>
-                  </table>
-                </div>
+                <Table
+                  columns={[
+                    { key: 'label', header: 'Jenis', render: (r) => <span style={r.tebal ? { fontWeight: 700 } : undefined}>{r.label}</span> },
+                    { key: 'nilai', header: 'Nominal', align: 'right', render: (r) => <span className="num" style={r.tebal ? { fontWeight: 700 } : undefined}>{formatRupiah(r.nilai)}</span> },
+                  ]}
+                  rows={[
+                    { key: 'kirim', label: 'Kirim uang (nominal titipan)', nilai: data.arus_dana?.kirim_uang || 0 },
+                    { key: 'tarik', label: 'Tarik tunai', nilai: data.arus_dana?.tarik_tunai || 0 },
+                    { key: 'transfer', label: 'Transfer', nilai: data.arus_dana?.transfer || 0 },
+                    { key: 'total', label: 'Total Arus Dana', nilai: data.arus_dana?.total || 0, tebal: true },
+                    { key: 'admin', label: 'Pendapatan admin (fee)', nilai: data.pendapatan_admin || 0 },
+                  ]}
+                  empty={null}
+                />
                 <p className="field-hint mt-2">Nominal titipan (kirim uang/tarik/transfer) bukan pendapatan, jadi tidak dihitung Omzet.</p>
               </Card>
 
@@ -524,42 +525,29 @@ export default function LaporanPage() {
 
               <div className="grid-2 mt-4">
                 <Card title="Kasbon" subtitle="Ringkasan kasbon periode ini">
-                  <div className="table-wrap">
-                    <table className="table">
-                      <thead>
-                        <tr><th>Status</th><th className="col-right">Jumlah</th><th className="col-right">Nominal</th></tr>
-                      </thead>
-                      <tbody>
-                        {kasbonRows.map((r) => (
-                          <tr key={r.label}>
-                            <td>{r.label}</td>
-                            <td className="col-right num">{r.qty}</td>
-                            <td className="col-right num">{r.nominal === null ? '-' : formatRupiah(r.nominal)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                  <Table
+                    className="table-fit"
+                    columns={[
+                      { key: 'label', header: 'Status' },
+                      { key: 'qty', header: 'Jumlah', align: 'right', render: (r) => <span className="num">{r.qty}</span> },
+                      { key: 'nominal', header: 'Nominal', align: 'right', render: (r) => <span className="num">{r.nominal === null ? '-' : formatRupiah(r.nominal)}</span> },
+                    ]}
+                    rows={kasbonRows}
+                    empty={<EmptyState title="Belum ada kasbon" icon="kasbon" />}
+                  />
                 </Card>
 
                 <Card title="Perbandingan Bulan Sebelumnya" subtitle={perb ? monthName(perb.bulan) : 'Tidak ada data'}>
                   {perb && perb.bulan ? (
-                    <div className="table-wrap">
-                      <table className="table">
-                        <thead>
-                          <tr><th>Komponen</th><th className="col-right">Bulan Lalu</th><th className="col-right">Perubahan</th></tr>
-                        </thead>
-                        <tbody>
-                          {perbRows.map((r) => (
-                            <tr key={r.key}>
-                              <td>{r.label}</td>
-                              <td className="col-right num">{formatRupiah(r.value)}</td>
-                              <td className="col-right num">{deltaPctText(r.delta)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
+                    <Table
+                      className="table-fit"
+                      columns={[
+                        { key: 'label', header: 'Komponen' },
+                        { key: 'value', header: 'Bulan Lalu', align: 'right', render: (r) => <span className="num">{formatRupiah(r.value)}</span> },
+                        { key: 'delta', header: 'Perubahan', align: 'right', render: (r) => <span className="num">{deltaPctText(r.delta)}</span> },
+                      ]}
+                      rows={perbRows}
+                    />
                   ) : (
                     <EmptyState title="Belum ada perbandingan" description="Tidak ada data bulan sebelumnya untuk dibandingkan." icon="clock" />
                   )}
@@ -572,12 +560,13 @@ export default function LaporanPage() {
             <>
               <Card className="mt-4" title="Breakdown 12 Bulan" subtitle={'Perbandingan per bulan pada ' + data.tahun}>
                 <Table
+                  className="table-fit"
                   columns={[
                     { key: 'bulan', header: 'Bulan' },
-                    { key: 'jumlah', header: 'Transaksi', align: 'right', render: (r) => <span className="num">{r.jumlah}</span> },
+                    { key: 'jumlah', header: 'Transaksi', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.jumlah}</span> },
                     { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
                     { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
-                    { key: 'pengeluaran', header: 'Pengeluaran', align: 'right', render: (r) => <span className="num">{formatRupiah(r.pengeluaran)}</span> },
+                    { key: 'pengeluaran', header: 'Pengeluaran', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{formatRupiah(r.pengeluaran)}</span> },
                     { key: 'net', header: 'Net', align: 'right', render: (r) => <span className="num">{formatRupiah(r.net)}</span> },
                   ]}
                   rows={breakdownRows}
@@ -606,12 +595,13 @@ export default function LaporanPage() {
               <ErrorState error={produk.error} onRetry={() => setRefresh((r) => r + 1)} />
             ) : (
               <Table
+                className="table-fit"
                 columns={[
-                  { key: 'peringkat', header: '#', align: 'right', render: (r) => <span className="num">{r.peringkat}</span> },
+                  { key: 'peringkat', header: '#', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.peringkat}</span> },
                   { key: 'nama_produk', header: 'Produk', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_produk}</span> },
-                  { key: 'nama_kategori', header: 'Kategori', render: (r) => <span className="text-sm text-muted">{r.nama_kategori}</span> },
+                  { key: 'nama_kategori', header: 'Kategori', className: 'hide-mobile', render: (r) => <span className="text-sm text-muted">{r.nama_kategori}</span> },
                   { key: 'qty', header: 'Qty Terjual', align: 'right', render: (r) => <span className="num">{r.qty}</span> },
-                  { key: 'jumlah_transaksi', header: 'Transaksi', align: 'right', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
+                  { key: 'jumlah_transaksi', header: 'Transaksi', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
                   { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
                   { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
                 ]}
@@ -653,21 +643,13 @@ export default function LaporanPage() {
             <ErrorState error={rekon.error} onRetry={() => setRefresh((r) => r + 1)} />
           ) : rk ? (
             <>
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr><th>Komponen</th><th className="col-right">Nilai</th></tr>
-                  </thead>
-                  <tbody>
-                    {rekonRows.map((r) => (
-                      <tr key={r.key}>
-                        <td style={{ fontWeight: r.bold ? 700 : 400 }}>{r.label}</td>
-                        <td className="col-right num" style={{ fontWeight: r.bold ? 700 : 400 }}>{formatSignedRupiah(r.value)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <Table
+                columns={[
+                  { key: 'label', header: 'Komponen', render: (r) => <span style={{ fontWeight: r.bold ? 700 : 400 }}>{r.label}</span> },
+                  { key: 'value', header: 'Nilai', align: 'right', render: (r) => <span className="num" style={{ fontWeight: r.bold ? 700 : 400 }}>{formatSignedRupiah(r.value)}</span> },
+                ]}
+                rows={rekonRows}
+              />
               <div className="flex justify-between items-center mt-3">
                 <span className="text-sm text-secondary">
                   Selisih (aktual − seharusnya), toleransi {formatRupiah(rk.toleransi)}
@@ -694,6 +676,7 @@ export default function LaporanPage() {
             <>
               <h4 className="card-title-sm mb-2">Ringkasan per Jenis</h4>
               <Table
+                className="table-fit"
                 columns={[
                   { key: 'jenis', header: 'Jenis', render: (r) => <span style={{ fontWeight: 600 }}>{r.jenis}</span> },
                   { key: 'masuk', header: 'Masuk', align: 'right', render: (r) => <span className="num text-success">{formatRupiah(r.masuk)}</span> },

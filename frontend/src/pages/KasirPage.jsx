@@ -16,11 +16,18 @@ import { Modal } from '../components/ui/Modal';
 import { KasirStatusBadge } from '../components/ui/Badge';
 import { Icon } from '../components/ui/Icon';
 
+function yesterdayWIB() {
+  const d = new Date(`${todayWIB()}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+}
+
 export default function KasirPage() {
   const toast = useToast();
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const [date] = useState(todayWIB());
+  const kemarin = yesterdayWIB();
 
   const sesi = useAsync(() => api.get('/kasir/current'), { deps: [] });
   const akun = useAsync(() => api.get('/akun'), { deps: [] });
@@ -184,7 +191,7 @@ export default function KasirPage() {
     setReopenLampauBusy(true);
     try {
       const info = await api.get('/kasir/current', { tanggal: tgl });
-      if (!info?.kasir_sesi_id) throw new Error(`Tidak ada sesi kasir pada ${tgl}.`);
+      if (!info?.kasir_sesi_id) throw new Error(`Belum ada sesi kasir pada ${tgl} — sesi dibuat lewat menu Opening, bukan Buka Ulang.`);
       if (info.status === 'buka') throw new Error(`Sesi ${tgl} masih berstatus buka — tidak perlu dibuka ulang.`);
       if (!window.confirm(`Buka ulang sesi kasir ${tgl}? Hasil closing lama akan dihapus, sehingga sesi bisa dipakai untuk edit transaksi pada tanggal tersebut.`)) return;
       await api.post('/kasir/reopen', { tanggal: tgl });
@@ -274,17 +281,16 @@ export default function KasirPage() {
       )}
 
       {isAdmin && (
-        <Card className="mb-4" title="Buka Ulang Sesi Lampau (Admin)">
+        <Card className="mb-4" title="Buka Ulang Sesi Tanggal Lain (Admin)">
           <p className="field-hint mb-2">
-            Dipakai saat perlu mengoreksi transaksi pada tanggal yang sesinya sudah ditutup. Sesi yang dibuka ulang
-            akan menghapus hasil closing lama, jadi setelah selesai edit transaksi lamanya, tutup kembali
-            sesinya di halaman ini.
+            Untuk mengoreksi transaksi tanggal lain yang sesinya sudah ditutup (bukan sesi hari ini).
+            Hasil closing lama dihapus, jadi tutup kembali sesinya setelah selesai edit.
           </p>
           <div className="flex items-end gap-2">
             <Field label="Tanggal Sesi" style={{ flex: 1 }}>
-              <Input type="date" value={reopenTgl} max={date} onChange={(e) => setReopenTgl(e.target.value)} />
+              <Input type="date" value={reopenTgl} max={kemarin} onChange={(e) => setReopenTgl(e.target.value)} />
             </Field>
-            <Button variant="secondary" onClick={doReopenLampau} loading={reopenLampauBusy} disabled={!reopenTgl}>
+            <Button variant="secondary" size="sm" className="btn-compact" onClick={doReopenLampau} loading={reopenLampauBusy} disabled={!reopenTgl}>
               <Icon name="refresh" size={14} /> Buka Ulang
             </Button>
           </div>
@@ -384,7 +390,7 @@ export default function KasirPage() {
       {status === 'tutup' && (
         <>
           <div className="mb-3 text-right">
-            <Button variant="secondary" size="sm" onClick={doReopen} loading={reopenBusy}>
+            <Button variant="secondary" size="sm" className="btn-compact" onClick={doReopen} loading={reopenBusy}>
               <Icon name="refresh" size={14} /> Buka ulang sesi
             </Button>
           </div>

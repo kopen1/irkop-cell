@@ -153,12 +153,12 @@ describe('Halaman Kasir — Buka Ulang Sesi Lampau (admin only)', () => {
   });
   afterEach(() => { cleanup(); localStorage.clear(); vi.restoreAllMocks(); });
 
-  it('admin MELIHAT kartu "Buka Ulang Sesi Lampau"', async () => {
+  it('admin MELIHAT kartu "Buka Ulang Sesi Tanggal Lain"', async () => {
     localStorage.setItem('irkop_cell_user', JSON.stringify(user));
     mockFetch(user, []);
     renderApp('/kasir');
     await waitFor(() => {
-      expect(screen.getByText(/Buka Ulang Sesi Lampau/i)).toBeTruthy();
+      expect(screen.getByText(/Buka Ulang Sesi Tanggal Lain/i)).toBeTruthy();
     }, { timeout: 8000 });
   });
 
@@ -169,7 +169,7 @@ describe('Halaman Kasir — Buka Ulang Sesi Lampau (admin only)', () => {
     await waitFor(() => {
       expect(screen.getByText('Perlu Closing — Ada Sesi Lampau')).toBeTruthy();
     }, { timeout: 8000 });
-    expect(screen.queryByText(/Buka Ulang Sesi Lampau/i)).toBeNull();
+    expect(screen.queryByText(/Buka Ulang Sesi Tanggal Lain/i)).toBeNull();
   });
 
   it('admin: pilih tanggal lalu Buka Ulang -> POST /kasir/reopen { tanggal }', async () => {

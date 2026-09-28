@@ -1,8 +1,8 @@
-export function Table({ columns, rows, empty, loading, onRowClick }) {
+export function Table({ columns, rows, empty, loading, onRowClick, className }) {
   if (loading) return null;
   if (!rows || rows.length === 0) return empty || null;
   return (
-    <div className="table-wrap">
+    <div className={`table-wrap ${className || ''}`.trim()}>
       <table className="table">
         <thead>
           <tr>
