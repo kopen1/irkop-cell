@@ -6,8 +6,8 @@ export const HARI = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sab
 // Gaji karyawan per shift, ditentukan jam buka: buka < batas -> awal (shift
 // panjang 13:00–21:00), buka >= batas -> akhir (shift 16:00–21:00).
 export const GAJI_SHIFT = { batasJam: 16, awal: 60000, akhir: 45000 };
-// Gaji owner: upah jaga toko (5 jam) + persentase laba service.
-export const GAJI_OWNER = { jaga: 45000, servicePct: 50 };
+// Gaji owner: upah jaga toko per hari (tetap) + persentase laba service.
+export const GAJI_OWNER = { jaga: 50000, servicePct: 50 };
 
 export function dayNameOf(date) {
   return HARI[new Date(`${date}T00:00:00Z`).getUTCDay()];
@@ -97,13 +97,13 @@ async function openingHour(db, tanggal) {
   return (d.getUTCHours() + 7) % 24;
 }
 
-// Upah owner mengikuti jam buka (opsi 1): <batas = 60k, >=batas = 45k.
-function ownerShiftRate(jamBuka) {
-  if (jamBuka === null || jamBuka === undefined) return GAJI_OWNER.jaga;
-  return Number(jamBuka) < GAJI_SHIFT.batasJam ? GAJI_SHIFT.awal : GAJI_SHIFT.akhir;
+// Upah owner: nominal tetap (GAJI_OWNER.jaga), tidak ikut shift.
+// Shift 60k/45k hanya untuk karyawan (GAJI_SHIFT).
+function ownerShiftRate() {
+  return GAJI_OWNER.jaga;
 }
 
-// Hitung gaji owner untuk satu tanggal: upah (ikut jam buka) + % laba service.
+// Hitung gaji owner untuk satu tanggal: upah jaga per hari (tetap) + % laba service.
 // Laba service dihitung dari TANGGAL TRANSAKSI service (saat selesai/dibayar).
 export async function hitungGajiOwner(db, tanggal, jamBukaIn) {
   let jamBuka = jamBukaIn;

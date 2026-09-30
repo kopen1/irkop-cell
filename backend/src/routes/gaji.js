@@ -7,6 +7,9 @@ import { hitungGajiOwner } from '../financial/gaji.js';
 import { requireSessionForToday } from '../financial/kasir.js';
 import { getAccount } from '../financial/akun.js';
 
+// Role yang boleh punya gaji: karyawan, dan admin sebagai owner toko.
+const GAJI_BISA_DIBAYAR = ['karyawan', 'admin'];
+
 export async function listGaji(db, request, ctx) {
   requireAdmin(ctx);
   const url = new URL(request.url);
@@ -49,7 +52,10 @@ export async function createGajiManual(db, request, ctx) {
   const nominal = asInt(body.nominal, { required: true, field: 'nominal', min: 0 });
   const u = await db.one('SELECT id, role FROM users WHERE id = ?', userId);
   if (!u) throw err(400, 'invalid_user', 'User tidak ditemukan');
-  if (u.role !== 'karyawan') throw err(400, 'invalid_user', 'Rate gaji hanya untuk role karyawan');
+  // Owner (role admin) juga boleh punya gaji: upah jaga + bagi hasil.
+  if (!GAJI_BISA_DIBAYAR.includes(u.role)) {
+    throw err(400, 'invalid_user', 'Gaji hanya untuk role karyawan atau admin (owner)');
+  }
 
   const ts = nowIso();
   await db.exec(
@@ -170,7 +176,9 @@ export async function setRateGaji(db, request, ctx) {
   const tipe = asEnum(body.tipe, ['flat', 'custom_harian'], { required: true, field: 'tipe' });
   const u = await db.one('SELECT id, role FROM users WHERE id = ?', userId);
   if (!u) throw err(400, 'invalid_user', 'User tidak ditemukan');
-  if (u.role !== 'karyawan') throw err(400, 'invalid_user', 'Rate gaji hanya untuk role karyawan');
+  if (!GAJI_BISA_DIBAYAR.includes(u.role)) {
+    throw err(400, 'invalid_user', 'Rate gaji hanya untuk role karyawan atau admin (owner)');
+  }
 
   const stmts = [];
   if (tipe === 'flat') {

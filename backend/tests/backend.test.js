@@ -349,13 +349,22 @@ test('R1: createGajiManual non-admin ditolak 403', async () => {
   assert.equal(r.status, 403);
 });
 
-test('R1: createGajiManual target user bukan karyawan ditolak 400', async () => {
+test('R1: createGajiManual — owner (admin) boleh, user tidak ada ditolak 400', async () => {
   const { env, adminToken, adminId } = await bootstrap();
+  // Owner = role admin: upkeep jaga + bagi hasil, jadi gaji HARUS boleh.
+  const ok = await call(env, '/api/gaji', {
+    method: 'POST', token: adminToken,
+    body: { user_id: adminId, tanggal: '2026-08-14', nominal: 80000, catatan: 'bagi hasil' },
+  });
+  assert.equal(ok.status, 200, `owner harus bisa punya gaji: ${JSON.stringify(ok.data)}`);
+  assert.equal(ok.data.nominal, 80000);
+
+  // User yang tidak ada tetap ditolak.
   const r = await call(env, '/api/gaji', {
     method: 'POST', token: adminToken,
-    body: { user_id: adminId, tanggal: '2026-08-14', nominal: 80000 },
+    body: { user_id: 999999, tanggal: '2026-08-14', nominal: 80000 },
   });
-  assert.equal(r.status, 400);
+  assert.equal(r.status, 400, 'user tidak ditemukan harus 400');
 });
 
 async function makeKirimUangSvc(env, kategoriId, harga = 5000) {

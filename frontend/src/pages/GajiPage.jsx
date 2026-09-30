@@ -128,7 +128,7 @@ export default function GajiPage() {
                   <tr><th>Komponen</th><th className="col-right">Nilai</th></tr>
                 </thead>
                 <tbody>
-                  <tr><td>Upah jaga toko (ikut jam buka{owner.data.jam_buka != null ? ` · buka ${String(owner.data.jam_buka).padStart(2, '0')}:00` : ''})</td><td className="col-right num">{formatRupiah(owner.data.upah)}</td></tr>
+                  <tr><td>Upah jaga toko per hari</td><td className="col-right num">{formatRupiah(owner.data.upah)}</td></tr>
                   <tr><td>Laba service hari ini</td><td className="col-right num">{formatRupiah(owner.data.service_laba)}</td></tr>
                   <tr><td>Bagi hasil service ({owner.data.service_pct}%)</td><td className="col-right num">{formatRupiah(owner.data.service_share)}</td></tr>
                   <tr><td style={{ fontWeight: 700 }}>Akru gaji owner hari ini</td><td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(owner.data.total)}</td></tr>
@@ -280,9 +280,17 @@ function RateModal({ open, onClose, onSaved }) {
     if (sel && rates[sel]) {
       setTipe(rates[sel].tipe);
       setRateFlat(rates[sel].rate_flat ?? '');
+      //isi ulang rate per hari dari string "senin:60000,rabu:60000,..."
+      const custom_ = {};
+      for (const pair of String(rates[sel].custom_harian || '').split(',')) {
+        const [hari, rate] = pair.split(':');
+        if (hari) custom_[hari] = rate ?? '';
+      }
+      setCustom(custom_);
     } else if (sel) {
       setTipe('flat');
       setRateFlat('');
+      setCustom({});
     }
   }, [sel, rates]);
 
@@ -303,7 +311,7 @@ function RateModal({ open, onClose, onSaved }) {
           setBusy(false);
           return setError('Semua hari wajib diisi untuk tipe custom per hari.');
         }
-        await api.post('/gaji/rate', { user_id: Number(sel), tipe: 'custom_harian', harian });
+        await api.post('/gaji/rate', { user_id: Number(sel), tipe: 'custom_harian', custom_harian: harian });
       }
       onSaved();
       onClose();

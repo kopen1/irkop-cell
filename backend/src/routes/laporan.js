@@ -239,6 +239,20 @@ export async function reportBulanan(db, request, ctx) {
   const totalSaldoAwal = saldoAkun.reduce((s, a) => s + a.saldo_awal, 0);
   const totalSaldoAkhir = saldoAkun.reduce((s, a) => s + a.saldo_akhir, 0);
 
+  // Gaji akru pada bulan ini yang BELUM dibayar. Gaji yang sudah dibayar
+  // sudah tercatat sebagai pengeluaran kategori 'gaji', jadi tidak dihitung
+  // lagi di sini supaya laba bersih tidak dobel.
+  const gajiBelum = await db.one(
+    `SELECT COALESCE(SUM(nominal), 0) AS total, COUNT(*) AS jumlah
+       FROM gaji_harian
+      WHERE tanggal >= ? AND tanggal <= ? AND dibayar_at IS NULL`,
+    startD,
+    endD
+  );
+  const gajiBelumTotal = Number(gajiBelum ? gajiBelum.total : 0);
+  const gajiBelumJumlah = Number(gajiBelum ? gajiBelum.jumlah : 0);
+  const labaBersih = laba - pengeluaranTotal - gajiBelumTotal;
+
   return {
     periode: 'bulanan',
     bulan: `${range.tahun}-${String(range.mon).padStart(2, '0')}`,
@@ -260,6 +274,8 @@ export async function reportBulanan(db, request, ctx) {
       nominal_belum_lunas: scalarSum([kasbon], 'nominal_belum_lunas'),
     },
     pengeluaran: { jumlah: scalarSum([pengeluaran], 'jumlah'), total: pengeluaranTotal },
+    gaji_belum_dibayar: { jumlah: gajiBelumJumlah, total: gajiBelumTotal },
+    laba_bersih: labaBersih,
     net,
     perbandingan_bulan_sebelumnya: {
       bulan: `${prev.tahun}-${String(prev.mon).padStart(2, '0')}`,

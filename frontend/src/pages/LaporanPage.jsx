@@ -299,6 +299,19 @@ export default function LaporanPage() {
         { label: 'Laba', value: formatRupiah(data.laba || 0) },
         { label: 'Pengeluaran', value: formatRupiah((data.pengeluaran && data.pengeluaran.total) || 0) },
         { label: 'Net (Laba − Pengeluaran)', value: formatRupiah(data.net || 0) },
+        ...(isBulanan
+          ? [
+              {
+                label: 'Gaji Belum Dibayar',
+                value: formatRupiah((data.gaji_belum_dibayar && data.gaji_belum_dibayar.total) || 0),
+              },
+              {
+                label: 'Laba Bersih',
+                value: formatRupiah(data.laba_bersih ?? data.net ?? 0),
+                tone: (data.laba_bersih ?? 0) < 0 ? 'danger' : 'success',
+              },
+            ]
+          : []),
       ]
     : [];
 
@@ -448,7 +461,13 @@ export default function LaporanPage() {
             {stats.map((s) => (
               <div key={s.label} className="stat-card">
                 <div className="stat-label">{s.label}</div>
-                <div className="stat-value">{s.value}</div>
+                <div
+                  className={`stat-value num ${
+                    s.tone === 'danger' ? 'text-danger' : s.tone === 'success' ? 'text-success' : ''
+                  }`}
+                >
+                  {s.value}
+                </div>
               </div>
             ))}
           </div>
@@ -594,6 +613,17 @@ export default function LaporanPage() {
             ) : produk.status === 'error' ? (
               <ErrorState error={produk.error} onRetry={() => setRefresh((r) => r + 1)} />
             ) : (
+              <details className="plist-summary">
+                <summary className="plist-summary-head">
+                  <span className="plist-summary-top">
+                    <b className="num">{produkRows.length}</b> produk terlaris
+                    <span className="plist-summary-dot">·</span>
+                    Qty <b className="num">{produkRows.reduce((a, r) => a + (Number(r.qty) || 0), 0)}</b>
+                    <span className="plist-summary-dot">·</span>
+                    Omzet <b className="num">{formatRupiah(produkRows.reduce((a, r) => a + (Number(r.omzet) || 0), 0))}</b>
+                  </span>
+                  <span className="plist-summary-toggle">Rincian</span>
+                </summary>
               <Table
                 className="table-fit"
                 columns={[
@@ -608,6 +638,7 @@ export default function LaporanPage() {
                 rows={produkRows}
                 empty={<EmptyState title="Belum ada produk terjual" description="Data muncul setelah ada transaksi pada periode ini." icon="barang" />}
               />
+              </details>
             )}
           </Card>
         </>

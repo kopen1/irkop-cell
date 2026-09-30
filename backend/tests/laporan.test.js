@@ -206,3 +206,58 @@ test('Rekap Per Akun R6: tidak ada double-count (R6 = tepat 3 mutasi/txn)', asyn
     'total mutasi konsisten (-100k +105k +5k)'
   );
 });
+async function setupLabaBersih() {
+  const { env } = setupEnv();
+  await createUserRaw(env, { nama: 'Admin', username: 'admin', password: 'admin1234', role: 'admin' });
+  const token = await login(env, 'admin', 'admin1234');
+  const k1 = await createKategoriRaw(env, 'Fisik', 1);
+  const p1 = await createProdukRaw(env, { kode: 'LB-1', nama: 'Toner', kategori_id: k1, harga: 100000, harga_modal: 70000, stok: 50 });
+  await call(env, '/api/kasir/opening', {
+    method: 'POST', token,
+    body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 5000000 }] },
+  });
+  // 1 penjualan: laba 30.000
+  await call(env, '/api/transaksi', {
+    method: 'POST', token,
+    body: { items: [{ produk_id: p1, qty: 1 }], metode_bayar: 'tunai' },
+  });
+  const kar = await env.DB.prepare(
+    `INSERT INTO users (nama, username, password_hash, role, aktif, created_at)
+     VALUES ('Karyawan', 'kr', 'x', 'karyawan', 1, ?)`
+  ).bind(new Date().toISOString()).run();
+  return { env, token, karId: Number(kar.meta.last_row_id) };
+}
+
+test('Laporan Bulanan: laba_bersih = laba - pengeluaran - gaji belum dibayar', async () => {
+  const { env, token, karId } = await setupLabaBersih();
+  const tgl = todayWib();
+  await env.DB.prepare(
+    `INSERT INTO gaji_harian (user_id, tanggal, nominal, sumber, created_at) VALUES (?, ?, 60000, 'auto', ?)`
+  ).bind(karId, tgl, new Date().toISOString()).run();
+
+  const r = await call(env, `/api/laporan/bulan?bulan=${currentBulan()}`, { token });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.laba, 30000, 'laba 100.000 - 70.000');
+  assert.equal(r.data.pengeluaran.total, 0, 'belum ada pengeluaran');
+  assert.equal(r.data.gaji_belum_dibayar.total, 60000, 'gaji akru belum dibayar');
+  assert.equal(r.data.laba_bersih, -30000, '30.000 - 0 - 60.000 = -30.000');
+});
+
+test('Laporan Bulanan: gaji SUDAH dibayar tidak dihitung dobel', async () => {
+  const { env, token, karId } = await setupLabaBersih();
+  const tgl = todayWib();
+  // dibayar_at terisi -> sudah jadi pengeluaran, jangan dihitung lagi
+  await env.DB.prepare(
+    `INSERT INTO gaji_harian (user_id, tanggal, nominal, sumber, created_at, dibayar_at)
+     VALUES (?, ?, 60000, 'auto', ?, ?)`
+  ).bind(karId, tgl, new Date().toISOString(), new Date().toISOString()).run();
+  await env.DB.prepare(
+    `INSERT INTO pengeluaran (deskripsi, kategori, nominal, metode_bayar, akun_sumber, tanggal, dicatat_oleh, created_at)
+     VALUES ('[gaji] bayar', 'gaji', 60000, 'tunai', 'Tunai Laci', ?, 1, ?)`
+  ).bind(tgl, new Date().toISOString()).run();
+
+  const r = await call(env, `/api/laporan/bulan?bulan=${currentBulan()}`, { token });
+  assert.equal(r.data.pengeluaran.total, 60000, 'gaji terbayar jadi pengeluaran');
+  assert.equal(r.data.gaji_belum_dibayar.total, 0, 'tidak ada gaji akru yang belum dibayar');
+  assert.equal(r.data.laba_bersih, r.data.laba - 60000, 'dihitung 1x saja');
+});
