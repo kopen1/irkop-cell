@@ -374,7 +374,7 @@ function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
             <tr>
               <th>Orang</th>
               <th className="col-right">% bagi hasil</th>
-              <th className="col-right">Laba servis (tanggal ini)</th>
+              <th className="col-right">Laba service-nya (tanggal ini)</th>
               <th className="col-right">Diterima</th>
               <th className="col-right">Aksi</th>
             </tr>
@@ -398,7 +398,10 @@ function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
                   />
                 </td>
                 <td className="col-right num">{formatRupiah(i.service_laba)}</td>
-                <td className="col-right num text-success">{formatRupiah(i.share)}</td>
+                <td className="col-right num text-success">
+                  {formatRupiah(i.share)}
+                  <span className="text-xs text-muted"> ({i.persen}%)</span>
+                </td>
                 <td className="col-right">
                   <Button variant="ghost" size="sm" disabled={busy || saving} onClick={() => hapusPorsi(i.user_id, i.nama)} aria-label={`Hapus porsi ${i.nama}`}>
                     <Icon name="trash" size={14} />
@@ -433,7 +436,10 @@ function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
       )}
 
       <div className="grid-2 mt-3">
-        <Field label="Tambah / ubah porsi (%)" hint=" Berlaku untuk admin (owner) maupun karyawan. Tersimpan di DB, bukan hardcoded — 0% berarti tidak bagi hasil. Contoh 50 = 50%, maksimal 100.">
+        <Field
+          label="Tambah / ubah porsi (%)"
+          hint="Berlaku untuk service HP saja (bukan jual produk, tarik tunai, atau transfer), dan hanya service yang dikerjakan orang ini sendiri. Servis tanpa teknisi tidak dibagi ke siapa pun. 0% berarti tidak bagi hasil."
+        >
           <div className="flex items-end gap-2">
             <Select value={userId} onChange={(e) => setUserId(e.target.value)} style={{ flex: 1 }} aria-label="Orang">
               <option value="">Pilih orang…</option>
