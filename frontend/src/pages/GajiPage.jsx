@@ -77,6 +77,7 @@ export default function GajiPage() {
       setPayBusy(null);
     }
   };
+  const [reloadGaji, setReloadGaji] = useState(0);
   useEffect(() => {
     let cancelled = false;
     setOwner({ status: 'loading', data: null, error: null });
@@ -90,7 +91,7 @@ export default function GajiPage() {
       .then((res) => { if (!cancelled) setOwner({ status: 'success', data: res, error: null }); })
       .catch((err) => { if (!cancelled) setOwner({ status: 'error', data: null, error: err }); });
     return () => { cancelled = true; };
-  }, [ownerDate]);
+  }, [ownerDate, reloadGaji]);
 
   const data = state.data || {};
   const rows = (data.items || []).map((g) => ({ ...g, key: `${g.user_id}-${g.tanggal}` }));
@@ -113,10 +114,7 @@ export default function GajiPage() {
           data={bagi.data}
           upahOwner={upahOwner}
           setUpahOwner={setUpahOwner}
-          onReload={() => {
-            setBagi({ status: 'idle', data: null });
-            setOwner({ status: 'idle', data: null, error: null });
-          }}
+          onReload={() => setReloadGaji((n) => n + 1)}
         />
       </Card>
 

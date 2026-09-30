@@ -257,10 +257,13 @@ export async function setBagiHasil(db, request, ctx) {
   if (!GAJI_BISA_DIBAYAR.includes(u.role)) {
     throw err(400, 'invalid_user', 'Bagi hasil service hanya untuk role karyawan atau admin (owner)');
   }
+  // Jangan tulis kolom updated_at: di D1 produksi bisa jadi belum ada (kalau
+  // tabel dibuat dari versi migrasi yang lebih lama). Jejak perubahan sudah
+  // dicatat di audit_log, jadi kolom ini tidak dibutuhkan.
   await db.exec(
-    `INSERT INTO bagi_hasil_service (user_id, persen, updated_at) VALUES (?, ?, ?)
-     ON CONFLICT(user_id) DO UPDATE SET persen = excluded.persen, updated_at = excluded.updated_at`,
-    userId, persen, nowIso()
+    `INSERT INTO bagi_hasil_service (user_id, persen) VALUES (?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET persen = excluded.persen`,
+    userId, persen
   );
   await writeAudit(db, { userId: admin.id, aksi: 'update', tabel: 'bagi_hasil_service', recordId: userId, dataAfter: { user_id: userId, persen } });
   return { user_id: userId, persen, message: 'Porsi bagi hasil service disimpan' };
