@@ -2,6 +2,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api } from '../lib/api';
 import { useToast } from '../context/ToastContext';
+import { useNavigate } from 'react-router-dom';
 import { formatRupiah, formatRupiahInput, parseRupiah } from '../lib/format';
 import { operatorOf, kodePrefixOf, kodeLokalDariServer } from '../lib/operator';
 import { PageHeader } from '../components/ui/PageHeader';
@@ -33,10 +34,12 @@ const KATEGORI_OPTIONS = [
 ];
 
 export default function HargaServerPage() {
+  const navigate = useNavigate();
   const toast = useToast();
   const [compareState, setCompareState] = useState({ status: 'idle', data: null, error: null });
   const [alerts, setAlerts] = useState([]);
   const [filterKategori, setFilterKategori] = useState('');
+  const [cari, setCari] = useState('');
   const [importOpen, setImportOpen] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
   const [logOpen, setLogOpen] = useState(false);
@@ -46,6 +49,7 @@ export default function HargaServerPage() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [showAll, setShowAll] = useState(false);
   const [terapkanOpen, setTerapkanOpen] = useState(false);
+  const [rugiTarget, setRugiTarget] = useState(null);
   const [syncBusy, setSyncBusy] = useState(false);
   const [syncResult, setSyncResult] = useState(null);
 
@@ -83,6 +87,15 @@ export default function HargaServerPage() {
       if (res.updated_count > 0) {
         const u = res.updated[0];
         toast.success(`${u.nama}: modal ${formatRupiah(u.modal_lama)} → ${formatRupiah(u.modal_baru)}`);
+        if (res.perlu_perhatian?.length) {
+          const p = res.perlu_perhatian[0];
+          setRugiTarget(res.perlu_perhatian);
+          toast.warning(
+            p.margin < 0
+              ? `${p.nama}: harga jual ${formatRupiah(p.harga_jual)} DI BAWAH modal ${formatRupiah(p.modal_baru)} — rugi!`
+              : `${p.nama}: modal naik jadi ${formatRupiah(p.modal_baru)}, harga jual lama ${formatRupiah(p.harga_jual_lama)} tidak berubah`
+          );
+        }
       } else {
         toast.warning(res.skipped?.[0]?.reason || 'Tidak ada yang diperbarui');
       }
@@ -131,10 +144,18 @@ export default function HargaServerPage() {
   const butuhTindakan = (r) =>
     r.status === 'naik' || r.status === 'turun' || !r.nama_produk_daftar;
 
-  const filteredItems = useMemo(
-    () => (filterKategori ? compareItems.filter((r) => r.kategori === filterKategori) : compareItems),
-    [compareItems, filterKategori]
-  );
+  const filteredItems = useMemo(() => {
+    const kat = filterKategori ? compareItems.filter((r) => r.kategori === filterKategori) : compareItems;
+    const needle = cari.trim().toLowerCase();
+    if (!needle) return kat;
+    return kat.filter(
+      (r) =>
+        String(r.kode_produk || '').toLowerCase().includes(needle) ||
+        String(r.nama_produk || '').toLowerCase().includes(needle) ||
+        String(r.kode_lokal || '').toLowerCase().includes(needle) ||
+        String(r.nama_produk_daftar || '').toLowerCase().includes(needle)
+    );
+  }, [compareItems, filterKategori, cari]);
 
   const visibleItems = useMemo(
     () => (showAll ? filteredItems : filteredItems.filter(butuhTindakan)),
@@ -282,6 +303,15 @@ export default function HargaServerPage() {
 
       {/* Filter */}
       <div className="filter-bar">
+        <Field label="Cari" style={{ flex: 2 }}>
+          <Input
+            type="search"
+            value={cari}
+            onChange={(e) => setCari(e.target.value)}
+            placeholder="Kode/nama di server atau produk lokal…"
+            autoComplete="off"
+          />
+        </Field>
         <Field label="Kategori OrderKuota">
           <Select value={filterKategori} onChange={(e) => setFilterKategori(e.target.value)}>
             {KATEGORI_OPTIONS.map((k) => (
@@ -290,6 +320,52 @@ export default function HargaServerPage() {
           </Select>
         </Field>
       </div>
+
+      <Modal
+        open={Array.isArray(rugiTarget) && rugiTarget.length > 0}
+        onClose={() => setRugiTarget(null)}
+        title="Harga Jual Perlu Dinaikkan"
+      >
+        <p className="text-sm text-secondary" style={{ marginTop: 0 }}>
+          Modal sudah diperbarui ke harga server, tapi <b>harga jual tidak ikut naik</b>
+          {' '}— margin lama dipertahankan. Yang berikut sekarang tidak untung atau malah rugi:
+        </p>
+        <div className="table-wrap">
+          <table className="table table-fit">
+            <thead>
+              <tr>
+                <th>Produk</th>
+                <th className="col-right">Modal baru</th>
+                <th className="col-right">Harga jual</th>
+                <th className="col-right">Margin</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(rugiTarget || []).map((p) => (
+                <tr key={p.kode_produk}>
+                  <td>
+                    <div style={{ fontWeight: 600 }}>{p.nama}</div>
+                    <div className="text-xs text-muted">{p.kode_produk}</div>
+                  </td>
+                  <td className="col-right num">{formatRupiah(p.modal_baru)}</td>
+                  <td className="col-right num">{formatRupiah(p.harga_jual)}</td>
+                  <td className={`col-right num ${p.margin < 0 ? 'text-danger' : 'text-warning'}`}>
+                    {formatRupiah(p.margin)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setRugiTarget(null)}>Tutup</Button>
+            <Button onClick={() => { setRugiTarget(null); navigate('/daftar-barang'); }}>
+              Buka Daftar Barang
+            </Button>
+          </>
+        }
+      </Modal>
 
       <ConfirmDialog
         open={terapkanOpen}

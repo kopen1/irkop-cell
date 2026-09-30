@@ -35,3 +35,6 @@ Revisi/
 native-preview/
 # Data bisnis lokal (produk/harga) — jangan di-commit
 daftar-barang-lama.csv
+
+# File lokal, jangan di-commit (reset data produksi)
+reset-transaksi-LOCAL.sql

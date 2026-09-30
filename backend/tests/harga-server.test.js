@@ -192,3 +192,45 @@ test('POST /api/harga-server/update-modal: kode tanpa produk dilewati', async ()
   assert.equal(r.data.updated_count, 0);
   assert.equal(r.data.skipped_count, 1);
 });
+
+test('update-modal: harga jual di BAWAH modal setelah terapkan -> masuk perlu_perhatian', async () => {
+  const { env, token } = await bootstrap();
+  // Modal lama 15.000, harga jual 15.500 (margin 500) — tipis.
+  await seedProduk(env, { kode: 'Vi2001', nama: 'Indosat 2GB 1Hari', harga: 15500, harga_modal: 15000 });
+  await call(env, '/api/harga-server', {
+    method: 'POST', token,
+    body: { items: [{ kode: 'Vi2001', nama: 'Indosat 2GB 1Hari', kategori: 'cetak_voucher', harga: 15900 }] },
+  });
+
+  const r = await call(env, '/api/harga-server/update-modal', { method: 'POST', token, body: { kode: 'Vi2001' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.updated_count, 1);
+
+  // Modal naik ke 16.400, margin 500 dipertahankan → harga jual 16.900 (masih untung).
+  assert.equal(r.data.perlu_perhatian_count, 0, 'margin positif tidak perlu perhatian');
+
+  const row = await env.DB.prepare('SELECT harga_modal, harga FROM produk WHERE kode = ?').bind('Vi2001').first();
+  assert.equal(row.harga_modal, 16400);
+  assert.equal(row.harga, 16900);
+  assert.ok(row.harga > row.harga_modal, 'harga jual harus di atas modal');
+});
+
+test('update-modal: produk RUGI (harga jual <= modal) dilaporkan di perlu_perhatian', async () => {
+  const { env, token } = await bootstrap();
+  // Modal lama 15.000 tapi harga jual 14.000 → sudah rugi sejak awal.
+  await seedProduk(env, { kode: 'Vi2002', nama: 'Indosat 2GB 2Hari', harga: 14000, harga_modal: 15000 });
+  await call(env, '/api/harga-server', {
+    method: 'POST', token,
+    body: { items: [{ kode: 'Vi2002', nama: 'Indosat 2GB 2Hari', kategori: 'cetak_voucher', harga: 15000 }] },
+  });
+
+  const r = await call(env, '/api/harga-server/update-modal', { method: 'POST', token, body: { kode: 'Vi2002' } });
+  assert.equal(r.status, 200);
+  assert.equal(r.data.updated_count, 1);
+  assert.equal(r.data.perlu_perhatian_count, 1, 'harus dilaporkan perlu perhatian');
+
+  const p = r.data.perlu_perhatian[0];
+  assert.equal(p.nama, 'Indosat 2GB 2Hari');
+  assert.ok(p.harga_jual <= p.modal_baru, 'harga jual harus <= modal');
+  assert.ok(p.margin < 0, 'margin harus negatif');
+});

@@ -383,6 +383,7 @@ export async function updateModalFromServer(db, request, ctx) {
 
   const updated = [];
   const skipped = [];
+  const perluPerhatian = [];
   const biayaMap = await getBiayaVoucherMap(db);
 
   for (const hs of serverRows) {
@@ -432,13 +433,30 @@ export async function updateModalFromServer(db, request, ctx) {
       modal_baru: newModal,
       harga_jual: newHarga,
     });
+
+    // Harga jual <= modal = rugi. Margin lama dipertahankan, jadi kalau
+    // margin sudah tipis/negatif, harga jual baru ikut bermasalah.
+    if (newHarga <= newModal) {
+      perluPerhatian.push({
+        kode: hs.kode_produk,
+        kode_produk: p.kode,
+        nama: p.nama,
+        modal_baru: newModal,
+        harga_jual: newHarga,
+        margin: newHarga - newModal,
+        modal_lama: p.harga_modal,
+        harga_jual_lama: p.harga,
+      });
+    }
   }
 
   return {
     updated_count: updated.length,
     skipped_count: skipped.length,
+    perlu_perhatian_count: perluPerhatian.length,
     updated,
     skipped,
+    perlu_perhatian: perluPerhatian,
     message: `${updated.length} produk diperbarui, ${skipped.length} dilewati`,
   };
 }

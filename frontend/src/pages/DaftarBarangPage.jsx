@@ -3,8 +3,8 @@
 // - Kategori: GET/POST/PUT/DELETE /api/kategori/:id (CRUD lengkap).
 // - Kategori non-stok (lacak_stok=0) → produk tidak punya field stok (PRD 5.5).
 // - stok_minimum → alert stok <= ambang.
-import { useCallback, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
@@ -33,8 +33,41 @@ export default function DaftarBarangPage() {
   const { can } = useAuth();
   const toast = useToast();
   const navigate = useNavigate();
-  const [q, setQ] = useState('');
-  const [filterKategori, setFilterKategori] = useState('');
+  // Pencarian & filter disimpan di URL supaya tetap ada saat membuka
+  // form edit lalu kembali ke daftar (komponen di-remount dengan state baru).
+  const [params, setParams] = useSearchParams();
+  const qUrl = params.get('q') || '';
+  const filterKategori = params.get('kat') || '';
+  const setParam = useCallback((key, value) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev);
+        if (value) next.set(key, value);
+        else next.delete(key);
+        return next;
+      },
+      { replace: true }
+    );
+  }, [setParams]);
+  const setFilterKategori = useCallback((v) => setParam('kat', v), [setParam]);
+
+  // Input pencarian punya state sendiri supaya mengetik terasa responsif;
+  // penulisan ke URL ditunda (debounce) supaya tidak memanggil replaceState
+  // pada tiap ketikan. qUrl tetap jadi sumber kebenaran saat halaman
+  // dibuka kembali / tombol Back browser ditekan.
+  const [qInput, setQInput] = useState(qUrl);
+  const setQ = useCallback((v) => setQInput(v), []);
+  useEffect(() => { setQInput(qUrl); }, [qUrl]);
+  const qTundaRef = useRef(null);
+  useEffect(() => {
+    if (qInput === qUrl) return undefined;
+    clearTimeout(qTundaRef.current);
+    qTundaRef.current = setTimeout(() => setParam('q', qInput), 300);
+    return () => clearTimeout(qTundaRef.current);
+  }, [qInput, qUrl, setParam]);
+
+  // Filter memakai nilai tertunda: ketikan tetap lancar walau katalog besar.
+  const q = useDeferredValue(qInput);
 
   // Data produk + kategori di-cache modul (hooks/useProdukCache.js): pindah
   // halaman bolak-balik tidak memicu request ulang. Pencarian & filter
@@ -61,8 +94,22 @@ export default function DaftarBarangPage() {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sort, setSort] = useState('harga_asc');
   const [selectMode, setSelectMode] = useState(false);
+  // Batasi baris yang dirender sekaligus supaya mengetik tidak berat di HP.
+  const [limitBaris, setLimitBaris] = useState(120);
+  useEffect(() => { setLimitBaris(120); }, [q, filterKategori, sort]);
 
   const kategoriList = cache?.kategori || [];
+
+  // Teks pencarian (kode + nama, lowercase) dihitung sekali per muat katalog,
+  // bukan tiap ketikan — ini bagian terbesar dari biaya filter.
+  const searchIndex = useMemo(() => {
+    const m = new Map();
+    for (const p of cache?.items || []) {
+      m.set(p.id, `${p.kode || ''} ${p.nama || ''}`.toLowerCase());
+    }
+    return m;
+  }, [cache?.items]);
+
   const rows = useMemo(() => {
     const needle = q.trim().toLowerCase();
     const kat = filterKategori ? Number(filterKategori) : null;
@@ -70,13 +117,10 @@ export default function DaftarBarangPage() {
       .filter((p) => {
         if (kat && p.kategori_id !== kat) return false;
         if (!needle) return true;
-        return (
-          String(p.nama || '').toLowerCase().includes(needle) ||
-          String(p.kode || '').toLowerCase().includes(needle)
-        );
+        return searchIndex.get(p.id).includes(needle);
       })
       .map((p) => ({ ...p, key: p.id }));
-  }, [cache, q, filterKategori]);
+  }, [cache, q, filterKategori, searchIndex]);
   const kategoriById = useMemo(
     () => Object.fromEntries((cache?.kategori || []).map((k) => [k.id, k])),
     [cache]
@@ -151,6 +195,21 @@ export default function DaftarBarangPage() {
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rows, kategoriById, kategoriList, sort]);
+
+  const groupedTerbatas = useMemo(() => {
+    if (groupedRows.length <= limitBaris) return groupedRows;
+    const out = [];
+    let produk = 0;
+    for (const g of groupedRows) {
+      if (g._kat || g._sub) { out.push(g); continue; }
+      if (produk >= limitBaris) continue;
+      out.push(g);
+      produk += 1;
+    }
+    return out;
+  }, [groupedRows, limitBaris]);
+
+  const sisaBaris = groupedRows.length - groupedTerbatas.length;
 
   const toggleSelect = (id) => {
     setSelectedIds((prev) => {
@@ -473,7 +532,7 @@ export default function DaftarBarangPage() {
           )}
 
           <div className="plist">
-            {groupedRows.map((r) => {
+            {groupedTerbatas.map((r) => {
               if (r._kat) return <PlistKat key={r.key} jumlah={r._n}>{r._kat}</PlistKat>;
               if (r._sub) {
                 return <PlistSub key={r.key} nama={r._sub} prefix={r._prefix} jumlah={r._n} />;
@@ -481,6 +540,8 @@ export default function DaftarBarangPage() {
               const tag = stokTag(r);
               const laba = (Number(r.harga) || 0) - (Number(r.harga_modal) || 0);
               const labaCls = laba < 0 ? 'text-danger' : laba === 0 ? 'text-warning' : 'text-success';
+              // Laba positif tapi di bawah 1.000 = margin terlalu tipis.
+              const labaTipis = laba > 0 && laba < 1000;
               const selected = selectedIds.has(r.id);
               return (
                 <div
@@ -518,6 +579,11 @@ export default function DaftarBarangPage() {
                     <span className="plist-tagline">
                       <span className={`plist-tag plist-tag-${tag.tone}`}>{tag.label}</span>
                       <span className={`plist-laba ${labaCls}`}>Laba {formatRupiah(laba)}</span>
+                      {labaTipis && (
+                        <span className="badge badge-warning" title={`Laba di bawah Rp 1.000 — tipis,pertimbangkan naikkan harga jual`}>
+                          Tipis
+                        </span>
+                      )}
                     </span>
                     <span className="plist-price">
                       {r.harga_modal != null && (
@@ -541,6 +607,14 @@ export default function DaftarBarangPage() {
               );
             })}
           </div>
+
+          {sisaBaris > 0 && (
+            <div className="hs-showmore">
+              <Button variant="ghost" onClick={() => setLimitBaris((n) => n + 200)}>
+                Tampilkan {Math.min(sisaBaris, 200)} lagi
+              </Button>
+            </div>
+          )}
         </>
       )}
 
