@@ -383,7 +383,7 @@ function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
           </thead>
           <tbody>
             {items.length === 0 && (
-              <tr><td colSpan={5} className="text-muted text-sm">Belum ada porsi diatur. Orang tanpa porsi mendapat 0%.</td></tr>
+              <tr><td colSpan={5} className="text-muted text-sm">Belum ada porsi diatur untuk siapa pun. Semua orang (termasuk owner) mendapat 0%. Isi di bawah bila ada yang perlu berbagi hasil.</td></tr>
             )}
             {items.map((i) => (
               <tr key={i.user_id}>
@@ -435,7 +435,7 @@ function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
       )}
 
       <div className="grid-2 mt-3">
-        <Field label="Tambah / ubah porsi (%)" hint="Contoh 50 = 50%. Maksimal 100.">
+        <Field label="Tambah / ubah porsi (%)" hint=" Berlaku untuk admin (owner) maupun karyawan. Tersimpan di DB, bukan hardcoded — 0% berarti tidak bagi hasil. Contoh 50 = 50%, maksimal 100.">
           <div className="flex items-end gap-2">
             <Select value={userId} onChange={(e) => setUserId(e.target.value)} style={{ flex: 1 }} aria-label="Orang">
               <option value="">Pilih orang…</option>

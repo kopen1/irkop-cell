@@ -182,6 +182,12 @@ npx wrangler deploy
 - **Bagi hasil service: per teknisi, hanya servis yang ia kerjakan.**
   Tabel `bagi_hasil_service (user_id PK, persen 0..100)`.
   `service_hp.teknisi_id` menandai pekerja — NULL = tidak dibagi (jadi bagian toko).
+  **Porsi 100% data-driven: TIDAK ada default di kode.** Tanpa baris = 0%
+  (sama untuk admin & karyawan), dan `persen: 0` tersimpan sebagai 0.
+  Dilarang memakai `||` / `if (!persen)` pada nilai ini — itu mengubah 0% jadi
+  default dan membuat owner diam-diam dapat porsi. Satu-satunya angka default
+  yang boleh di kode adalah `GAJI_OWNER.jaga` (50.000), itu pun hanya kalau
+  setting `owner_upah_harian` belum pernah disimpan.
   Endpoint: `GET|POST /gaji/bagi-hasil`, `DELETE /gaji/bagi-hasil-:userId`,
   `PUT /gaji/owner-upah`, `GET /gaji/teknisi` (bukan admin-only, dipakai form service).
 - Akru gaji owner = `ensureOwnerGajiAutoInput` saat **Closing** (kasir.js) — satu baris

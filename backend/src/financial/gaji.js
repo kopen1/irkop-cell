@@ -7,9 +7,10 @@ export const HARI = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sab
 // panjang 13:00–21:00), buka >= batas -> akhir (shift 16:00–21:00).
 export const GAJI_SHIFT = { batasJam: 16, awal: 60000, akhir: 45000 };
 // Gaji owner: upah jaga toko per hari (tetap) + persentase laba service.
-// Nilai(cls) diambil dari tabel settings / bagi_hasil_service supaya bisa
-// diubah dari UI. Angka di bawah hanya fallback bila setting belum ada.
-export const GAJI_OWNER = { jaga: 50000, servicePct: 50 };
+// Hanya `jaga` yang punya default, dan itu pun HANYA kalau setting belum pernah
+// disimpan. Porsi (%) TIDAK punya default di kode: selalu dibaca dari
+// bagi_hasil_service. Tanpa baris = 0%, sama untuk admin maupun karyawan.
+export const GAJI_OWNER = { jaga: 50000 };
 
 // Upah owner dari settings (default GAJI_OWNER.jaga).
 export async function getOwnerUpah(db) {
@@ -139,11 +140,8 @@ async function openingHour(db, tanggal) {
   return (d.getUTCHours() + 7) % 24;
 }
 
-// Upah owner: nominal tetap (GAJI_OWNER.jaga), tidak ikut shift.
-// Shift 60k/45k hanya untuk karyawan (GAJI_SHIFT).
-function ownerShiftRate() {
-  return GAJI_OWNER.jaga;
-}
+// Upah owner (admin) = settings global `owner_upah_harian` (lihat
+// getUpahUntukUser). Shift 60k/45k hanya untuk karyawan (karyawan_rate).
 
 // Hitung gaji owner untuk satu tanggal: upah jaga per hari (tetap) + % laba service.
 // Laba service dihitung dari TANGGAL TRANSAKSI service (saat selesai/dibayar).
@@ -184,9 +182,9 @@ export async function hitungGajiOwner(db, tanggal, jamBukaIn, ownerIdIn = null) 
   const ownerId = Number(ownerIdIn);
   const info = await db.one('SELECT id, nama, role FROM users WHERE id = ?', ownerId);
   const upah = await getUpahUntukUser(db, ownerId);
-  // Pakai persen dari DB; belum ada baris -> fallback ke bawaan.
-  let persen = await getPersenService(db, ownerId);
-  if (!persen) persen = GAJI_OWNER.servicePct;
+  // Porsi selalu dari DB. Tidak ada fallback di kode — 0% pun tersimpan
+  // sebagai 0 (jangan pakai `||` atau `if (!persen)`, itu destroys 0).
+  const persen = await getPersenService(db, ownerId);
   const serviceLaba = await sumServiceLaba(db, tanggal, ownerId);
   const serviceShare = Math.round((serviceLaba * persen) / 100);
   return {

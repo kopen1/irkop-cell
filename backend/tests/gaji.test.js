@@ -366,3 +366,99 @@ test('Gaji owner: GLOBAL untuk semua admin, tidak dikunci ke satu akun', async (
   assert.equal(k1.total, 100000, 'admin dengan porsi 50% dapat 100.000');
   assert.equal(r.data.total, 150000, 'total global = 100.000 + 50.000');
 });
+
+test('Bagi hasil: TIDAK ada default di kode — owner tanpa porsi = 0%', async () => {
+  const { env, adminToken, adminId } = await setup();
+  const today = todayWib();
+  await openKasir(env, adminToken);
+
+  // Service dikerjakan owner, tapi TIDAK ada baris bagi_hasil_service.
+  const svc = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-no-porsi' },
+    body: {
+      jenis: 'service', metode_bayar: 'tunai', items: [],
+      service: {
+        nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 200000,
+        harga_modal: 100000, tanggal_masuk: today, technisi_id: adminId,
+      },
+    },
+  });
+  assert.equal(svc.status, 200, JSON.stringify(svc.data));
+
+  const r = await call(env, `/api/gaji/owner?tanggal=${today}&user_id=${adminId}`, { token: adminToken });
+  assert.equal(r.data.service_laba, 100000, 'laba service terdeteksi');
+  assert.equal(r.data.service_pct, 0, 'tanpa baris porsi -> 0%, bukan default 50%');
+  assert.equal(r.data.service_share, 0, 'tidak ada bagi hasil');
+  assert.equal(r.data.total, 50000, 'hanya upah harian');
+});
+
+test('Bagi hasil: porsi 0% bisa DISIMPAN (tidak diam-diam jadi default)', async () => {
+  const { env, adminToken, adminId } = await setup();
+  const today = todayWib();
+  await openKasir(env, adminToken);
+
+  const set = await call(env, '/api/gaji/bagi-hasil', {
+    method: 'POST', token: adminToken, body: { user_id: adminId, persen: 0 },
+  });
+  assert.equal(set.status, 200, JSON.stringify(set.data));
+  assert.equal(set.data.persen, 0, '0% tersimpan sebagai 0');
+
+  await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-porsi-nol' },
+    body: {
+      jenis: 'service', metode_bayar: 'tunai', items: [],
+      service: {
+        nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 400000,
+        harga_modal: 100000, tanggal_masuk: today, technisi_id: adminId,
+      },
+    },
+  });
+
+  const r = await call(env, `/api/gaji/owner?tanggal=${today}&user_id=${adminId}`, { token: adminToken });
+  assert.equal(r.data.service_laba, 300000);
+  assert.equal(r.data.service_pct, 0, 'porsi 0% tidak dikembalikan ke default');
+  assert.equal(r.data.service_share, 0);
+  assert.equal(r.data.total, 50000, 'upah saja');
+});
+
+test('Bagi hasil: teknisi baru bisa dapat porsi apa saja tanpa sentuh kode', async () => {
+  const { env, adminToken } = await setup();
+  const baru = await createUserRaw(env, { nama: 'Teknisi Baru', username: 'tekbaru', password: 'tekbaru1234', role: 'karyawan' });
+  const today = todayWib();
+  await openKasir(env, adminToken);
+
+  // Tidak ada porsi sama sekali -> 0
+  let r = await call(env, '/api/gaji/bagi-hasil?tanggal=' + today, { token: adminToken });
+  const cari = (rows, id) => (rows || []).find((x) => Number(x.user_id) === Number(id));
+  assert.equal(cari(r.data.items, baru), undefined, 'tanpa baris -> tidak masuk daftar items');
+  assert.ok(r.data.daftar_orang.some((x) => Number(x.id) === Number(baru)), 'tapi tetap muncul di daftar orang (bisa dipilih di UI)');
+
+  // Set 35% untuk teknisi baru
+  const s = await call(env, '/api/gaji/bagi-hasil', {
+    method: 'POST', token: adminToken, body: { user_id: baru, persen: 35 },
+  });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  assert.equal(s.data.persen, 35);
+
+  await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-tek-baru' },
+    body: {
+      jenis: 'service', metode_bayar: 'tunai', items: [],
+      service: {
+        nama_device: 'iPhone', deskripsi_kerusakan: 'Baterai', biaya: 200000,
+        harga_modal: 100000, tanggal_masuk: today, technisi_id: baru,
+      },
+    },
+  });
+
+  r = await call(env, '/api/gaji/bagi-hasil?tanggal=' + today, { token: adminToken });
+  const row = cari(r.data.items, baru);
+  assert.ok(row, 'teknisi baru muncul setelah porsi diisi');
+  assert.equal(row.persen, 35, 'porsi 35% dari DB');
+  assert.equal(row.share, 35000, '35% dari laba 100.000');
+
+  // Ubah jadi 100% tanpa sentuh kode
+  await call(env, '/api/gaji/bagi-hasil', { method: 'POST', token: adminToken, body: { user_id: baru, persen: 100 } });
+  r = await call(env, '/api/gaji/bagi-hasil?tanggal=' + today, { token: adminToken });
+  assert.equal(cari(r.data.items, baru).share, 100000, '100% setelah diubah');
+});
