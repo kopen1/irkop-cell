@@ -119,6 +119,7 @@ export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel
   const akun = useAsync(() => api.get('/akun'), { deps: [] });
   const pelanggan = useAsync(() => api.get('/pelanggan', { limit: 500 }), { deps: [] });
   const kasir = useAsync(() => api.get('/kasir/current'), { deps: [] });
+  const teknisiList = useAsync(() => api.get('/gaji/teknisi'), { deps: [] });
 
   const allProduk = useMemo(() => (produk.data?.items || []).filter((p) => !p.deleted_at), [produk.data]);
   const kategoriList = useMemo(() => (kategori.data?.items || []).filter((k) => !k.deleted_at), [kategori.data]);
@@ -192,6 +193,7 @@ export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel
   const [adminPresetTarik, setAdminPresetTarik] = useState('');
 
   const [namaDevice, setNamaDevice] = useState(initial?.service?.nama_device || '');
+  const [technisiId, setTechnisiId] = useState(initial?.service?.technisi_id || '');
   const [kerusakan, setKerusakan] = useState(initial?.service?.deskripsi_kerusakan || '');
   const [biayaService, setBiayaService] = useState(initial?.service?.biaya ? String(initial.service.biaya) : '');
   const [modalService, setModalService] = useState(initial?.service?.harga_modal ? String(initial.service.harga_modal) : '');
@@ -562,6 +564,7 @@ export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel
         pelanggan_id: pelangganId || null,
         service: {
           nama_device: namaDevice.trim(),
+          teknisi_id: teknisiId ? Number(technisiId) : null,
           deskripsi_kerusakan: kerusakan.trim(),
           biaya: biayaServiceNum,
           harga_modal: modalServiceNum,
@@ -1226,6 +1229,14 @@ export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel
                   onChange={(e) => setKerusakan(e.target.value)}
                   placeholder="mis. LCD retak"
                 />
+              </Field>
+              <Field label="Teknisi" hint="Untuk bagi hasil service. Kosong = tidak dibagi.">
+                <Select value={technisiId} onChange={(e) => setTechnisiId(e.target.value)}>
+                  <option value="">— Tanpa teknisi —</option>
+                  {(teknisiList.data || []).map((u) => (
+                    <option key={u.id} value={u.id}>{u.nama}</option>
+                  ))}
+                </Select>
               </Field>
             </div>
 

@@ -7,7 +7,22 @@ export const HARI = ['minggu', 'senin', 'selasa', 'rabu', 'kamis', 'jumat', 'sab
 // panjang 13:00–21:00), buka >= batas -> akhir (shift 16:00–21:00).
 export const GAJI_SHIFT = { batasJam: 16, awal: 60000, akhir: 45000 };
 // Gaji owner: upah jaga toko per hari (tetap) + persentase laba service.
+// Nilai(cls) diambil dari tabel settings / bagi_hasil_service supaya bisa
+// diubah dari UI. Angka di bawah hanya fallback bila setting belum ada.
 export const GAJI_OWNER = { jaga: 50000, servicePct: 50 };
+
+// Upah owner dari settings (default GAJI_OWNER.jaga).
+export async function getOwnerUpah(db) {
+  const row = await db.one("SELECT value FROM settings WHERE key = 'owner_upah_harian'");
+  const v = row ? Number(row.value) : NaN;
+  return Number.isFinite(v) && v >= 0 ? Math.round(v) : GAJI_OWNER.jaga;
+}
+
+// Persentase bagi hasil service untuk satu orang (0 bila belum diatur).
+export async function getPersenService(db, userId) {
+  const row = await db.one('SELECT persen FROM bagi_hasil_service WHERE user_id = ?', userId);
+  return row ? Math.max(0, Math.min(100, Number(row.persen) || 0)) : 0;
+}
 
 export function dayNameOf(date) {
   return HARI[new Date(`${date}T00:00:00Z`).getUTCDay()];
@@ -74,15 +89,42 @@ export async function ensureGajiAutoInput(db, { user, tanggal, kasirSesiId, jamB
   return row;
 }
 
-async function sumServiceLaba(db, tanggal) {
+// Laba service satu tanggal. Kalau teknisiId diisi, hanya servis yang
+// dikerjakan orang itu.
+async function sumServiceLaba(db, tanggal, teknisiId = null) {
+  const params = [tanggal];
+  let filter = '';
+  if (teknisiId != null) {
+    filter = ' AND s.teknisi_id = ?';
+    params.push(teknisiId);
+  }
   const row = await db.one(
     `SELECT COALESCE(SUM((ti.harga_snapshot - COALESCE(ti.harga_modal_snapshot, 0)) * ti.qty), 0) AS laba
        FROM transaksi t
        JOIN transaksi_item ti ON ti.transaksi_id = t.id
-      WHERE t.deleted_at IS NULL AND t.tanggal_transaksi = ? AND ti.service_hp_id IS NOT NULL`,
-    tanggal
+       JOIN service_hp s ON s.id = ti.service_hp_id
+      WHERE t.deleted_at IS NULL AND t.tanggal_transaksi = ? AND ti.service_hp_id IS NOT NULL${filter}`,
+    ...params
   );
   return Number(row ? row.laba : 0);
+}
+
+// Semua servis pada satu tanggal, dikelompokkan per teknisi.
+// Kunci 'null' = servis tanpa teknisi (tidak dibagi ke siapa pun).
+export async function serviceLabaPerTeknisi(db, tanggal) {
+  const rows = await db.many(
+    `SELECT s.teknisi_id AS teknisi_id,
+            COALESCE(SUM((ti.harga_snapshot - COALESCE(ti.harga_modal_snapshot, 0)) * ti.qty), 0) AS laba
+       FROM transaksi t
+       JOIN transaksi_item ti ON ti.transaksi_id = t.id
+       JOIN service_hp s ON s.id = ti.service_hp_id
+      WHERE t.deleted_at IS NULL AND t.tanggal_transaksi = ? AND ti.service_hp_id IS NOT NULL
+      GROUP BY s.teknisi_id`,
+    tanggal
+  );
+  const map = new Map();
+  for (const r of rows) map.set(r.teknisi_id ?? 'null', Number(r.laba));
+  return map;
 }
 
 // Jam buka (WIB) satu tanggal, dari kasir_sesi.dibuka_at.
@@ -105,22 +147,49 @@ function ownerShiftRate() {
 
 // Hitung gaji owner untuk satu tanggal: upah jaga per hari (tetap) + % laba service.
 // Laba service dihitung dari TANGGAL TRANSAKSI service (saat selesai/dibayar).
-export async function hitungGajiOwner(db, tanggal, jamBukaIn) {
+export async function hitungGajiOwner(db, tanggal, jamBukaIn, ownerIdIn = null) {
   let jamBuka = jamBukaIn;
   if (jamBuka === null || jamBuka === undefined) jamBuka = await openingHour(db, tanggal);
-  const upah = ownerShiftRate(jamBuka);
-  const serviceLaba = await sumServiceLaba(db, tanggal);
-  const serviceShare = Math.round((serviceLaba * GAJI_OWNER.servicePct) / 100);
+  const upah = await getOwnerUpah(db);
+  const ownerId = ownerIdIn ?? (await db.one("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"))?.id ?? null;
+  // Pakai persen dari DB; belum ada baris -> fallback ke bawaan.
+  let persen = ownerId ? await getPersenService(db, ownerId) : 0;
+  if (!persen) persen = GAJI_OWNER.servicePct;
+  const serviceLaba = await sumServiceLaba(db, tanggal, ownerId);
+  const serviceShare = Math.round((serviceLaba * persen) / 100);
   return {
     tanggal,
     jam_buka: jamBuka,
     upah,
     jaga: upah,
     service_laba: serviceLaba,
-    service_pct: GAJI_OWNER.servicePct,
+    service_pct: persen,
     service_share: serviceShare,
     total: upah + serviceShare,
   };
+}
+
+// Ringkasan bagi hasil service semua orang pada satu tanggal.
+export async function hitungBagiHasilService(db, tanggal) {
+  const map = await serviceLabaPerTeknisi(db, tanggal);
+  const rows = await db.many(
+    `SELECT b.user_id, u.nama, u.role, b.persen
+       FROM bagi_hasil_service b JOIN users u ON u.id = b.user_id
+      ORDER BY u.nama`
+  );
+  const items = [];
+  let totalLaba = 0, totalShare = 0;
+  for (const r of rows) {
+    const laba = map.get(r.user_id) ?? 0;
+    const share = Math.round((laba * Math.max(0, Math.min(100, Number(r.persen) || 0))) / 100);
+    totalLaba += laba;
+    totalShare += share;
+    items.push({ user_id: r.user_id, nama: r.nama, role: r.role, persen: Number(r.persen) || 0, service_laba: laba, share });
+  }
+  // Servis tanpa teknisi tetap bagian toko, tapi tetap dilaporkan.
+  const tanpaTeknisi = map.get('null') ?? 0;
+  totalLaba += tanpaTeknisi;
+  return { tanggal, items, total_service_laba: totalLaba, total_share: totalShare, sisa_toko: totalLaba - totalShare, service_tanpa_teknisi: tanpaTeknisi };
 }
 
 // Akru gaji owner otomatis (dipanggil saat Closing). Hanya menambah baris gaji

@@ -7,7 +7,7 @@
 //  2) rate custom yang sudah tersimpan tidak dimuat ulang ke form -> input kosong
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import React from 'react';
-import { render, screen, fireEvent, waitFor, cleanup } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor, cleanup, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ThemeProvider } from '../../context/ThemeContext';
 import { ToastProvider } from '../../context/ToastContext';
@@ -140,7 +140,9 @@ describe('GajiPage — Atur Rate (custom per hari)', () => {
       expect(screen.getByLabelText('Tipe rate').value).toBe('custom_harian');
     }, { timeout: 8000 });
 
-    const simpan = screen.getAllByRole('button', { name: /simpan/i })[0];
+    // Tombol di modal Atur Rate namanya "Simpan Rate" (ada "Simpan" lain di kartu Bagi Hasil).
+    const dialog = screen.getByRole('dialog');
+    const simpan = within(dialog).getByRole('button', { name: /simpan rate/i });
     fireEvent.click(simpan);
 
     await waitFor(() => {

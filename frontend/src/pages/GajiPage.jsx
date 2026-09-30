@@ -49,6 +49,8 @@ export default function GajiPage() {
 
   const [ownerDate, setOwnerDate] = useState(todayWIB());
   const [owner, setOwner] = useState({ status: 'idle', data: null, error: null });
+  const [bagi, setBagi] = useState({ status: 'idle', data: null });
+  const [upahOwner, setUpahOwner] = useState('');
   const [unpaid, setUnpaid] = useState({ status: 'idle', items: [] });
   const [payBusy, setPayBusy] = useState(null);
   const loadUnpaid = async () => {
@@ -78,6 +80,12 @@ export default function GajiPage() {
   useEffect(() => {
     let cancelled = false;
     setOwner({ status: 'loading', data: null, error: null });
+    api.get('/gaji/bagi-hasil', { tanggal: ownerDate })
+      .then((r) => {
+        setBagi({ status: 'success', data: r });
+        setUpahOwner(r.owner_upah_harian != null ? String(r.owner_upah_harian) : '');
+      })
+      .catch(() => setBagi({ status: 'error', data: null }));
     api.get('/gaji/owner', { tanggal: ownerDate })
       .then((res) => { if (!cancelled) setOwner({ status: 'success', data: res, error: null }); })
       .catch((err) => { if (!cancelled) setOwner({ status: 'error', data: null, error: err }); });
@@ -99,6 +107,18 @@ export default function GajiPage() {
           </Button>
         }
       />
+
+      <Card className="mt-4" title="Bagi Hasil Service" subtitle="Porsi laba servis untuk orang yang mengerjakannya. Tersimpan di database — bisa diubah kapan saja.">
+        <BagikanHasil
+          data={bagi.data}
+          upahOwner={upahOwner}
+          setUpahOwner={setUpahOwner}
+          onReload={() => {
+            setBagi({ status: 'idle', data: null });
+            setOwner({ status: 'idle', data: null, error: null });
+          }}
+        />
+      </Card>
 
       <div className="filter-bar">
         <Field label="Bulan">
@@ -253,6 +273,164 @@ function GajiEditForm({ target, onCancel, onSaved }) {
         <Button type="submit" loading={busy}>Simpan</Button>
       </div>
     </form>
+  );
+}
+
+function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
+  const toast = useToast();
+  const [userId, setUserId] = useState('');
+  const [persen, setPersen] = useState('');
+  const [err, setErr] = useState(null);
+  const [saving, setSaving] = useState(false);
+
+  if (!data) return <Loader />;
+  const items = data.items || [];
+  const sudah = new Set(items.map((i) => i.user_id));
+  const belumAdaPorsi = (data.daftar_orang || []).filter((u) => !sudah.has(u.id));
+
+  const simpanPorsi = async () => {
+    setErr(null);
+    if (!userId) return setErr('Pilih orang dulu.');
+    const p = parseRupiah(persen);
+    if (persen === '' || Number.isNaN(p) || p < 0 || p > 100) return setErr('Persen harus 0-100.');
+    setSaving(true);
+    try {
+      await api.post('/gaji/bagi-hasil', { user_id: Number(userId), persen: p });
+      toast.success('Porsi bagi hasil disimpan.');
+      setUserId(''); setPersen('');
+      onReload();
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  };
+
+  const ubahPorsi = async (id, nilai) => {
+    const p = parseRupiah(nilai);
+    if (Number.isNaN(p) || p < 0 || p > 100) { setErr('Persen harus 0-100.'); return; }
+    setSaving(true);
+    try {
+      await api.post('/gaji/bagi-hasil', { user_id: id, persen: p });
+      toast.success('Porsi diperbarui.');
+      onReload();
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  };
+
+  const hapusPorsi = async (id, nama) => {
+    if (!window.confirm(`Hapus porsi bagi hasil untuk ${nama}? Porsinya jadi 0%.`)) return;
+    setSaving(true);
+    try {
+      await api.del(`/gaji/bagi-hasil-${id}`);
+      toast.success('Porsi dihapus.');
+      onReload();
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  };
+
+  const simpanUpah = async () => {
+    setErr(null);
+    const n = parseRupiah(upahOwner);
+    if (Number.isNaN(n) || n < 0) return setErr('Upah owner tidak valid.');
+    setSaving(true);
+    try {
+      await api.put('/gaji/owner-upah', { nominal: n });
+      toast.success('Upah harian owner disimpan.');
+      onReload();
+    } catch (e) { setErr(e.message); } finally { setSaving(false); }
+  };
+
+  return (
+    <>
+      <div className="table-wrap">
+        <table className="table table-fit">
+          <thead>
+            <tr>
+              <th>Orang</th>
+              <th className="col-right">% bagi hasil</th>
+              <th className="col-right">Laba servis (tanggal ini)</th>
+              <th className="col-right">Diterima</th>
+              <th className="col-right">Aksi</th>
+            </tr>
+          </thead>
+          <tbody>
+            {items.length === 0 && (
+              <tr><td colSpan={5} className="text-muted text-sm">Belum ada porsi diatur. Orang 默认 dapat 0%.</td></tr>
+            )}
+            {items.map((i) => (
+              <tr key={i.user_id}>
+                <td style={{ fontWeight: 600 }}>{i.nama} <span className="text-xs text-muted">({i.role})</span></td>
+                <td className="col-right">
+                  <Input
+                    type="number" min="0" max="100" defaultValue={i.persen}
+                    style={{ width: 82, textAlign: 'right' }}
+                    aria-label={`Porsi ${i.nama}`}
+                    onBlur={(e) => {
+                      const v = Number(e.target.value);
+                      if (v !== i.persen) ubahPorsi(i.user_id, e.target.value);
+                    }}
+                  />
+                </td>
+                <td className="col-right num">{formatRupiah(i.service_laba)}</td>
+                <td className="col-right num text-success">{formatRupiah(i.share)}</td>
+                <td className="col-right">
+                  <Button variant="ghost" size="sm" disabled={busy || saving} onClick={() => hapusPorsi(i.user_id, i.nama)} aria-label={`Hapus porsi ${i.nama}`}>
+                    <Icon name="trash" size={14} />
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          {items.length > 0 && (
+            <tfoot>
+              <tr>
+                <td style={{ fontWeight: 700 }}>Total</td>
+                <td />
+                <td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(data.total_service_laba)}</td>
+                <td className="col-right num" style={{ fontWeight: 700, color: 'var(--success)' }}>{formatRupiah(data.total_share)}</td>
+                <td />
+              </tr>
+              <tr>
+                <td colSpan={4} className="text-sm text-secondary">Sisa untuk toko ({formatRupiah(data.total_service_laba)} − {formatRupiah(data.total_share)})</td>
+                <td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(data.sisa_toko)}</td>
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+
+      {data.service_tanpa_teknisi > 0 && (
+        <p className="field-hint mt-2">
+          Ada servis tanpa teknisi: laba <b className="num">{formatRupiah(data.service_tanpa_teknisi)}</b> — tidak dibagi ke siapa pun, menjadi bagian toko.
+          Setel teknisi saat input servis agar ikut dibagikan.
+        </p>
+      )}
+
+      <div className="grid-2 mt-3">
+        <Field label="Tambah / ubah porsi">
+          <div className="flex items-end gap-2">
+            <Select value={userId} onChange={(e) => setUserId(e.target.value)} style={{ flex: 1 }}>
+              <option value="">Pilih orang…</option>
+              {(belumAdaPorsi.length ? belumAdaPorsi : (data.daftar_orang || [])).map((u) => (
+                <option key={u.id} value={u.id}>{u.nama}</option>
+              ))}
+            </Select>
+            <Input
+              value={persen} onChange={(e) => setPersen(e.target.value)}
+              placeholder="0" style={{ width: 90 }}
+              aria-label="Persen" inputMode="numeric"
+            />
+            <Button onClick={simpanPorsi} loading={saving}>Simpan</Button>
+          </div>
+        </Field>
+        <Field label="Upah harian owner (Rp)">
+          <div className="flex items-end gap-2">
+            <Input
+              value={upahOwner} onChange={(e) => setUpahOwner(e.target.value)}
+              placeholder="50000" style={{ flex: 1 }} aria-label="Upah harian owner" inputMode="numeric"
+            />
+            <Button variant="secondary" onClick={simpanUpah} loading={saving}>Simpan</Button>
+          </div>
+        </Field>
+      </div>
+
+      {err && <p className="field-error" role="alert">{err}</p>}
+    </>
   );
 }
 

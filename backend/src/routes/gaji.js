@@ -2,8 +2,8 @@ import { err } from '../lib/errors.js';
 import { readBody, asInt, asDate, asEnum } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { nowIso, isValidCalendarDate, wibDateToday } from '../lib/time.js';
-import { requireAdmin } from '../lib/auth.js';
-import { hitungGajiOwner } from '../financial/gaji.js';
+import { requireAdmin, requireAuth } from '../lib/auth.js';
+import { hitungGajiOwner, hitungBagiHasilService, getOwnerUpah, getPersenService } from '../financial/gaji.js';
 import { requireSessionForToday } from '../financial/kasir.js';
 import { getAccount } from '../financial/akun.js';
 
@@ -215,4 +215,86 @@ export async function setRateGaji(db, request, ctx) {
   await db.batch(stmts);
   await writeAudit(db, { userId: admin.id, aksi: 'update', tabel: 'karyawan_rate', recordId: userId, dataAfter: body });
   return { user_id: userId, tipe, message: 'Rate gaji disimpan' };
+}
+// ---------------------------------------------------------------------------
+// Bagi hasil service: Configure percent per orang (bukanopi-coded).
+// ---------------------------------------------------------------------------
+
+// GET /api/gaji/bagi-hasil?  (tanpa params: semua orang + total hari ini)
+export async function getBagiHasil(db, request, ctx) {
+  requireAdmin(ctx);
+  const url = new URL(request.url);
+  const tanggal = asDate(url.searchParams.get('tanggal'), { required: true, field: 'tanggal' });
+  const summary = await hitungBagiHasilService(db, tanggal);
+  const up = await getOwnerUpah(db);
+  const semua = await db.many(
+    `SELECT u.id, u.nama, u.role FROM users u
+      WHERE u.aktif = 1 AND u.role IN ('karyawan','admin')
+      ORDER BY u.nama`
+  );
+  return {
+    tanggal,
+    owner_upah_harian: up,
+    items: summary.items,
+    service_tanpa_teknisi: summary.service_tanpa_teknisi,
+    total_service_laba: summary.total_service_laba,
+    total_share: summary.total_share,
+    sisa_toko: summary.sisa_toko,
+    daftar_orang: semua,
+  };
+}
+
+// POST /api/gaji/bagi-hasil  { user_id, persen }
+export async function setBagiHasil(db, request, ctx) {
+  const admin = requireAdmin(ctx);
+  const body = await readBody(request);
+  const userId = asInt(body.user_id, { required: true, field: 'user_id' });
+  const persen = asInt(body.persen, { required: true, field: 'persen', min: 0, max: 100 });
+  const u = await db.one('SELECT id, role FROM users WHERE id = ?', userId);
+  if (!u) throw err(400, 'invalid_user', 'User tidak ditemukan');
+  if (!GAJI_BISA_DIBAYAR.includes(u.role)) {
+    throw err(400, 'invalid_user', 'Bagi hasil service hanya untuk role karyawan atau admin (owner)');
+  }
+  await db.exec(
+    `INSERT INTO bagi_hasil_service (user_id, persen, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(user_id) DO UPDATE SET persen = excluded.persen, updated_at = excluded.updated_at`,
+    userId, persen, nowIso()
+  );
+  await writeAudit(db, { userId: admin.id, aksi: 'update', tabel: 'bagi_hasil_service', recordId: userId, dataAfter: { user_id: userId, persen } });
+  return { user_id: userId, persen, message: 'Porsi bagi hasil service disimpan' };
+}
+
+// DELETE /api/gaji/bagi-hasil/:userId
+export async function deleteBagiHasil(db, request, ctx, userIdStr) {
+  const admin = requireAdmin(ctx);
+  const userId = asInt(userIdStr, { required: true, field: 'user_id' });
+  const changes = await db.exec('DELETE FROM bagi_hasil_service WHERE user_id = ?', userId);
+  await writeAudit(db, { userId: admin.id, aksi: 'delete', tabel: 'bagi_hasil_service', recordId: userId, dataAfter: { user_id: userId } });
+  return { user_id: userId, deleted: Number(changes.changes || 0) > 0 };
+}
+
+// PUT /api/gaji/owner-upah { nominal }
+export async function setOwnerUpah(db, request, ctx) {
+  const admin = requireAdmin(ctx);
+  const body = await readBody(request);
+  const nominal = asInt(body.nominal, { required: true, field: 'nominal', min: 0 });
+  await db.exec(
+    `INSERT INTO settings (key, value, updated_at) VALUES ('owner_upah_harian', ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+    String(nominal), nowIso()
+  );
+  await writeAudit(db, { userId: admin.id, aksi: 'update', tabel: 'settings', recordId: 'owner_upah_harian', dataAfter: { nominal } });
+  return { nominal, message: 'Upah harian owner disimpan' };
+}
+
+// GET /api/gaji/teknisi — daftar orang yang bisa jadi teknisi.
+// Bukan requireAdmin: teknisi juga perlu memilih namanya saat input servis.
+export async function listTeknisi(db, request, ctx) {
+  requireAuth(ctx);
+  const rows = await db.many(
+    `SELECT u.id, u.nama, u.role FROM users u
+      WHERE u.aktif = 1 AND u.role IN ('karyawan','admin')
+      ORDER BY u.role, u.nama`
+  );
+  return { items: rows };
 }

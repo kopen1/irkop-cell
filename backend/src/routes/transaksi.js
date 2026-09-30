@@ -440,6 +440,12 @@ async function writeTransaksiAudit(db, user, tx, aksi = 'create', before = null,
   });
 }
 
+function asIntUser(v) {
+  const n = Number(v);
+  if (!Number.isInteger(n) || n < 1) throw err(400, 'invalid_value', 'technisi_id tidak valid');
+  return n;
+}
+
 export async function createTransaksi(db, body, ctx, request) {
   const jenis = body.jenis || null;
   if (jenis === 'tariktunai' || jenis === 'transfer') {
@@ -678,9 +684,17 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     }
     const modalFinal = servicePartEntries.length ? partModal : (svc.harga_modal != null ? Number(svc.harga_modal) : null);
 
+    // Teknisi (pembagi hasil service). NULL = tidak ada pembagian.
+    let svcTeknisiId = null;
+    if (svc.technisi_id != null && svc.technisi_id !== '') {
+      svcTeknisiId = asIntUser(svc.technisi_id);
+      const t = await db.one("SELECT id, role FROM users WHERE id = ? AND aktif = 1", svcTeknisiId);
+      if (!t) throw err(400, 'invalid_user', 'Teknisi tidak ditemukan');
+    }
+
     const svcResult = await db.exec(
-      `INSERT INTO service_hp (pelanggan_id, nama_device, deskripsi_kerusakan, biaya, harga_modal, tanggal_masuk, catatan, status)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO service_hp (pelanggan_id, nama_device, deskripsi_kerusakan, biaya, harga_modal, tanggal_masuk, catatan, status, teknisi_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       svcPelangganId,
       svc.nama_device,
       svc.deskripsi_kerusakan || null,
@@ -688,7 +702,8 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
       modalFinal,
       svc.tanggal_masuk || svcNow,
       svc.catatan || null,
-      'selesai'
+      'selesai',
+      svcTeknisiId
     );
     // Replace body.items with a single item referencing the new service_hp
     body.items = [{ service_hp_id: svcResult.lastRowId, qty: 1, biaya: svc.biaya, harga_modal: modalFinal }];

@@ -159,6 +159,20 @@ npx wrangler deploy
 - Harga yang "terbaca" 0 dari OrderKuota biasanya berarti request dari IP Cloudflare
   diblokir — cek `pulsa.fetched` pada respons `POST /api/price-check`.
 
+### 6e. Gaji & bagi hasil service (migrasi 0014)
+- `gaji_harian` = **(upah per hari dari `karyawan_rate`) + (porsi % laba service)**.
+- Upah karyawan: `tipe = 'flat'` atau `custom_harian` (7 hari). Diubah lewat "Atur Rate".
+- Upah owner: **tidak ada** di `karyawan_rate` — dibaca dari `settings` key
+  `owner_upah_harian` (default 50.000). Diubah lewat UI Gaji.
+- **Bagi hasil service: per teknisi, hanya servis yang ia kerjakan.**
+  Tabel `bagi_hasil_service (user_id PK, persen 0..100)`.
+  `service_hp.teknisi_id` menandai pekerja — NULL = tidak dibagi (jadi bagian toko).
+  Endpoint: `GET|POST /gaji/bagi-hasil`, `DELETE /gaji/bagi-hasil-:userId`,
+  `PUT /gaji/owner-upah`, `GET /gaji/teknisi` (bukan admin-only, dipakai form service).
+- Akru gaji owner = `ensureOwnerGajiAutoInput` saat **Closing** (kasir.js). Bila sesi
+  dibuat langsung `tutup` (mis. impor), akru tidak jalan — jalankan manual.
+- Bayar gaji: `POST /gaji/bayar` → 1 `pengeluaran` kategori `gaji` + `dibayar_at`.
+
 ## 7. Testing
 
 ```bash
