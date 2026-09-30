@@ -55,6 +55,15 @@ irkop-cell/
 - **Uang = INTEGER rupiah** (tanpa desimal/float).
 - **Hard rule:** role `karyawan` tidak pernah dapat akses `gaji_karyawan`/`pengaturan`.
   Ditegakkan di BE (`requirePage`/`requireAdmin`) dan FE (`lib/routes.js`).
+- **Hapus user hanya kalau bersih** (`routes/users.js:deleteUser`): sebelum `DELETE`,
+  dicek 18 kolom FK di 12 tabel (`transaksi`, `kasir_sesi`, `gaji_harian`, `service_hp`,
+  `kasbon`, `kasbon_pembayaran`, `pengeluaran`, `pembelian_stok`, `transfer_saldo`,
+  `payments`). Kalau ada isinya → `409 user_has_history`, wajib **nonaktifkan** (`aktif=0`).
+  Konfigurasi saja (`user_permissions`, `karyawan_rate`, `karyawan_rate_harian`,
+  `bagi_hasil_service`, `audit_log`) dibersihkan otomatis, tidak menghalangi.
+  Plus: tidak bisa hapus diri sendiri (`cannot_delete_self`).
+- **Jangan pernah menonaktifkan admin aktif terakhir** (`last_admin`) — cek di
+  `updateUser` (saat `aktif=0`) dan `deleteUser`, supaya sistem tidak terkunci tanpa admin.
 - **Jangan tambah dependency** (BE sengaja zero-dep; FE hanya yang sudah ada) tanpa izin.
 - **Jangan commit/push** tanpa perintah eksplisit user.
 
@@ -164,13 +173,19 @@ npx wrangler deploy
 - Upah karyawan: `tipe = 'flat'` atau `custom_harian` (7 hari). Diubah lewat "Atur Rate".
 - Upah owner: **tidak ada** di `karyawan_rate` — dibaca dari `settings` key
   `owner_upah_harian` (default 50.000). Diubah lewat UI Gaji.
+- **Owner = SETIAPA user `role = 'admin'` — tidak dikunci ke satu akun.**
+  `hitungGajiOwner(db, tanggal)` tanpa `user_id` menjumlah semua admin
+  (rincian per orang di `.owners`, total di `.total`, daftar di `.semua_admin`).
+  `ensureOwnerGajiAutoInput` membuat satu baris `gaji_harian` per admin.
+  `GET /api/gaji/owner?user_id=N` hanya untuk satu orang.
+  `getUpahUntukUser()`: admin → settings global, karyawan → `karyawan_rate`.
 - **Bagi hasil service: per teknisi, hanya servis yang ia kerjakan.**
   Tabel `bagi_hasil_service (user_id PK, persen 0..100)`.
   `service_hp.teknisi_id` menandai pekerja — NULL = tidak dibagi (jadi bagian toko).
   Endpoint: `GET|POST /gaji/bagi-hasil`, `DELETE /gaji/bagi-hasil-:userId`,
   `PUT /gaji/owner-upah`, `GET /gaji/teknisi` (bukan admin-only, dipakai form service).
-- Akru gaji owner = `ensureOwnerGajiAutoInput` saat **Closing** (kasir.js). Bila sesi
-  dibuat langsung `tutup` (mis. impor), akru tidak jalan — jalankan manual.
+- Akru gaji owner = `ensureOwnerGajiAutoInput` saat **Closing** (kasir.js) — satu baris
+  per admin. Bila sesi dibuat langsung `tutup` (mis. impor), akru tidak jalan — jalankan manual.
 - Bayar gaji: `POST /gaji/bayar` → 1 `pengeluaran` kategori `gaji` + `dibayar_at`.
 
 ## 7. Testing

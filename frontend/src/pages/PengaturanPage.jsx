@@ -349,15 +349,75 @@ function UsersTab() {
 
   const [editUser, setEditUser] = useState(null);
   const [permUser, setPermUser] = useState(null);
+  const [cariUser, setCariUser] = useState('');
+  const [tampilNonaktif, setTampilNonaktif] = useState(false);
+  const [hapusTarget, setHapusTarget] = useState(null);
+  const [busyHapus, setBusyHapus] = useState(false);
 
-  const users = Array.isArray(state.data) ? state.data : (state.data?.items || []);
+  const semuaUser = useMemo(
+    () => (Array.isArray(state.data) ? state.data : (state.data?.items || [])),
+    [state.data]
+  );
+  const users = useMemo(() => {
+    const q = cariUser.trim().toLowerCase();
+    return semuaUser.filter((u) => {
+      if (!tampilNonaktif && !u.aktif) return false;
+      if (!q) return true;
+      return `${u.nama} ${u.username} ${u.role}`.toLowerCase().includes(q);
+    });
+  }, [semuaUser, cariUser, tampilNonaktif]);
+  const jumlahNonaktif = semuaUser.filter((u) => !u.aktif).length;
+
+  const toggleAktif = async (u) => {
+    try {
+      await api.put(`/users/${u.id}`, { aktif: u.aktif ? 0 : 1 });
+      toast.success(u.aktif ? `${u.nama} dinonaktifkan.` : `${u.nama} diaktifkan.`);
+      load();
+    } catch (err) {
+      toast.error(err.message || 'Gagal mengubah status user.');
+    }
+  };
+
+  const konfirmasiHapus = async () => {
+    if (!hapusTarget) return;
+    setBusyHapus(true);
+    try {
+      await api.del(`/users/${hapusTarget.id}`);
+      toast.success(`User ${hapusTarget.nama} dihapus.`);
+      setHapusTarget(null);
+      load();
+    } catch (err) {
+      toast.error(err.message || 'Gagal menghapus user.');
+    } finally {
+      setBusyHapus(false);
+    }
+  };
 
   return (
     <Card title="Manajemen User">
-      <div className="mb-4">
+      <div className="mb-4 flex items-center gap-2" style={{ flexWrap: 'wrap' }}>
         <Button onClick={() => setEditUser({})}>
           <Icon name="plus" size={16} /> Tambah Karyawan
         </Button>
+        <input
+          type="search"
+          className="input"
+          placeholder="Cari nama / username…"
+          value={cariUser}
+          onChange={(e) => setCariUser(e.target.value)}
+          aria-label="Cari user"
+          style={{ minWidth: 180 }}
+        />
+        {jumlahNonaktif > 0 && (
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={tampilNonaktif}
+              onChange={(e) => setTampilNonaktif(e.target.checked)}
+            />
+            Tampilkan nonaktif ({jumlahNonaktif})
+          </label>
+        )}
       </div>
       {state.status === 'loading' ? (
         <Loader />
@@ -384,6 +444,23 @@ function UsersTab() {
                   <Button variant="ghost" size="sm" aria-label="Edit user" onClick={() => setEditUser(r)}>
                     <Icon name="edit" size={15} />
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label={r.aktif ? 'Nonaktifkan user' : 'Aktifkan user'}
+                    onClick={() => toggleAktif(r)}
+                  >
+                    {r.aktif ? 'Nonaktifkan' : 'Aktifkan'}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="text-danger"
+                    aria-label="Hapus user"
+                    onClick={() => setHapusTarget(r)}
+                  >
+                    <Icon name="trash" size={15} />
+                  </Button>
                 </div>
               ),
             },
@@ -391,6 +468,27 @@ function UsersTab() {
           rows={users.map((u) => ({ ...u, key: u.id }))}
         />
       )}
+
+      <Modal
+        open={Boolean(hapusTarget)}
+        onClose={() => (busyHapus ? null : setHapusTarget(null))}
+        title="Hapus user?"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setHapusTarget(null)} disabled={busyHapus}>Batal</Button>
+            <Button variant="danger" onClick={konfirmasiHapus} loading={busyHapus}>Hapus Permanen</Button>
+          </>
+        }
+      >
+        <p>
+          User <strong>{hapusTarget?.nama}</strong> (<span className="font-mono">{hapusTarget?.username}</span>) akan dihapus permanen.
+        </p>
+        <p className="text-sm text-muted mt-2">
+          Hapus hanya bisa kalau user belum pernah buka kasir, membuat transaksi, mencatat service,
+          atau punya riwayat gaji. Kalau sudah ada, sistem akan menolak — pilih <strong>Nonaktifkan</strong> saja
+          supaya riwayat lama tetap tersimpan dan namanya hilang dari daftar kasir &amp; teknisi.
+        </p>
+      </Modal>
 
       <Modal open={Boolean(permUser)} onClose={() => setPermUser(null)} title={`Akses halaman — ${permUser?.nama}`}>
         <PermissionForm

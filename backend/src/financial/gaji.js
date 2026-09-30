@@ -147,18 +147,53 @@ function ownerShiftRate() {
 
 // Hitung gaji owner untuk satu tanggal: upah jaga per hari (tetap) + % laba service.
 // Laba service dihitung dari TANGGAL TRANSAKSI service (saat selesai/dibayar).
+// Upah harian: admin memakai settings global; karyawan memakai rate-nya.
+export async function getUpahUntukUser(db, userId) {
+  const u = await db.one("SELECT id, role FROM users WHERE id = ?", userId);
+  if (!u) return 0;
+  if (u.role === 'admin') return getOwnerUpah(db);
+  const rate = await getRateForUser(db, userId, new Date().toISOString().slice(0, 10));
+  return rate && rate.nominal != null ? Number(rate.nominal) : 0;
+}
+
+// Semua admin. Gaji owner TIDAM dikunci ke satu akun: setiap admin yang punya
+// porsi di bagi_hasil_service mendapat akrunya masing-masing.
+export async function daftarOwner(db) {
+  return db.many("SELECT id, nama, role FROM users WHERE role = 'admin' AND aktif = 1 ORDER BY nama");
+}
+
 export async function hitungGajiOwner(db, tanggal, jamBukaIn, ownerIdIn = null) {
   let jamBuka = jamBukaIn;
   if (jamBuka === null || jamBuka === undefined) jamBuka = await openingHour(db, tanggal);
-  const upah = await getOwnerUpah(db);
-  const ownerId = ownerIdIn ?? (await db.one("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1"))?.id ?? null;
+  // Tanpa ownerId: jumlahkan semua admin (global), bukan hanya admin pertama.
+  if (ownerIdIn == null) {
+    const semua = await daftarOwner(db);
+    let totalGaji = 0;
+    const rincian = [];
+    for (const o of semua) {
+      const satu = await hitungGajiOwner(db, tanggal, jamBuka, o.id);
+      if (satu.total > 0) rincian.push(satu);
+      totalGaji += satu.total;
+    }
+    return {
+      tanggal, jam_buka: jamBuka, total: totalGaji, owners: rincian,
+      upah: rincian.length ? rincian[0].upah : await getOwnerUpah(db),
+      semua_admin: semua.map((o) => ({ id: o.id, nama: o.nama })),
+    };
+  }
+  const ownerId = Number(ownerIdIn);
+  const info = await db.one('SELECT id, nama, role FROM users WHERE id = ?', ownerId);
+  const upah = await getUpahUntukUser(db, ownerId);
   // Pakai persen dari DB; belum ada baris -> fallback ke bawaan.
-  let persen = ownerId ? await getPersenService(db, ownerId) : 0;
+  let persen = await getPersenService(db, ownerId);
   if (!persen) persen = GAJI_OWNER.servicePct;
   const serviceLaba = await sumServiceLaba(db, tanggal, ownerId);
   const serviceShare = Math.round((serviceLaba * persen) / 100);
   return {
     tanggal,
+    user_id: ownerId,
+    nama: info ? info.nama : null,
+    role: info ? info.role : null,
     jam_buka: jamBuka,
     upah,
     jaga: upah,
@@ -195,29 +230,32 @@ export async function hitungBagiHasilService(db, tanggal) {
 // Akru gaji owner otomatis (dipanggil saat Closing). Hanya menambah baris gaji
 // (belum dibayar) — pembayaran dilakukan terpisah saat "Bayar Gaji".
 export async function ensureOwnerGajiAutoInput(db, { tanggal, jamBuka, kasirSesiId }) {
-  const owner = await db.one("SELECT id FROM users WHERE role = 'admin' ORDER BY id LIMIT 1");
-  if (!owner) return null;
-  const hitung = await hitungGajiOwner(db, tanggal, jamBuka);
-  if (hitung.total <= 0) return null;
-
-  const res = await db.exec(
-    `INSERT OR IGNORE INTO gaji_harian (user_id, tanggal, nominal, sumber, catatan, created_at)
-     VALUES (?, ?, ?, 'auto', ?, ?)`,
-    owner.id,
-    tanggal,
-    hitung.total,
-    `[owner] upah ${hitung.upah} + ${hitung.service_pct}% service ${hitung.service_share}`,
-    nowIso()
-  );
-  if (res.changes === 0) return getGaji(db, owner.id, tanggal);
-
-  const row = await getGaji(db, owner.id, tanggal);
-  await writeAudit(db, {
-    userId: null,
-    aksi: 'auto_input_gaji_owner',
-    tabel: 'gaji_harian',
-    recordId: row.id,
-    dataAfter: { user_id: owner.id, tanggal, nominal: hitung.total, sumber: 'auto', kasir_sesi_id: kasirSesiId },
-  });
-  return row;
+  // Setiap admin (owner) dihitung terpisah — tidak dikunci ke satu akun.
+  const owners = await daftarOwner(db);
+  if (!owners.length) return null;
+  const dibuat = [];
+  for (const owner of owners) {
+    const hitung = await hitungGajiOwner(db, tanggal, jamBuka, owner.id);
+    if (hitung.total <= 0) continue;
+    const res = await db.exec(
+      `INSERT OR IGNORE INTO gaji_harian (user_id, tanggal, nominal, sumber, catatan, created_at)
+       VALUES (?, ?, ?, 'auto', ?, ?)`,
+      owner.id,
+      tanggal,
+      hitung.total,
+      `[owner] upah ${hitung.upah} + ${hitung.service_pct}% service ${hitung.service_share}`,
+      nowIso()
+    );
+    if (res.changes === 0) continue;
+    const row = await getGaji(db, owner.id, tanggal);
+    dibuat.push(row);
+    await writeAudit(db, {
+      userId: null,
+      aksi: 'auto_input_gaji_owner',
+      tabel: 'gaji_harian',
+      recordId: row.id,
+      dataAfter: { user_id: owner.id, tanggal, nominal: hitung.total, sumber: 'auto', kasir_sesi_id: kasirSesiId },
+    });
+  }
+  return dibuat;
 }

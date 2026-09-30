@@ -130,7 +130,7 @@ export default function GajiPage() {
         </div>
       </div>
 
-      <Card className="mt-4" title="Gaji Owner (Anda)">
+      <Card className="mt-4" title="Gaji Owner" subtitle="Untuk setiap user dengan role admin. Dihitung per orang, tidak dikunci ke satu akun.">
         <div className="grid-2">
           <Field label="Tanggal">
             <Input type="date" value={ownerDate} onChange={(e) => setOwnerDate(e.target.value)} />
@@ -142,20 +142,53 @@ export default function GajiPage() {
           <ErrorState error={owner.error} onRetry={() => setOwnerDate(ownerDate)} />
         ) : owner.data ? (
           <>
-            <div className="table-wrap mt-3">
-              <table className="table">
-                <thead>
-                  <tr><th>Komponen</th><th className="col-right">Nilai</th></tr>
-                </thead>
-                <tbody>
-                  <tr><td>Upah jaga toko per hari</td><td className="col-right num">{formatRupiah(owner.data.upah)}</td></tr>
-                  <tr><td>Laba service hari ini</td><td className="col-right num">{formatRupiah(owner.data.service_laba)}</td></tr>
-                  <tr><td>Bagi hasil service ({owner.data.service_pct}%)</td><td className="col-right num">{formatRupiah(owner.data.service_share)}</td></tr>
-                  <tr><td style={{ fontWeight: 700 }}>Akru gaji owner hari ini</td><td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(owner.data.total)}</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <p className="field-hint mt-2">Otomatis ditambahkan ke gaji owner saat Closing. Pembayaran dilakukan di bagian "Gaji Belum Dibayar" (mis. tiap 15 hari).</p>
+            {(owner.data.owners || []).length === 0 ? (
+              <p className="text-sm text-muted mt-3">
+                Belum ada user dengan role admin. Gaji owner dihitung otomatis untuk setiap admin.
+              </p>
+            ) : (
+              <>
+                <div className="table-wrap mt-3">
+                  <table className="table table-fit">
+                    <thead>
+                      <tr>
+                        <th>Owner</th>
+                        <th className="col-right hide-mobile">Upah/hari</th>
+                        <th className="col-right">Laba service</th>
+                        <th className="col-right">Bagi hasil</th>
+                        <th className="col-right">Total hari ini</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {owner.data.owners.map((o) => (
+                        <tr key={o.user_id}>
+                          <td style={{ fontWeight: 600 }}>{o.nama || `#${o.user_id}`}</td>
+                          <td className="col-right num hide-mobile">{formatRupiah(o.upah)}</td>
+                          <td className="col-right num">{formatRupiah(o.service_laba)}</td>
+                          <td className="col-right num">
+                            {formatRupiah(o.service_share)}
+                            <span className="text-xs text-muted"> ({o.service_pct}%)</span>
+                          </td>
+                          <td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(o.total)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td style={{ fontWeight: 700 }}>Total semua owner</td>
+                        <td className="hide-mobile" />
+                        <td />
+                        <td />
+                        <td className="col-right num" style={{ fontWeight: 700 }}>{formatRupiah(owner.data.total)}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+                <p className="field-hint mt-2">
+                  Otomatis ditambahkan ke gaji tiap owner saat Closing. Pembayaran dilakukan di bagian &quot;Gaji Belum Dibayar&quot;.
+                </p>
+              </>
+            )}
           </>
         ) : null}
       </Card>
@@ -350,7 +383,7 @@ function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
           </thead>
           <tbody>
             {items.length === 0 && (
-              <tr><td colSpan={5} className="text-muted text-sm">Belum ada porsi diatur. Orang 默认 dapat 0%.</td></tr>
+              <tr><td colSpan={5} className="text-muted text-sm">Belum ada porsi diatur. Orang tanpa porsi mendapat 0%.</td></tr>
             )}
             {items.map((i) => (
               <tr key={i.user_id}>
@@ -402,23 +435,27 @@ function BagikanHasil({ data, busy, upahOwner, setUpahOwner, onReload }) {
       )}
 
       <div className="grid-2 mt-3">
-        <Field label="Tambah / ubah porsi">
+        <Field label="Tambah / ubah porsi (%)" hint="Contoh 50 = 50%. Maksimal 100.">
           <div className="flex items-end gap-2">
-            <Select value={userId} onChange={(e) => setUserId(e.target.value)} style={{ flex: 1 }}>
+            <Select value={userId} onChange={(e) => setUserId(e.target.value)} style={{ flex: 1 }} aria-label="Orang">
               <option value="">Pilih orang…</option>
               {(belumAdaPorsi.length ? belumAdaPorsi : (data.daftar_orang || [])).map((u) => (
                 <option key={u.id} value={u.id}>{u.nama}</option>
               ))}
             </Select>
-            <Input
-              value={persen} onChange={(e) => setPersen(e.target.value)}
-              placeholder="0" style={{ width: 90 }}
-              aria-label="Persen" inputMode="numeric"
-            />
+            <div style={{ position: 'relative', width: 96 }}>
+              <Input
+                type="number" min="0" max="100" step="1"
+                value={persen} onChange={(e) => setPersen(e.target.value)}
+                placeholder="0" style={{ textAlign: 'right', paddingRight: 26 }}
+                aria-label="Porsi persen" inputMode="numeric"
+              />
+              <span style={{ position: 'absolute', right: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)', pointerEvents: 'none', fontSize: '0.85rem' }}>%</span>
+            </div>
             <Button onClick={simpanPorsi} loading={saving}>Simpan</Button>
           </div>
         </Field>
-        <Field label="Upah harian owner (Rp)">
+        <Field label="Upah harian owner (Rp)" hint="Nominal per hari, bukan persen.">
           <div className="flex items-end gap-2">
             <Input
               value={upahOwner} onChange={(e) => setUpahOwner(e.target.value)}

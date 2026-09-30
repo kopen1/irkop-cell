@@ -74,6 +74,15 @@ export async function updateUser(db, request, ctx, idStr) {
   const role = asEnum(body.role, ['admin', 'karyawan'], { field: 'role' });
   const aktif = body.aktif === undefined ? undefined : asBool(body.aktif);
 
+  // Jangan sampai tidak ada admin aktif sama sekali (bisa terkunci dari sistem).
+  if (aktif !== undefined && !aktif && (user.role === 'admin' || role === 'admin')) {
+    const sisa = await db.one(
+      "SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND aktif = 1 AND id != ?", id);
+    if (!sisa || sisa.n < 1) {
+      throw err(400, 'last_admin', 'Ini admin aktif terakhir. Buat admin lain dulu sebelum menonaktifkan.');
+    }
+  }
+
   const sets = [];
   const vals = [];
   if (nama !== null) { sets.push('nama = ?'); vals.push(nama); }
@@ -108,6 +117,66 @@ export async function updateUser(db, request, ctx, idStr) {
     dataAfter: body,
   });
   return { id, message: 'User berhasil diperbarui' };
+}
+
+// Tabel yang mencatat bisnis (transaksi/uang). Kalau ada isinya -> user tidak
+// boleh dihapus, riwayatnya harus tetap utuh untuk laporan & audit.
+const HISTORI_BISNIS = [
+  ['transaksi', 'dibuat_oleh'], ['transaksi', 'deleted_by'],
+  ['kasir_sesi', 'dibuka_oleh'], ['kasir_sesi', 'ditutup_oleh'],
+  ['gaji_harian', 'user_id'], ['gaji_harian', 'diedit_oleh'], ['gaji_harian', 'dibayar_oleh'],
+  ['service_hp', 'teknisi_id'],
+  ['kasbon', 'dicatat_oleh'],
+  ['kasbon_pembayaran', 'dicatat_oleh'],
+  ['pengeluaran', 'dicatat_oleh'], ['pengeluaran', 'deleted_by'],
+  ['pembelian_stok', 'dibuat_oleh'], ['pembelian_stok', 'deleted_by'],
+  ['transfer_saldo', 'dibuat_oleh'], ['transfer_saldo', 'deleted_by'],
+  ['payments', 'dibuat_oleh'],
+];
+
+// Konfigurasi, bukan uang — aman dibersihkan barisannya.
+const KONFIG_USER = [
+  'user_permissions', 'karyawan_rate', 'karyawan_rate_harian',
+  'bagi_hasil_service', 'audit_log',
+];
+
+export async function deleteUser(db, request, ctx, idStr) {
+  const admin = requireAdmin(ctx);
+  const id = asInt(idStr, { required: true, field: 'id' });
+  const user = await db.one('SELECT * FROM users WHERE id = ?', id);
+  if (!user) throw err(404, 'not_found', 'User tidak ditemukan');
+  if (id === admin.id) {
+    throw err(400, 'cannot_delete_self', 'Tidak bisa menghapus akun yang sedang dipakai');
+  }
+
+  const dipakai = [];
+  for (const [tabel, kolom] of HISTORI_BISNIS) {
+    const row = await db.one(`SELECT COUNT(*) AS n FROM ${tabel} WHERE ${kolom} = ?`, id);
+    if (row && row.n > 0) dipakai.push(tabel);
+  }
+  if (dipakai.length) {
+    const unik = [...new Set(dipakai)];
+    throw err(409, 'user_has_history',
+      `User masih punya riwayat (${unik.join(', ')}). Nonaktifkan saja agar riwayat tetap tersimpan.`);
+  }
+
+  // Jangan sampai admin aktif terakhir hilang.
+  if (user.role === 'admin') {
+    const sisa = await db.one("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND aktif = 1 AND id != ?", id);
+    if (!sisa || sisa.n < 1) {
+      throw err(400, 'last_admin', 'Ini admin aktif terakhir. Buat admin lain dulu sebelum menonaktifkan/menghapus.');
+    }
+  }
+
+  for (const tabel of KONFIG_USER) {
+    await db.exec(`DELETE FROM ${tabel} WHERE user_id = ?`, id);
+  }
+  await db.exec('DELETE FROM users WHERE id = ?', id);
+  await writeAudit(db, {
+    userId: admin.id, aksi: 'delete', tabel: 'users', recordId: id,
+    dataBefore: { nama: user.nama, username: user.username, role: user.role },
+  });
+  return { id, message: `User ${user.nama} dihapus` };
 }
 
 export async function setUserPermissions(db, request, ctx, idStr) {

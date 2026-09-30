@@ -231,12 +231,15 @@ test('GAJI owner: upah TETAP 50.000 walaupun jam buka >= 16 (tidak ikut shift)',
   });
   assert.equal(svc.status, 200, JSON.stringify(svc.data));
 
+  // Tanpa user_id -> global: jumlah semua admin, rincian per orang di .owners
   const r = await call(env, `/api/gaji/owner?tanggal=${today}`, { token: adminToken });
   assert.equal(r.status, 200, JSON.stringify(r.data));
-  assert.equal(r.data.upah, 50000, 'upah owner tetap 50.000');
-  assert.equal(r.data.service_laba, 200000);
-  assert.equal(r.data.service_share, 100000);
-  assert.equal(r.data.total, 150000);
+  assert.equal(r.data.total, 150000, 'total global = 50.000 upah + 100.000 bagi hasil');
+  assert.equal(r.data.owners.length, 1);
+  assert.equal(r.data.owners[0].nama, 'Admin', 'rincian menyebut nama owner');
+  assert.equal(r.data.owners[0].upah, 50000, 'upah owner tetap 50.000');
+  assert.equal(r.data.owners[0].service_laba, 200000);
+  assert.equal(r.data.owners[0].service_share, 100000);
 });
 
 test('GAJI: admin (owner) boleh set rate & buat gaji manual', async () => {
@@ -329,7 +332,37 @@ test('Owner: upah harian dari settings (bisa diubah tanpa sentuh kode)', async (
   assert.equal(r.data.upah, 75000, 'upah mengikuti settings, bukan konstanta kode');
   // Porsi owner dari DB
   await call(env, '/api/gaji/bagi-hasil', { method: 'POST', token: adminToken, body: { user_id: adminId, persen: 30 } });
-  const r2 = await call(env, `/api/gaji/owner?tanggal=${today}`, { token: adminToken });
+  const r2 = await call(env, `/api/gaji/owner?tanggal=${today}&user_id=${adminId}`, { token: adminToken });
   assert.equal(r2.data.service_pct, 30, 'porsi owner dari DB');
   assert.ok(adminId, 'bootstrap punya admin');
+});
+
+test('Gaji owner: GLOBAL untuk semua admin, tidak dikunci ke satu akun', async () => {
+  const { env, adminToken, adminId } = await setup();
+  const admin2 = await createUserRaw(env, { nama: 'Admin Kedua', username: 'adm2', password: 'adm21234', role: 'admin' });
+  const today = todayWib();
+  await openKasir(env, adminToken);
+  await call(env, '/api/gaji/bagi-hasil', { method: 'POST', token: adminToken, body: { user_id: adminId, persen: 50 } });
+
+  const svc = await call(env, '/api/transaksi', {
+    method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-multi-owner' },
+    body: {
+      jenis: 'service', metode_bayar: 'tunai', items: [],
+      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 200000, harga_modal: 100000, tanggal_masuk: today, technisi_id: adminId },
+    },
+  });
+  assert.equal(svc.status, 200, JSON.stringify(svc.data));
+
+  const r = await call(env, `/api/gaji/owner?tanggal=${today}`, { token: adminToken });
+  assert.equal(r.data.owners.length, 2, 'kedua admin dihitung, bukan hanya admin pertama');
+  const nama = r.data.owners.map((o) => o.nama).sort();
+  assert.deepEqual(nama, ['Admin', 'Admin Kedua']);
+  // Admin kedua: upah 50.000, tanpa porsi -> tidak dapat bagi hasil
+  const k2 = r.data.owners.find((o) => o.user_id === Number(admin2));
+  assert.equal(k2.upah, 50000, 'admin kedua tetap dapat upah harian');
+  assert.equal(k2.service_share, 0, 'tanpa porsi -> 0');
+  // Admin 1: upah 50.000 + 50% dari laba 100.000 = 100.000. Admin 2: upah 50.000 saja.
+  const k1 = r.data.owners.find((o) => o.user_id === Number(1) || o.nama === 'Admin');
+  assert.equal(k1.total, 100000, 'admin dengan porsi 50% dapat 100.000');
+  assert.equal(r.data.total, 150000, 'total global = 100.000 + 50.000');
 });

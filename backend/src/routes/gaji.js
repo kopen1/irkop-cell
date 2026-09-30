@@ -100,7 +100,9 @@ export async function getOwnerGaji(db, request, ctx) {
   requireAdmin(ctx);
   const url = new URL(request.url);
   const tanggal = asDate(url.searchParams.get('tanggal'), { required: true, field: 'tanggal' });
-  return hitungGajiOwner(db, tanggal);
+  const userId = url.searchParams.get('user_id');
+  // Tanpa user_id: hitung SEMUA admin (global), bukan hanya satu owner.
+  return hitungGajiOwner(db, tanggal, null, userId == null || userId === '' ? null : Number(userId));
 }
 
 // GET /api/gaji/unpaid — gaji yang belum dibayar, dikelompokkan per orang.
