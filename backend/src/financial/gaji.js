@@ -48,22 +48,13 @@ export async function getGaji(db, userId, tanggal) {
   return db.one('SELECT * FROM gaji_harian WHERE user_id = ? AND tanggal = ?', userId, tanggal);
 }
 
+// Opening: buat baris gaji pakai UPAH saja (rate / shift) — service hari itu
+// belum terjadi. Bagian service ditambahkan saat Closing oleh syncGajiKaryawan.
+// Kalau baris sudah ada (mis. sudah pernah buka), jangan diubah di sini.
 export async function ensureGajiAutoInput(db, { user, tanggal, kasirSesiId, jamBuka }) {
   if (user.role !== 'karyawan') return null;
-
-  // Prioritas: rate karyawan (jika diatur) -> jika tidak, gaji per shift dari
-  // jam buka. Buka < batas = 60k (13:00), >= batas = 45k (16:00).
-  let nominal = null;
-  let sumberNominal = null;
-  const rate = await getRateForUser(db, user.id, tanggal);
-  if (rate && rate.nominal !== null && rate.nominal !== undefined) {
-    nominal = rate.nominal;
-    sumberNominal = 'rate';
-  } else if (jamBuka !== null && jamBuka !== undefined) {
-    nominal = Number(jamBuka) < GAJI_SHIFT.batasJam ? GAJI_SHIFT.awal : GAJI_SHIFT.akhir;
-    sumberNominal = `shift_${jamBuka < GAJI_SHIFT.batasJam ? 'awal' : 'akhir'}`;
-  }
-  if (nominal === null) return null;
+  const hitung = await hitungGajiKaryawan(db, user.id, tanggal, jamBuka);
+  if (!hitung || hitung.upah <= 0) return null;
 
   const existing = await getGaji(db, user.id, tanggal);
   if (existing) return existing;
@@ -73,8 +64,8 @@ export async function ensureGajiAutoInput(db, { user, tanggal, kasirSesiId, jamB
      VALUES (?, ?, ?, 'auto', ?, ?)`,
     user.id,
     tanggal,
-    nominal,
-    `[auto] ${sumberNominal}`,
+    hitung.upah,
+    `[auto] ${hitung.source_rate}`,
     nowIso()
   );
   if (res.changes === 0) return getGaji(db, user.id, tanggal);
@@ -85,7 +76,7 @@ export async function ensureGajiAutoInput(db, { user, tanggal, kasirSesiId, jamB
     aksi: 'auto_input_gaji',
     tabel: 'gaji_harian',
     recordId: row.id,
-    dataAfter: { user_id: user.id, tanggal, nominal, sumber: 'auto', kasir_sesi_id: kasirSesiId },
+    dataAfter: { user_id: user.id, tanggal, nominal: hitung.upah, sumber: 'auto', kasir_sesi_id: kasirSesiId },
   });
   return row;
 }
@@ -200,6 +191,74 @@ export async function hitungGajiOwner(db, tanggal, jamBukaIn, ownerIdIn = null) 
     service_share: serviceShare,
     total: upah + serviceShare,
   };
+}
+
+// Gaji karyawan satu hari = upah (rate atau shift) + porsi % laba service
+// yang dikerjakan orang itu sendiri hari itu.
+// Upah: karyawan_rate (flat / custom_harian per hari). Kalau tidak ada rate,
+// fallback ke shift jam buka (60k sebelum batas, 45k setelahnya).
+export async function hitungGajiKaryawan(db, userId, tanggal, jamBuka = null) {
+  let upah = null;
+  let sumberUpah = null;
+  const rate = await getRateForUser(db, userId, tanggal);
+  if (rate && rate.nominal !== null && rate.nominal !== undefined) {
+    upah = Number(rate.nominal);
+    sumberUpah = 'rate';
+  } else if (jamBuka !== null && jamBuka !== undefined) {
+    upah = Number(jamBuka) < GAJI_SHIFT.batasJam ? GAJI_SHIFT.awal : GAJI_SHIFT.akhir;
+    sumberUpah = `shift_${jamBuka < GAJI_SHIFT.batasJam ? 'awal' : 'akhir'}`;
+  }
+  const persen = await getPersenService(db, userId);
+  const laba = await sumServiceLaba(db, tanggal, userId);
+  const share = Math.round((laba * persen) / 100);
+  return {
+    tanggal,
+    user_id: userId,
+    upah: upah ?? 0,
+    source_rate: sumberUpah,
+    service_pct: persen,
+    service_laba: laba,
+    service_share: share,
+    total: (upah ?? 0) + share,
+  };
+}
+
+// Dipanggil saat Closing: sinkronkan gaji karyawan = upah + bagian service.
+// Memakai upsert sehingga aman dipanggil berkali-kali, dan TIDAK menimpa
+// baris yang sudah diedit manual (sumber = 'manual_edit').
+export async function syncGajiKaryawan(db, { tanggal, jamBuka = null, kasirSesiId = null }) {
+  const karyawans = await db.many("SELECT id FROM users WHERE role = 'karyawan' AND aktif = 1 ORDER BY id");
+  const hasil = [];
+  for (const k of karyawans) {
+    const hitung = await hitungGajiKaryawan(db, k.id, tanggal, jamBuka);
+    if (hitung.total <= 0) continue;
+    const res = await db.exec(
+      `INSERT INTO gaji_harian (user_id, tanggal, nominal, sumber, catatan, created_at)
+       VALUES (?, ?, ?, 'auto', ?, ?)
+       ON CONFLICT(user_id, tanggal) DO UPDATE SET
+         nominal = excluded.nominal,
+         catatan = excluded.catatan,
+         updated_at = datetime('now')
+       WHERE gaji_harian.sumber = 'auto'`,
+      k.id,
+      tanggal,
+      hitung.total,
+      `[auto] upah ${hitung.upah}${hitung.source_rate ? ` (${hitung.source_rate})` : ''} + ${hitung.service_pct}% service ${hitung.service_share}`,
+      nowIso()
+    );
+    const row = await getGaji(db, k.id, tanggal);
+    if (row) hasil.push(row);
+    if (res.changes > 0) {
+      await writeAudit(db, {
+        userId: null,
+        aksi: 'auto_input_gaji',
+        tabel: 'gaji_harian',
+        recordId: row ? row.id : null,
+        dataAfter: { user_id: k.id, tanggal, nominal: hitung.total, sumber: 'auto', kasir_sesi_id: kasirSesiId },
+      });
+    }
+  }
+  return hasil;
 }
 
 // Ringkasan bagi hasil service semua orang pada satu tanggal.

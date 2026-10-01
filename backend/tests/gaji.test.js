@@ -16,6 +16,27 @@ function todayWib() {
   return ymd(wibNow());
 }
 
+// Fixture service HP dengan teknisi yang pasti tersimpan (lewat SQL langsung),
+// supaya test akru gaji tidak bergantung pada route /api/transaksi.
+async function sisipServiceTeknisi(env, { tanggal, teknisiId, biaya = 200000, hargaModal = 100000, kode = 'FIX-SVC-1' }) {
+  await env.DB.prepare("INSERT OR IGNORE INTO pelanggan (nama, created_at) VALUES ('Umum', ?)").bind(new Date().toISOString()).run();
+  const pl = await env.DB.prepare('SELECT id FROM pelanggan WHERE nama = ?').bind('Umum').first();
+  const sesi = await env.DB.prepare('SELECT id FROM kasir_sesi WHERE tanggal = ? ORDER BY id DESC LIMIT 1').bind(tanggal).first();
+  const shp = await env.DB.prepare(
+    `INSERT INTO service_hp (pelanggan_id, nama_device, deskripsi_kerusakan, biaya, harga_modal, tanggal_masuk, status, teknisi_id)
+     VALUES (?, 'Fixture', 'Layar pecah', ?, ?, ?, 'selesai', ?)`
+  ).bind(pl.id, biaya, hargaModal, tanggal, teknisiId).run();
+  const trx = await env.DB.prepare(
+    `INSERT INTO transaksi (kode_transaksi, pelanggan_id, metode_bayar, konfirmasi_pembayaran, subtotal, total, laba, kasir_sesi_id, dibuat_oleh, created_at, tanggal_transaksi)
+     VALUES (?, ?, 'tunai', 'tidak_perlu', ?, ?, ?, ?, 1, ?, ?)`
+  ).bind(kode, pl.id, biaya, biaya, biaya - hargaModal, sesi.id, new Date().toISOString(), tanggal).run();
+  await env.DB.prepare(
+    `INSERT INTO transaksi_item (transaksi_id, nama_produk_snapshot, harga_snapshot, harga_modal_snapshot, qty, subtotal, service_hp_id)
+     VALUES (?, 'Service HP', ?, ?, 1, ?, ?)`
+  ).bind(trx.meta.last_row_id, biaya, hargaModal, biaya, shp.meta.last_row_id).run();
+  return { shpId: shp.meta.last_row_id, trxId: trx.meta.last_row_id };
+}
+
 async function setup() {
   const { env } = setupEnv();
   const adminId = await createUserRaw(env, { nama: 'Admin', username: 'admin', password: 'admin1234', role: 'admin' });
@@ -461,4 +482,103 @@ test('Bagi hasil: teknisi baru bisa dapat porsi apa saja tanpa sentuh kode', asy
   await call(env, '/api/gaji/bagi-hasil', { method: 'POST', token: adminToken, body: { user_id: baru, persen: 100 } });
   r = await call(env, '/api/gaji/bagi-hasil?tanggal=' + today, { token: adminToken });
   assert.equal(cari(r.data.items, baru).share, 100000, '100% setelah diubah');
+});
+
+test('GAJI karyawan: Closing otomatis = rate (jaga toko) + porsi service', async () => {
+  const { env, adminToken, karyawanToken, karyawanId } = await setup();
+  await setPermission(env, karyawanId, 'transaksi');
+  const today = todayWib();
+
+  // Atur rate flat 40.000 + porsi 50%
+  await call(env, '/api/gaji/rate', {
+    method: 'POST', token: adminToken, body: { user_id: karyawanId, tipe: 'flat', rate_flat: 40000 },
+  });
+  await call(env, '/api/gaji/bagi-hasil', {
+    method: 'POST', token: adminToken, body: { user_id: karyawanId, persen: 50 },
+  });
+
+  await call(env, '/api/kasir/opening', {
+    method: 'POST', token: adminToken, body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 2000000 }] },
+  });
+
+  // Karyawan mengerjakan service: laba 100.000 -> porsi 50% = 50.000
+  await sisipServiceTeknisi(env, { tanggal: today, teknisiId: karyawanId, kode: 'FIX-A' });
+
+  await closeKasir(env, karyawanToken);
+
+  const row = await env.DB.prepare('SELECT nominal, sumber FROM gaji_harian WHERE user_id = ? AND tanggal = ?')
+    .bind(karyawanId, today).first();
+  assert.ok(row, 'baris gaji karyawan harus dibuat otomatis saat Closing');
+  assert.equal(row.nominal, 90000, '40.000 jaga toko + 50.000 (50% dari laba 100.000)');
+  assert.equal(row.sumber, 'auto');
+});
+
+test('GAJI karyawan: tanpa rate -> pakai upah shift, porsi 0 -> tak ada bagian service', async () => {
+  const { env, adminToken, karyawanToken, karyawanId } = await setup();
+  const today = todayWib();
+  await call(env, '/api/kasir/opening', {
+    method: 'POST', token: adminToken, body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 2000000 }] },
+  });
+  const wibHour = new Date(Date.now() + 7 * 3600 * 1000).getUTCHours();
+  const expected = wibHour < 16 ? 60000 : 45000;
+  await closeKasir(env, karyawanToken);
+
+  const row = await env.DB.prepare('SELECT nominal, sumber FROM gaji_harian WHERE user_id = ? AND tanggal = ?')
+    .bind(karyawanId, today).first();
+  assert.ok(row, 'tanpa rate tetap dapat upah shift');
+  assert.equal(row.nominal, expected, 'hanya upah shift, tanpa bagian service');
+  assert.equal(row.sumber, 'auto');
+});
+
+test('GAJI karyawan: porsi 0% -> hanya jaga toko, tidak error', async () => {
+  const { env, adminToken, karyawanToken, karyawanId } = await setup();
+  await setPermission(env, karyawanId, 'transaksi');
+  const today = todayWib();
+  await call(env, '/api/gaji/rate', {
+    method: 'POST', token: adminToken, body: { user_id: karyawanId, tipe: 'flat', rate_flat: 55000 },
+  });
+  await call(env, '/api/gaji/bagi-hasil', {
+    method: 'POST', token: adminToken, body: { user_id: karyawanId, persen: 0 },
+  });
+  await call(env, '/api/kasir/opening', {
+    method: 'POST', token: adminToken, body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 2000000 }] },
+  });
+  await sisipServiceTeknisi(env, { tanggal: today, teknisiId: karyawanId, biaya: 300000, kode: 'FIX-B' });
+  await closeKasir(env, karyawanToken);
+
+  const row = await env.DB.prepare('SELECT nominal FROM gaji_harian WHERE user_id = ? AND tanggal = ?')
+    .bind(karyawanId, today).first();
+  assert.equal(row.nominal, 55000, 'porsi 0% -> hanya upah jaga toko');
+});
+
+test('GAJI karyawan: Closing TIDAK menimpa gaji yang sudah diedit manual', async () => {
+  const { env, adminToken, karyawanToken, karyawanId } = await setup();
+  await setPermission(env, karyawanId, 'transaksi');
+  const today = todayWib();
+  await call(env, '/api/gaji/rate', {
+    method: 'POST', token: adminToken, body: { user_id: karyawanId, tipe: 'flat', rate_flat: 40000 },
+  });
+  await call(env, '/api/gaji/bagi-hasil', {
+    method: 'POST', token: adminToken, body: { user_id: karyawanId, persen: 50 },
+  });
+  await call(env, '/api/kasir/opening', {
+    method: 'POST', token: adminToken, body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 2000000 }] },
+  });
+  // Admin koreksi manual (mis. potong kasur) -> sumber jadi manual_edit
+  const upd = await call(env, '/api/gaji', {
+    method: 'POST', token: adminToken,
+    body: { user_id: karyawanId, tanggal: today, nominal: 30000, catatan: 'koreksi manual' },
+  });
+  assert.equal(upd.status, 200, JSON.stringify(upd.data));
+  const created = await env.DB.prepare('SELECT id, sumber FROM gaji_harian WHERE user_id = ? AND tanggal = ?')
+    .bind(karyawanId, today).first();
+  assert.equal(created.sumber, 'manual_edit', 'sudah manual sebelum Closing');
+
+  await sisipServiceTeknisi(env, { tanggal: today, teknisiId: karyawanId, kode: 'FIX-C' });
+  await closeKasir(env, karyawanToken);
+
+  const row = await env.DB.prepare('SELECT nominal, sumber, catatan FROM gaji_harian WHERE user_id = ? AND tanggal = ?')
+    .bind(karyawanId, today).first();
+  assert.equal(row.nominal, 30000, 'nominal manual tidak ditimpa oleh hitungan otomatis');
+  assert.equal(row.catatan, 'koreksi manual', 'catatan manual tetap');
 });

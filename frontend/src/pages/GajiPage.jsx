@@ -481,7 +481,9 @@ function RateModal({ open, onClose, onSaved }) {
   const [sel, setSel] = useState('');
   const [tipe, setTipe] = useState('flat');
   const [rateFlat, setRateFlat] = useState('');
-  const [custom, setCustom] = useState({});
+const [custom, setCustom] = useState({});
+  const [porsi, setPorsi] = useState('');
+  const [porsiMap, setPorsiMap] = useState({});
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -490,8 +492,13 @@ function RateModal({ open, onClose, onSaved }) {
     api.get('/users', { limit: 200 }).then((r) => setUsers(r.items || [])).catch(() => {});
     api.get('/gaji/rate').then((r) => {
       const m = {};
-      (r.items || []).forEach((r0) => (m[r0.user_id] = r0));
+      (r.items || []).forEach((r0) => { m[r0.user_id] = r0; });
       setRates(m);
+    }).catch(() => {});
+    api.get('/gaji/bagi-hasil', { tanggal: todayWIB() }).then((r) => {
+      const m = {};
+      (r.items || []).forEach((r0) => { m[r0.user_id] = r0.persen; });
+      setPorsiMap(m);
     }).catch(() => {});
   }, [open]);
 
@@ -506,12 +513,14 @@ function RateModal({ open, onClose, onSaved }) {
         if (hari) custom_[hari] = rate ?? '';
       }
       setCustom(custom_);
+      setPorsi(porsiMap[sel] != null ? String(porsiMap[sel]) : '');
     } else if (sel) {
       setTipe('flat');
       setRateFlat('');
       setCustom({});
+      setPorsi('');
     }
-  }, [sel, rates]);
+  }, [sel, rates, porsiMap]);
 
   const save = async () => {
     setError(null);
@@ -531,6 +540,15 @@ function RateModal({ open, onClose, onSaved }) {
           return setError('Semua hari wajib diisi untuk tipe custom per hari.');
         }
         await api.post('/gaji/rate', { user_id: Number(sel), tipe: 'custom_harian', custom_harian: harian });
+      }
+      // Porsi service ikut disimpan dari sini (satu sumber: bagi_hasil_service)
+      if (porsi !== '') {
+        const p = Number(porsi);
+        if (Number.isNaN(p) || p < 0 || p > 100) {
+          setBusy(false);
+          return setError('Porsi service harus 0-100.');
+        }
+        await api.post('/gaji/bagi-hasil', { user_id: Number(sel), persen: p });
       }
       onSaved();
       onClose();
@@ -582,6 +600,24 @@ function RateModal({ open, onClose, onSaved }) {
             ))}
           </div>
         )}
+        <Field
+          label="Porsi service (%)"
+          hint="Gaji per hari = rate di atas (jaga toko) + porsi ini × laba service yang dikerjakan karyawan ini sendiri. 0% berarti hanya jaga toko. Kosongkan kalau tidak mau bagi hasil."
+        >
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min="0"
+              max="100"
+              value={porsi}
+              onChange={(e) => setPorsi(e.target.value)}
+              placeholder="0"
+              style={{ width: 110 }}
+              aria-label="Porsi service persen"
+            />
+            <span className="text-muted">%</span>
+          </div>
+        </Field>
         {error && <p className="field-error" role="alert">{error}</p>}
       </div>
     </Modal>

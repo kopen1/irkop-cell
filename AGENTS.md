@@ -190,8 +190,19 @@ npx wrangler deploy
   setting `owner_upah_harian` belum pernah disimpan.
   Endpoint: `GET|POST /gaji/bagi-hasil`, `DELETE /gaji/bagi-hasil-:userId`,
   `PUT /gaji/owner-upah`, `GET /gaji/teknisi` (bukan admin-only, dipakai form service).
-- Akru gaji owner = `ensureOwnerGajiAutoInput` saat **Closing** (kasir.js) — satu baris
-  per admin. Bila sesi dibuat langsung `tutup` (mis. impor), akru tidak jalan — jalankan manual.
+- Akru gaji **otomatis, dua titik** (kasih `jamBuka` dari `sesi.dibuka_at`):
+  - **Opening** → `ensureGajiAutoInput` (hanya user yang BUKA kasir, role
+    karyawan): bikin baris berisi **upah saja** (rate / shift).
+  - **Closing** → dua pemanggilan:
+    `ensureOwnerGajiAutoInput` (semua admin) + `syncGajiKaryawan` (semua
+    karyawan aktif). Keduanya menulis **upah + porsi % laba service**.
+- Rumus: `gaji_harian = upah per hari + (persen × laba service yang dikerjakan
+  orang itu)`. Upah karyawan = `karyawan_rate` (flat / custom_harian per hari),
+  fallback ke shift jam buka. Upah admin = `settings.owner_upah_harian`.
+- `syncGajiKaryawan` memakai upsert dengan `WHERE gaji_harian.sumber = 'auto'`
+  → baris yang sudah dikoreksi admin (`manual_edit`) **tidak pernah ditimpa**.
+- Porsi karyawan bisa diisi dari modal **"Atur Rate Gaji"** (kolom
+  "Porsi service (%)"), tetap menulis ke `bagi_hasil_service` — satu sumber data.
 - Bayar gaji: `POST /gaji/bayar` → 1 `pengeluaran` kategori `gaji` + `dibayar_at`.
 
 ## 7. Testing

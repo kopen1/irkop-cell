@@ -3,7 +3,7 @@ import { nowIso, wibDateToday } from '../lib/time.js';
 import { getAccount } from './akun.js';
 import { sumMutationBySession } from './mutasi.js';
 import { writeAudit } from '../lib/audit.js';
-import { ensureGajiAutoInput, ensureOwnerGajiAutoInput } from './gaji.js';
+import { ensureGajiAutoInput, ensureOwnerGajiAutoInput, syncGajiKaryawan } from './gaji.js';
 import { autoCreateProdukFromTransaksi } from './autoProduk.js';
 
 // Akun ledger / label hitung yang BUKAN akun uang — tidak direkonsiliasi
@@ -240,10 +240,14 @@ export async function closing(db, { body, user, ip }) {
     throw err(500, 'close_failed', 'Gagal menutup kasir');
   }
 
-  // Akru gaji owner otomatis saat closing (belum dibayar).
+  // Akru gaji otomatis saat closing (belum dibayar):
+  // - owner (admin): upah harian + porsi % laba service-nya
+  // - karyawan    : rate (jaga toko) + porsi % laba service-nya
+  // Baris gaji yang sudah diedit manual (sumber='manual_edit') tidak disentuh.
   if (sesi.dibuka_at) {
     const jamBuka = (new Date(sesi.dibuka_at).getUTCHours() + 7) % 24;
     await ensureOwnerGajiAutoInput(db, { tanggal: sesi.tanggal, jamBuka, kasirSesiId: sesi.id });
+    await syncGajiKaryawan(db, { tanggal: sesi.tanggal, jamBuka, kasirSesiId: sesi.id });
   }
 
   // Buat produk otomatis dari transaksi DANA/Bank yang sering.
