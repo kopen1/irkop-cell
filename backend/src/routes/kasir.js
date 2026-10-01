@@ -1,9 +1,18 @@
 import { readBody } from '../lib/validate.js';
-import { opening, closing, reopen, sessionStatus, reminderKasirBelumClosing } from '../financial/kasir.js';
+import { opening, revisiOpening, closing, reopen, sessionStatus, sesiAktif, reminderKasirBelumClosing } from '../financial/kasir.js';
 
 export async function doOpening(db, request, ctx) {
   const body = await readBody(request);
   return opening(db, { body, user: ctx.auth.user, ip: clientIp(request) });
+}
+
+export async function doRevisiOpening(db, request, ctx) {
+  const body = await readBody(request);
+  return revisiOpening(db, { body, user: ctx.auth.user, ip: clientIp(request) });
+}
+
+export async function doSesiAktif(db, request, ctx) {
+  return sesiAktif(db);
 }
 
 export async function doClosing(db, request, ctx) {

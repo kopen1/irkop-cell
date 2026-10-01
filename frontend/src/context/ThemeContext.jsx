@@ -12,11 +12,19 @@ export const THEMES = [
 ];
 
 export function ThemeProvider({ children }) {
-  const [theme, setThemeState] = useState(() => localStorage.getItem(THEME_KEY) || 'classic');
+  // Validasi id tema: kalau localStorage berisi nilai yang tidak dikenal
+  // (mis. "dark" dari versi lama), data-theme tidak akan cocok dengan blok
+  // [data-theme='...'] mana pun -> semua variabel warna hilang -> seluruh
+  // teks jatuh ke warna default browser (terlihat "pertebal" semua).
+  const [theme, setThemeState] = useState(() => {
+    const simpanan = localStorage.getItem(THEME_KEY);
+    return THEMES.some((t) => t.id === simpanan) ? simpanan : 'classic';
+  });
 
   useEffect(() => {
-    document.documentElement.setAttribute('data-theme', theme);
-    localStorage.setItem(THEME_KEY, theme);
+    const valid = THEMES.some((t) => t.id === theme) ? theme : 'classic';
+    document.documentElement.setAttribute('data-theme', valid);
+    localStorage.setItem(THEME_KEY, valid);
   }, [theme]);
 
   const value = useMemo(

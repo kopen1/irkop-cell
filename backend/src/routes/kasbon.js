@@ -30,7 +30,11 @@ export async function updateKasbon(db, request, ctx, idStr) {
   if (body.status === 'lunas' && old.status !== 'lunas') {
     const sisa = Number(old.nominal) - Number(old.terbayar || 0); if (sisa <= 0) throw err(409, 'already_lunas', 'Kasbon sudah lunas; tidak ada sisa tagihan');
     const sesi = await requireOpenSession(db); const akun = body.akun ? (await getAccount(db, body.akun)).nama_akun : 'Tunai Laci'; const key = `kasbon_pelunasan:${id}:${akun}`;
-    await db.exec(`INSERT OR IGNORE INTO mutasi_saldo (kasir_sesi_id, nama_akun, jumlah, sumber_tipe, sumber_id, mutation_key, created_at) VALUES (?, ?, ?, 'kasbon_pelunasan', ?, ?, ?)`, sesi.id, akun, sisa, id, key, nowIso());
+    // WAJIB buat baris kasbon_pembayaran juga. Kalau tidak, rekonsiliasi
+    // menghitung mutasi (aktual) tapi tidak menghitung kasbonBayar, sehingga
+    // selisih muncul padahal kasbon sudah lunas.
+    const bayar = await db.exec(`INSERT INTO kasbon_pembayaran (kasbon_id, nominal, metode, akun_id, dicatat_oleh, tanggal, created_at) VALUES (?, ?, 'tunai', ?, ?, ?, ?)`, id, sisa, akun, user.id, sesi.tanggal, nowIso());
+    await db.exec(`INSERT OR IGNORE INTO mutasi_saldo (kasir_sesi_id, nama_akun, jumlah, sumber_tipe, sumber_id, mutation_key, created_at) VALUES (?, ?, ?, 'kasbon_pelunasan', ?, ?, ?)`, sesi.id, akun, sisa, bayar.lastRowId, `${key}:${bayar.lastRowId}`, nowIso());
     sets.push("status = 'lunas'"); sets.push('lunas_at = ?'); vals.push(nowIso()); sets.push('terbayar = ?'); vals.push(Number(old.nominal));
   } else if (body.status === 'belum_lunas' && old.status === 'lunas') throw err(409, 'lunas_immutable', 'Pelunasan kasbon tidak bisa dibatalkan; gunakan koreksi/reversal resmi');
   if (!sets.length) throw err(400, 'no_changes', 'Tidak ada perubahan'); vals.push(id); await db.exec(`UPDATE kasbon SET ${sets.join(', ')} WHERE id = ?`, ...vals);
@@ -41,13 +45,23 @@ export async function updateKasbon(db, request, ctx, idStr) {
 export async function payKasbon(db, request, ctx, idStr) {
   const { user } = ctx.auth; const id = asInt(idStr, { required: true, field: 'id' }); const body = await readBody(request); const old = await db.one('SELECT * FROM kasbon WHERE id = ?', id); if (!old) throw err(404, 'not_found', 'Kasbon tidak ditemukan');
   const nominal = asInt(body.nominal, { required: true, field: 'nominal', min: 1 }); const sisa = Number(old.nominal) - Number(old.terbayar || 0); if (sisa <= 0) throw err(409, 'already_lunas', 'Kasbon sudah lunas; tidak ada sisa tagihan'); if (nominal > sisa) throw err(400, 'overpayment', `Pembayaran melebihi sisa tagihan (${sisa})`);
-  const metode = asEnum(body.metode, ['tunai', 'transfer', 'bon'], { defaultVal: 'tunai', field: 'metode' }); const tanggal = asDate(body.tanggal, { field: 'tanggal' }) || wibDateToday(); let akun = null;
-  if (body.akun_id !== undefined && body.akun_id !== null && body.akun_id !== '') akun = await getAccount(db, body.akun_id);
-  const res = await db.exec(`INSERT INTO kasbon_pembayaran (kasbon_id, nominal, metode, akun_id, dicatat_oleh, tanggal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, id, nominal, metode, akun ? akun.nama_akun : null, user.id, tanggal, nowIso());
+  const metode = asEnum(body.metode, ['tunai', 'transfer', 'bon'], { defaultVal: 'tunai', field: 'metode' });
+  // Uang hanya bisa bergerak pada hari kasir buka, jadi tanggal pembayaran
+  // HARUS sama dengan tanggal sesi. Kalau tidak, kasbonBayar masuk ke periode
+  // satu sementara mutasinya masuk periode lain -> selisih muncul di keduanya.
+  const sesi = await requireOpenSession(db);
+  const tanggal = sesi.tanggal;
+  // Tanpa akun_id pun tetap harus ada mutasi, kalau tidak uang hilang dari
+  // pembukuan (aktual tidak naik, tapi kasbonBayar naik).
+  const akun = (body.akun_id !== undefined && body.akun_id !== null && body.akun_id !== '')
+    ? await getAccount(db, body.akun_id)
+    : await getAccount(db, 'Tunai Laci');
+  const res = await db.exec(`INSERT INTO kasbon_pembayaran (kasbon_id, nominal, metode, akun_id, dicatat_oleh, tanggal, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`, id, nominal, metode, akun.nama_akun, user.id, tanggal, nowIso());
   const terbayar = Number(old.terbayar || 0) + nominal; const lunas = terbayar >= Number(old.nominal);
   if (lunas) await db.exec("UPDATE kasbon SET terbayar = ?, status = 'lunas', lunas_at = ? WHERE id = ?", terbayar, nowIso(), id); else await db.exec('UPDATE kasbon SET terbayar = ? WHERE id = ?', terbayar, id);
-  if (akun) { const sesi = await requireOpenSession(db); const key = `kasbon_pelunasan:${id}:${res.lastRowId}:${akun.nama_akun}`; await db.exec(`INSERT OR IGNORE INTO mutasi_saldo (kasir_sesi_id, nama_akun, jumlah, sumber_tipe, sumber_id, mutation_key, created_at) VALUES (?, ?, ?, 'kasbon_pelunasan', ?, ?, ?)`, sesi.id, akun.nama_akun, nominal, res.lastRowId, key, nowIso()); }
-  await writeAudit(db, { userId: user.id, aksi: 'create', tabel: 'kasbon_pembayaran', recordId: res.lastRowId, dataAfter: { kasbon_id: id, nominal, metode, akun_id: akun ? akun.nama_akun : null, tanggal } });
+  const key = `kasbon_pelunasan:${id}:${res.lastRowId}:${akun.nama_akun}`;
+  await db.exec(`INSERT OR IGNORE INTO mutasi_saldo (kasir_sesi_id, nama_akun, jumlah, sumber_tipe, sumber_id, mutation_key, created_at) VALUES (?, ?, ?, 'kasbon_pelunasan', ?, ?, ?)`, sesi.id, akun.nama_akun, nominal, res.lastRowId, key, nowIso());
+  await writeAudit(db, { userId: user.id, aksi: 'create', tabel: 'kasbon_pembayaran', recordId: res.lastRowId, dataAfter: { kasbon_id: id, nominal, metode, akun_id: akun.nama_akun, tanggal } });
   return { id: res.lastRowId, kasbon_id: id, nominal, metode, terbayar, sisa: Number(old.nominal) - terbayar, status: lunas ? 'lunas' : 'belum_lunas', tanggal };
 }
 

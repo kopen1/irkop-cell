@@ -35,6 +35,9 @@ export default function KasirPage() {
 
   const [opening, setOpening] = useState(null);
   const [openingBusy, setOpeningBusy] = useState(false);
+  const [konfirmasiOpening, setKonfirmasiOpening] = useState(null);
+  const [koreksiBusy, setKoreksiBusy] = useState(false);
+  const [koreksiRows, setKoreksiRows] = useState(null);
   const [closing, setClosing] = useState(null);
   const [closingCatatan, setClosingCatatan] = useState('');
   const [closingBusy, setClosingBusy] = useState(false);
@@ -92,6 +95,9 @@ export default function KasirPage() {
   const status = sesi.data?.status;
   const perluDiingatkan = reminder.data?.perlu_diingatkan;
   const sesiLampau = reminder.data?.sesi_buka_lampau || [];
+  // Akun tipe "Lainnya" sengaja tidak bisa dipakai di opening/closing.
+  // Kalau ada, beri tahu supaya tidak hilang diam-diam.
+  const akunTersembunyi = (akun.data?.items || []).filter((a) => a.tipe === 'lainnya');
 
   const doOpening = async (e) => {
     e.preventDefault();
@@ -101,18 +107,50 @@ export default function KasirPage() {
       setErrForm('Isi saldo awal minimal satu akun.');
       return;
     }
+    // Tampilkan dulu ringkasannya supaya angka bisa dicek sebelum tersimpan.
+    setKonfirmasiOpening(entries);
+  };
+
+  const konfirmasiOpeningJalog = async () => {
+    const entries = konfirmasiOpening || [];
     setOpeningBusy(true);
     try {
       const res = await api.post('/kasir/opening', {
         saldo_awal: entries.map((o) => ({ nama_akun: o.nama_akun, saldo: parseRupiah(o.saldo) })),
       });
       toast.success('Kasir dibuka.');
+      setKonfirmasiOpening(null);
       if (res.notif_admin) toast.info('Notifikasi Opening telah dikirim ke Admin.');
       sesi.run();
     } catch (err) {
       toast.error(err.message);
     } finally {
       setOpeningBusy(false);
+    }
+  };
+
+  const mulaiKoreksi = () => {
+    const rows = (sesi.data?.saldo || [])
+      .filter((s) => s.nama_akun !== 'Total Saldo')
+      .map((s) => ({ nama_akun: s.nama_akun, saldo: formatRupiahInput(String(s.saldo_opening ?? 0)) }));
+    setKoreksiRows(rows);
+  };
+
+  const simpanKoreksi = async () => {
+    const entries = (koreksiRows || []).filter((r) => r.saldo !== '' && r.saldo !== null);
+    if (entries.length === 0) return;
+    setKoreksiBusy(true);
+    try {
+      await api.put('/kasir/opening', {
+        saldo_awal: entries.map((r) => ({ nama_akun: r.nama_akun, saldo: parseRupiah(r.saldo) })),
+      });
+      toast.success('Saldo awal dikoreksi.');
+      setKoreksiRows(null);
+      sesi.run();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setKoreksiBusy(false);
     }
   };
 
@@ -301,6 +339,14 @@ export default function KasirPage() {
         <Card title="Opening — Saldo Awal">
           <form onSubmit={doOpening}>
             <p className="field-hint mb-2">Saldo awal otomatis diisi dari sesi terakhir. Sesuaikan bila ada perubahan.</p>
+            {akunTersembunyi.length > 0 && (
+              <p className="field-error mb-2" role="alert">
+                Ada akun yang tidak ikut tampil di form ini karena tipenya &quot;Lainnya&quot;:{' '}
+                <strong>{akunTersembunyi.map((a) => a.nama_akun).join(', ')}</strong>. Kalau uangnya memang
+                ada (mis. uang darurat), ubah tipenya jadi Tunai/Bank di Pengaturan → Akun Master supaya bisa
+                dicatat di kasir.
+              </p>
+            )}
             <div className="flex flex-col gap-3">
               {opening && opening.length > 0 ? (
                 opening.map((o, idx) => (
@@ -337,10 +383,18 @@ export default function KasirPage() {
       {status === 'buka' && (
         <>
           <Card title="Saldo Sistem (berjalan)">
-            <div className="mb-3 text-right">
-              <Button variant="secondary" size="sm" onClick={() => sesi.run()}>
-                <Icon name="refresh" size={14} /> Muat ulang
-              </Button>
+            <div className="mb-3 flex items-center justify-between gap-2 wrap" style={{ flexWrap: 'wrap' }}>
+              <span className="text-sm text-muted">
+                Saldo awal masih bisa dikoreksi selama sesi ini belum punya transaksi.
+              </span>
+              <div className="row-actions">
+                <Button variant="secondary" size="sm" onClick={() => sesi.run()}>
+                  <Icon name="refresh" size={14} /> Muat ulang
+                </Button>
+                <Button variant="secondary" size="sm" onClick={mulaiKoreksi}>
+                  <Icon name="edit" size={14} /> Koreksi Saldo Awal
+                </Button>
+              </div>
             </div>
             <BalanceTable rows={sesi.data?.saldo || []} />
           </Card>
@@ -437,6 +491,95 @@ export default function KasirPage() {
           </div>
         </>
       )}
+
+      <Modal
+        open={Boolean(konfirmasiOpening)}
+        onClose={() => (openingBusy ? null : setKonfirmasiOpening(null))}
+        title="Periksa Saldo Awal"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setKonfirmasiOpening(null)} disabled={openingBusy}>
+              Kembali
+            </Button>
+            <Button onClick={konfirmasiOpeningJalog} loading={openingBusy}>
+              <Icon name="check" size={16} /> Ya, Buka Kasir
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm">
+          Kasir <strong>belum</strong> dibuka. Cek dulu saldo di bawah — setelah dibuka, angka ini
+          jadi acuan seluruh pembukuan hari ini.
+        </p>
+        <div className="table-wrap table-fit mt-3">
+          <table className="table">
+            <thead>
+              <tr>
+                <th>Akun</th>
+                <th className="col-right">Saldo awal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {(konfirmasiOpening || []).map((o) => {
+                const n = parseRupiah(o.saldo);
+                return (
+                  <tr key={o.nama_akun}>
+                    <td>{o.nama_akun}</td>
+                    <td className="col-right num font-bold" style={{ color: n === 0 ? 'var(--warning)' : undefined }}>
+                      {formatRupiah(n)}
+                      {n === 0 && <span className="text-xs text-warning"> (nol)</span>}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+        {(konfirmasiOpening || []).every((o) => parseRupiah(o.saldo) === 0) && (
+          <p className="field-error mt-3" role="alert">
+            Semua saldo awal 0. Kalau memang belum ada uang tercatat, tidak apa-apa — tapi kalau
+            ada uang di laci atau e-wallet, isi dulu agar pembukuan tidak meleset.
+          </p>
+        )}
+      </Modal>
+
+      <Modal
+        open={Boolean(koreksiRows)}
+        onClose={() => (koreksiBusy ? null : setKoreksiRows(null))}
+        title="Koreksi Saldo Awal"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setKoreksiRows(null)} disabled={koreksiBusy}>
+              Batal
+            </Button>
+            <Button onClick={simpanKoreksi} loading={koreksiBusy}>
+              <Icon name="check" size={16} /> Simpan Koreksi
+            </Button>
+          </>
+        }
+      >
+        <p className="text-sm">
+          Isi ulang saldo awal sesi hari ini. Bisa dipakai selama sesi <strong>belum punya transaksi</strong>.
+          Semua perubahan tercatat di audit log.
+        </p>
+        <div className="flex flex-col gap-2 mt-3">
+          {(koreksiRows || []).map((r, i) => (
+            <div key={r.nama_akun} className="akun-row">
+              <div style={{ fontWeight: 600 }}>{r.nama_akun}</div>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="input"
+                style={{ maxWidth: 180, textAlign: 'right' }}
+                value={r.saldo}
+                onChange={(e) =>
+                  setKoreksiRows((rows) => rows.map((x, j) => (j === i ? { ...x, saldo: formatRupiahInput(e.target.value) } : x)))
+                }
+              />
+            </div>
+          ))}
+        </div>
+      </Modal>
 
       <Modal
         open={Boolean(editSesi)}

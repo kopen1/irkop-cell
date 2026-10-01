@@ -24,6 +24,11 @@
   --container-max: 1200px;
 }
 
+/* :root ikut-mileur 'classic' sebagai nilai default. Kalau data-theme hilang
+   atau berisi id yang tidak dikenal, blok di bawah TIDAK akan cocok dan semua
+   variabel warna hilang -> teks jatuh ke warna default browser (terlihat
+   "pertebal" semua). Jaga agar itu tidak mungkin terjadi. */
+:root,
 [data-theme='classic'] {
   color-scheme: dark;
 

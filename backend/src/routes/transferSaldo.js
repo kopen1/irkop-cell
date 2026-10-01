@@ -6,7 +6,7 @@
 import { err } from '../lib/errors.js';
 import { nowIso, wibDateToday, isValidCalendarDate } from '../lib/time.js';
 import { getAccount } from '../financial/akun.js';
-import { requireSessionForToday } from '../financial/kasir.js';
+import { requireOpenSession } from '../financial/kasir.js';
 import { reverseFullSource } from '../financial/reversal.js';
 import { writeAudit } from '../lib/audit.js';
 import { asInt } from '../lib/validate.js';
@@ -126,7 +126,9 @@ export async function createTransferSaldo(db, body, ctx, request) {
   const ke = await resolveMoneyAccount(db, v.ke);
   if (dari === ke) throw err(400, 'invalid_value', 'Akun asal dan tujuan tidak boleh sama');
 
-  const sesi = await requireSessionForToday(db);
+  // Pakai tanggal yang dipilih, BUKAN hari ini. Kalau user membuka ulang sesi
+  // tanggal lain untuk mencatat, transfernya harus masuk ke sesi itu juga.
+  const sesi = await requireOpenSession(db, v.tanggal);
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
 
   if (idempotencyKey) {
@@ -181,7 +183,7 @@ export async function updateTransferSaldo(db, body, ctx, idStr) {
   const ke = await resolveMoneyAccount(db, v.ke);
   if (dari === ke) throw err(400, 'invalid_value', 'Akun asal dan tujuan tidak boleh sama');
 
-  const sesi = await requireSessionForToday(db);
+  const sesi = await requireOpenSession(db, v.tanggal);
   const actionKey = ctx.idempotencyKey || `utr-${id}-${Date.now()}`;
   const now = nowIso();
 
@@ -221,7 +223,8 @@ export async function deleteTransferSaldo(db, body, ctx, idStr) {
   const old = await db.one('SELECT * FROM transfer_saldo WHERE id = ? AND deleted_at IS NULL', id);
   if (!old) throw err(404, 'not_found', 'Transfer saldo tidak ditemukan');
 
-  const sesi = await requireSessionForToday(db);
+  // Pembatalan harus masuk ke sesi tanggalnya, bukan sesi hari ini.
+  const sesi = await requireOpenSession(db, old.tanggal);
   const actionKey = ctx.idempotencyKey || `dtr-${id}-${Date.now()}`;
   const reversal = await reverseFullSource(db, { sumberTipe: 'penyesuaian', sumberId: id, kasirSesiId: sesi.id, actionKey });
   const reason = body.deleted_reason || 'dihapus dari halaman Isi Saldo';

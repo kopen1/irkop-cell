@@ -476,6 +476,7 @@ export default function LaporanPage() {
             <>
               <Card className="mt-4" title="Rekap Kategori" subtitle="Snapshot transaksi_item periode ini">
                 <Table
+                  className="table-fit"
                   columns={[
                     { key: 'nama', header: 'Kategori', render: (r) => { const c = kategoriColor(r.nama); return <span className="badge" style={{ background: c.bg, color: c.fg, fontWeight: 700 }}>{r.nama}</span>; } },
                     { key: 'jumlah_item', header: 'Jumlah Item', align: 'right', render: (r) => <span className="num">{r.jumlah_item}</span> },
@@ -506,6 +507,7 @@ export default function LaporanPage() {
 
               <Card className="mt-4" title="Arus Dana (bukan omzet)">
                 <Table
+                  className="table-fit"
                   columns={[
                     { key: 'label', header: 'Jenis', render: (r) => <span style={r.tebal ? { fontWeight: 700 } : undefined}>{r.label}</span> },
                     { key: 'nilai', header: 'Nominal', align: 'right', render: (r) => <span className="num" style={r.tebal ? { fontWeight: 700 } : undefined}>{formatRupiah(r.nilai)}</span> },
@@ -524,6 +526,7 @@ export default function LaporanPage() {
 
               <Card className="mt-4" title="Saldo Akun (awal → akhir bulan)">
                 <Table
+                  className="table-fit"
                   columns={[
                     { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
                     { key: 'saldo_awal', header: 'Saldo Awal', align: 'right', render: (r) => <span className="num">{formatRupiah(r.saldo_awal)}</span> },
@@ -595,6 +598,7 @@ export default function LaporanPage() {
 
               <Card className="mt-4" title="Ranking Kategori Terlaris" subtitle={'Top kategori selama ' + data.tahun}>
                 <Table
+                  className="table-fit"
                   columns={[
                     { key: 'nama', header: 'Kategori' },
                     { key: 'qty', header: 'Qty', align: 'right', render: (r) => <span className="num">{r.qty}</span> },
@@ -668,6 +672,11 @@ export default function LaporanPage() {
 
       {status === 'success' && isBulanan && (
         <Card className="mt-4" title={`Rekonsiliasi Bulanan — ${monthName(bulanParam)}`}>
+          <p className="field-hint mb-2">
+            Semua nilai adalah <strong>kontribusi</strong> terhadap &quot;Δ Uang seharusnya&quot;, bukan nilai
+            absolut. Contoh: Δ Stok negatif (HPP &gt; pembelian = stok berkurang) artinya kasir seharusnya
+            menerima uang lebih besar.
+          </p>
           {rekon.status === 'loading' ? (
             <Loader />
           ) : rekon.status === 'error' ? (
@@ -675,7 +684,8 @@ export default function LaporanPage() {
           ) : rk ? (
             <>
               <Table
-                columns={[
+                className="table-fit"
+                  columns={[
                   { key: 'label', header: 'Komponen', render: (r) => <span style={{ fontWeight: r.bold ? 700 : 400 }}>{r.label}</span> },
                   { key: 'value', header: 'Nilai', align: 'right', render: (r) => <span className="num" style={{ fontWeight: r.bold ? 700 : 400 }}>{formatSignedRupiah(r.value)}</span> },
                 ]}
@@ -719,7 +729,8 @@ export default function LaporanPage() {
               />
               <h4 className="card-title-sm mb-2" style={{ marginTop: 16 }}>Per Akun</h4>
               <Table
-                columns={[
+                className="table-fit"
+                  columns={[
                   { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
                   { key: 'masuk', header: 'Masuk', align: 'right', render: (r) => <span className="num text-success">{formatRupiah(r.masuk)}</span> },
                   { key: 'keluar', header: 'Keluar', align: 'right', render: (r) => <span className="num text-danger">{formatRupiah(r.keluar)}</span> },

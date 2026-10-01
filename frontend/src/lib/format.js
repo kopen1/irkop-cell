@@ -47,6 +47,15 @@ export function parseRupiah(value) {
 }
 
 // Format tanggal WIB: 10/08/2026 19:45
+// Tanggal transaksi bisnis saja, tanpa jam: "01/10/2026".
+// Dipakai supaya tanggal tidak tampil dobel (tanggal input + tanggal transaksi).
+export function formatTanggal(isoDate) {
+  if (!isoDate) return '-';
+  const [y, m, d] = String(isoDate).slice(0, 10).split('-');
+  if (!y || !m || !d) return String(isoDate);
+  return `${d}/${m}/${y}`;
+}
+
 export function formatDateTime(iso) {
   if (!iso) return '-';
   return new Intl.DateTimeFormat('id-ID', {

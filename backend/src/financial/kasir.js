@@ -11,6 +11,34 @@ import { autoCreateProdukFromTransaksi } from './autoProduk.js';
 const LEDGER_AKUN = new Set(['Saldo Akun', 'Total Saldo', 'Laba']);
 const isAkunUang = (namaAkun) => !LEDGER_AKUN.has(String(namaAkun || '').trim());
 
+// Sesi mana yang harus menerima transaksi BARU.
+// Prioritas: sesi hari ini kalau masih buka. Kalau tidak (mis. pengguna sedang
+// mengoreksi lewat "Buka Ulang Sesi Tanggal Lain"), pakai sesi lampau yang
+// masih buka — supaya form transaksi otomatis ikut tanggal itu, tidak perlu
+// memilih tanggal secara manual.
+export async function sesiAktif(db) {
+  const today = wibDateToday();
+  const hariIni = await getTodaySession(db, { date: today });
+  if (hariIni && hariIni.status === 'buka') {
+    return { tanggal: today, kasir_sesi_id: hariIni.id, reopened: false };
+  }
+  const lampau = await db.one(
+    `SELECT id, tanggal FROM kasir_sesi
+      WHERE status = 'buka' AND tanggal < ?
+      ORDER BY tanggal DESC, id DESC LIMIT 1`,
+    today
+  );
+  if (lampau) {
+    return { tanggal: lampau.tanggal, kasir_sesi_id: lampau.id, reopened: true };
+  }
+  return {
+    tanggal: today,
+    kasir_sesi_id: null,
+    reopened: false,
+    alasan: hariIni ? 'Sesi hari ini sudah ditutup.' : 'Kasir hari ini belum dibuka.',
+  };
+}
+
 export async function reminderKasirBelumClosing(db, { user, ip }) {
   const today = wibDateToday();
   const open = await db.many(
@@ -183,6 +211,60 @@ export async function opening(db, { body, user, ip }) {
   await Promise.all(hang);
 
   return { kasir_sesi_id: sesi.id, tanggal: today, status: 'buka', saldo_awal: openingRows.map((r) => ({ nama_akun: r.nama_akun, saldo: r.saldo })) };
+}
+
+// Koreksi saldo awal sesi yang MASIH BUKA dan belum ada transaksinya.
+// Opening tidak menulis mutasi_saldo (baseline-nya ada di kasir_saldo
+// tipe='opening'), jadi koreksi cukup menulis ulang baris itu.
+// Dibatasi: sesi harus buka + belum ada transaksi, supaya tidak pernah
+// membuat saldo sistem tidak sinkron dengan mutasi yang sudah terjadi.
+export async function revisiOpening(db, { body, user, ip }) {
+  const today = wibDateToday();
+  const sesi = await getTodaySession(db, { date: today });
+  if (!sesi) throw err(404, 'not_found', 'Sesi kasir hari ini belum dibuka');
+  if (sesi.status !== 'buka') {
+    throw err(400, 'session_closed', 'Sesi sudah ditutup. Gunakan "Buka Ulang Sesi Tanggal Lain" untuk mengoreksi.');
+  }
+
+  const sudahAda = await db.one('SELECT COUNT(*) AS n FROM transaksi WHERE kasir_sesi_id = ?', sesi.id);
+  if (sudahAda && sudahAda.n > 0) {
+    throw err(409, 'session_has_transaksi',
+      'Sesi ini sudah punya transaksi, jadi saldo awal tidak bisa diubah (akan membuat saldo sistem tidak cocok dengan mutasi).');
+  }
+
+  const openingInput = computeOpeningRows(body).filter((r) => isAkunUang(r.nama_akun));
+  if (!openingInput.length) throw err(400, 'missing_field', 'Tidak ada akun uang untuk saldo awal');
+  const rows = await Promise.all(
+    openingInput.map(async (r) => ({ nama_akun: r.nama_akun, saldo: Number(r.saldo), account: await getAccount(db, r.nama_akun) }))
+  );
+
+  const before = await db.many(
+    "SELECT nama_akun, saldo_sistem FROM kasir_saldo WHERE kasir_sesi_id = ? AND tipe = 'opening'",
+    sesi.id
+  );
+  const beforeMap = Object.fromEntries(before.map((b) => [b.nama_akun, Number(b.saldo_sistem)]));
+
+  for (const { nama_akun, saldo } of rows) {
+    await db.exec(
+      "UPDATE kasir_saldo SET saldo_sistem = ?, saldo_real = ? WHERE kasir_sesi_id = ? AND nama_akun = ? AND tipe = 'opening'",
+      saldo, saldo, sesi.id, nama_akun
+    );
+  }
+
+  await writeAudit(db, {
+    userId: user.id, aksi: 'revisi_opening', tabel: 'kasir_sesi', recordId: sesi.id,
+    dataBefore: { saldo_awal: beforeMap },
+    dataAfter: { tanggal: today, saldo_awal: rows.map((r) => ({ nama_akun: r.nama_akun, saldo: r.saldo })) },
+    ip,
+  });
+
+  return {
+    kasir_sesi_id: sesi.id,
+    tanggal: today,
+    status: 'buka',
+    message: 'Saldo awal dikoreksi',
+    saldo_awal: rows.map((r) => ({ nama_akun: r.nama_akun, saldo: r.saldo })),
+  };
 }
 
 export async function closing(db, { body, user, ip }) {

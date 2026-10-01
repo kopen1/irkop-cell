@@ -804,13 +804,18 @@ function AkunForm({ akun, onCancel, onSaved }) {
       <Field label="Nama akun" required>
         <Input type="text" value={form.nama_akun} placeholder="mis. BCA, ShopeePay…" onChange={(e) => setForm((f) => ({ ...f, nama_akun: e.target.value }))} />
       </Field>
-      <Field label="Tipe">
+      <Field
+        label="Tipe"
+        hint={form.tipe === 'lainnya'
+          ? 'Peringatan: akun tipe "Lainnya" TIDAK muncul di halaman Kasir (opening/closing) dan tidak dihitung di Total Saldo. Kalau uangnya benar-benar ada di tangan, pilih Tunai atau Bank.'
+          : 'Tunai = uang fisik di tangan · Bank = rekening · E-Wallet = DANA/OVO/GoPay · Digital = prepaid (OrderKuota, dll)'}
+      >
         <Select value={form.tipe} onChange={(e) => setForm((f) => ({ ...f, tipe: e.target.value }))}>
           <option value="tunai">Tunai</option>
           <option value="bank">Bank</option>
           <option value="e_wallet">E-Wallet</option>
           <option value="digital">Digital</option>
-          <option value="lainnya">Lainnya</option>
+          <option value="lainnya">Lainnya (tidak muncul di Kasir)</option>
         </Select>
       </Field>
       {error && <p className="field-error" role="alert">{error}</p>}

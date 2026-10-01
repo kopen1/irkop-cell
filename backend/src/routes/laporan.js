@@ -518,7 +518,12 @@ export async function rekonsiliasi(db, request, ctx) {
   const beli = scalarSum([beliRow], 'beli');
   const delta_stok = beli - cogs;
 
-  const kasbonBaru = await db.one('SELECT COALESCE(SUM(nominal), 0) AS n FROM kasbon WHERE tanggal >= ? AND tanggal <= ?', startD, endD);
+  // Kasbon yang berasal dari penjualan (metode Bon) sudah bringing laba di
+  // transaksi yang sama, jadi ikut dihitung sebagai kenaikan piutang.
+  // Kasbon yang dibuat MANUAL (tanpa transaksi) tidak pernah mencatat laba,
+  // jadi TIDAK boleh dihitung di sini — kalau ikut, pelunasan manual terlihat
+  // seperti selisih padahal uangnya benar-benar masuk.
+  const kasbonBaru = await db.one("SELECT COALESCE(SUM(nominal), 0) AS n FROM kasbon WHERE transaksi_id IS NOT NULL AND tanggal >= ? AND tanggal <= ?", startD, endD);
   const kasbonBayar = await db.one('SELECT COALESCE(SUM(nominal), 0) AS n FROM kasbon_pembayaran WHERE tanggal >= ? AND tanggal <= ?', startD, endD);
   const delta_piutang = scalarSum([kasbonBaru], 'n') - scalarSum([kasbonBayar], 'n');
 

@@ -1,19 +1,21 @@
 import { useState, useMemo } from 'react';
 import { api, newIdempotencyKey } from '../../lib/api';
 import { useAsync } from '../../hooks/useAsync';
-import { METODE_PEMBAYARAN, formatRupiah, todayWIB, formatRupiahInput, parseRupiah } from '../../lib/format';
+import { METODE_PEMBAYARAN, formatRupiah, todayWIB, formatTanggal, formatRupiahInput, parseRupiah } from '../../lib/format';
 import { Button } from '../ui/Button';
 import { Field, Input, Select } from '../ui/Field';
 import { Icon } from '../ui/Icon';
 import { operatorOf } from '../../lib/operator';
 import { kategoriColor } from '../../lib/kategoriColor';
 
+// Warna per jenis biar cepat dikenali saat memilih. `tone` memakai kelas
+// badge-* yang sudah ada di proyek (success/info/warning/accent).
 const JENIS_OPTIONS = [
   { value: '', label: '-- Pilih Jenis --' },
-  { value: 'penjualan', label: 'Penjualan' },
-  { value: 'produkdigital', label: 'Produk Digital' },
-  { value: 'tariktunai', label: 'Tarik Tunai' },
-  { value: 'service', label: 'Service HP' },
+  { value: 'penjualan', label: 'Penjualan', tone: 'success' },
+  { value: 'produkdigital', label: 'Produk Digital', tone: 'info' },
+  { value: 'tariktunai', label: 'Tarik Tunai', tone: 'warning' },
+  { value: 'service', label: 'Service HP', tone: 'accent' },
 ];
 
 const SUB_JENIS_OPTIONS = [
@@ -104,12 +106,16 @@ function LabaDisplay({ value }) {
   );
 }
 
-export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel }) {
+export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSaved, onCancel }) {
   const today = todayWIB();
   const maxBackdate = (() => {
     const d = new Date();
     d.setDate(d.getDate() - 30);
-    return d.toISOString().slice(0, 10);
+    const batas = d.toISOString().slice(0, 10);
+    // Sesi yang dibuka ulang bisa lebih lama dari 30 hari — jangan kunci tanggal.
+    const tglSesi = sesiAktif?.tanggal;
+    if (tglSesi && tglSesi < batas) return tglSesi;
+    return batas;
   })();
 
   const isEdit = Boolean(initial?.id);
@@ -140,7 +146,12 @@ export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel
     if (initial?.jenis) return initial.jenis;
     return initialJenis || '';
   });
-  const [tanggal, setTanggal] = useState(() => initial?.tanggal_transaksi || today);
+  // Kalau kasir sedang mengoreksi lewat "Buka Ulang Sesi Tanggal Lain", transaksi
+  // baru harus ikut tanggal sesi itu — bukan tanggal hari ini. Backend sudah
+  // memilih tanggal yang benar (hari ini kalau buka; kalau tidak, sesi lampau
+  // yang masih buka), jadi FE cukup memakainya apa adanya.
+  const tanggalSesi = sesiAktif?.tanggal || today;
+  const [tanggal, setTanggal] = useState(() => initial?.tanggal_transaksi || tanggalSesi);
   const [pelangganId, setPelangganId] = useState(() => initial?.pelanggan_id || '');
   const [showPelangganForm, setShowPelangganForm] = useState(false);
   const [newPelangganNama, setNewPelangganNama] = useState('');
@@ -608,11 +619,19 @@ export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel
         <div className="card" style={{ padding: 'var(--space-4)' }}>
           <div className="grid-3">
             <Field label="Jenis Transaksi" required>
-              <Select value={jenis} onChange={(e) => handleJenisChange(e.target.value)}>
-                {JENIS_OPTIONS.map((j) => (
-                  <option key={j.value} value={j.value}>{j.label}</option>
+              <div className="jenis-pick" role="group" aria-label="Jenis Transaksi">
+                {JENIS_OPTIONS.filter((j) => j.value).map((j) => (
+                  <button
+                    key={j.value}
+                    type="button"
+                    className={`jenis-pick-btn badge-${j.tone}${jenis === j.value ? ' aktif' : ''}`}
+                    aria-pressed={jenis === j.value}
+                    onClick={() => handleJenisChange(j.value)}
+                  >
+                    {j.label}
+                  </button>
                 ))}
-              </Select>
+              </div>
             </Field>
             <Field label={`Pelanggan${metodeBayar === 'bon' ? ' (Wajib untuk Bon)' : ''}`}>
               <div className="input-group">
@@ -643,7 +662,12 @@ export default function TransaksiForm({ initial, initialJenis, onSaved, onCancel
                 </div>
               )}
             </Field>
-            <Field label="Tanggal">
+            <Field
+              label="Tanggal"
+              hint={sesiAktif?.reopened
+                ? `Sesi ${formatTanggal(sesiAktif.tanggal)} sedang dibuka ulang — transaksi ini masuk ke sesi itu, bukan ke kasir hari ini.`
+                : undefined}
+            >
               <Input
                 type="date"
                 min={maxBackdate}

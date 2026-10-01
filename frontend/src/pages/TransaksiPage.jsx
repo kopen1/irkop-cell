@@ -9,7 +9,7 @@ import { api } from '../lib/api';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useDebounce } from '../hooks/useDebounce';
-import { todayWIB, formatRupiah, formatDateTime, METODE_PEMBAYARAN } from '../lib/format';
+import { todayWIB, formatRupiah, formatTanggal, METODE_PEMBAYARAN } from '../lib/format';
 import { PageHeader } from '../components/ui/PageHeader';
 import { Button } from '../components/ui/Button';
 import { Field, Input, Select } from '../components/ui/Field';
@@ -50,6 +50,10 @@ export default function TransaksiPage() {
   const [statusKonfirmasi, setStatusKonfirmasi] = useState('');
   const [offset, setOffset] = useState(0);
   const [kasirStatus, setKasirStatus] = useState(null);
+  // Sesi kasir yang sedang menerima transaksi baru. Kalau pengguna sedang
+  // mengoreksi lewat "Buka Ulang Sesi Tanggal Lain", form transaksi ikut
+  // tanggal sesi itu secara otomatis.
+  const [sesiAktif, setSesiAktif] = useState(null);
 
   const debouncedQ = useDebounce(q, 350);
 
@@ -95,6 +99,11 @@ export default function TransaksiPage() {
 
   useEffect(() => {
     api.get('/kasir/current').then((r) => setKasirStatus(r.status)).catch(() => {});
+    // Diambil ulang berkala supaya tanggal default ikut berubah begitu sesi
+    // dibuka ulang / ditutup dari halaman Kasir.
+    const poll = setInterval(() => { api.get('/kasir/aktif').then(setSesiAktif).catch(() => {}); }, 15000);
+    api.get('/kasir/aktif').then(setSesiAktif).catch(() => {});
+    return () => clearInterval(poll);
   }, []);
 
   // --- Detail (termasuk deep link ?detail= dari Dashboard) ---
@@ -228,6 +237,7 @@ export default function TransaksiPage() {
           key={editItem ? String(editItem.id) : 'baru'}
           initial={editItem || undefined}
           initialJenis={lastJenis}
+          sesiAktif={sesiAktif}
           onCancel={closeForm}
           onSaved={handleSaved}
         />
@@ -361,14 +371,13 @@ export default function TransaksiPage() {
             columns={[
               {
                 key: 'created_at',
-                header: 'Tanggal/Jam (WIB)',
+                header: 'Tanggal',
+                // Satu tanggal saja: tanggal bisnis yang jadi acuan pembukuan.
+                // Jam & tanggal input lengkap ada di halaman detail.
                 render: (r) => (
-                  <>
-                    <span className="text-sm">{formatDateTime(r.created_at)}</span>
-                    {r.tanggal_transaksi && r.tanggal_transaksi !== r.created_at?.slice(0, 10) && (
-                      <span className="col-sub">Transaksi: {r.tanggal_transaksi}</span>
-                    )}
-                  </>
+                  <span className="text-sm">
+                    {formatTanggal(r.tanggal_transaksi || r.created_at)}
+                  </span>
                 ),
               },
               {
