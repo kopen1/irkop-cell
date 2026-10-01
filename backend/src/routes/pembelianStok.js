@@ -6,7 +6,7 @@
 import { err } from '../lib/errors.js';
 import { nowIso, wibDateToday, isValidCalendarDate } from '../lib/time.js';
 import { getAccount } from '../financial/akun.js';
-import { requireSessionForToday } from '../financial/kasir.js';
+import { requireOpenSession } from '../financial/kasir.js';
 import { reverseFullSource } from '../financial/reversal.js';
 import { writeAudit } from '../lib/audit.js';
 import { asInt } from '../lib/validate.js';
@@ -157,7 +157,9 @@ export async function createPembelianStok(db, body, ctx, request) {
   const { tanggal, catatan } = validateHeader(body);
   const { items, total } = await buildItems(db, body.items);
 
-  const sesi = await requireSessionForToday(db);
+  // Pakai tanggal yang dipilih, bukan hari ini — supaya bisa dipakai setelah
+  // "Buka Ulang Sesi Tanggal Lain" (mis. inject voucherclosing).
+  const sesi = await requireOpenSession(db, tanggal);
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
   if (idempotencyKey) {
     const existing = await db.one('SELECT sumber_id FROM mutasi_saldo WHERE mutation_key = ?', mutationKey(idempotencyKey, null, akun));
@@ -217,7 +219,7 @@ export async function updatePembelianStok(db, body, ctx, idStr) {
   const akun = await resolveMoneyAccount(db, body.akun_sumber);
   const { tanggal, catatan } = validateHeader(body);
   const { items, total } = await buildItems(db, body.items);
-  const sesi = await requireSessionForToday(db);
+  const sesi = await requireOpenSession(db, tanggal);
   const actionKey = ctx.idempotencyKey || `ups-${id}-${Date.now()}`;
   const now = nowIso();
 
@@ -264,7 +266,8 @@ export async function deletePembelianStok(db, body, ctx, idStr) {
   const old = await db.one('SELECT * FROM pembelian_stok WHERE id = ? AND deleted_at IS NULL', id);
   if (!old) throw err(404, 'not_found', 'Pembelian stok tidak ditemukan');
 
-  const sesi = await requireSessionForToday(db);
+  // Pembatalan masuk ke sesi tanggalnya sendiri.
+  const sesi = await requireOpenSession(db, old.tanggal);
   const actionKey = ctx.idempotencyKey || `dps-${id}-${Date.now()}`;
   const now = nowIso();
   const items = await db.many('SELECT produk_id, qty FROM pembelian_stok_item WHERE pembelian_id = ?', id);

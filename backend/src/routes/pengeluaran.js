@@ -78,7 +78,9 @@ export async function createPengeluaran(db, body, ctx, request) {
   const { user } = ctx.auth;
   const v = validateBody(body);
   await getAccount(db, v.akunSumber);
-  const sesi = await requireOpenSession(db);
+  // Pakai tanggal yang dipilih supaya bisa dipakai saat sesi tanggal lain
+  // dibuka ulang, bukan hanya sesi hari ini.
+  const sesi = await requireOpenSession(db, v.tanggal);
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
 
   if (idempotencyKey) {
@@ -132,7 +134,7 @@ export async function updatePengeluaran(db, body, ctx, idStr) {
 
   const v = validateBody(body);
   await getAccount(db, v.akunSumber);
-  const sesi = await requireOpenSession(db);
+  const sesi = await requireOpenSession(db, v.tanggal);
   const actionKey = ctx.idempotencyKey || `peu-${id}-${Date.now()}`;
 
   await reverseFullSource(db, { sumberTipe: 'pengeluaran', sumberId: id, kasirSesiId: sesi.id, actionKey });
@@ -161,7 +163,7 @@ export async function deletePengeluaran(db, body, ctx, idStr) {
   const old = await db.one('SELECT * FROM pengeluaran WHERE id = ? AND deleted_at IS NULL', id);
   if (!old) throw err(404, 'not_found', 'Pengeluaran tidak ditemukan');
 
-  const sesi = await requireOpenSession(db);
+  const sesi = await requireOpenSession(db, old.tanggal);
   const actionKey = ctx.idempotencyKey || `ped-${id}-${Date.now()}`;
   const reversal = await reverseFullSource(db, { sumberTipe: 'pengeluaran', sumberId: id, kasirSesiId: sesi.id, actionKey });
   const reason = body.deleted_reason || 'manual soft-delete';

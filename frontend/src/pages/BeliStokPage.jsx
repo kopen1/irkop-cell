@@ -24,6 +24,9 @@ export default function BeliStokPage() {
   const akun = useAsync(() => api.get('/akun'), { deps: [] });
   const produk = useAsync(() => api.get('/produk', { limit: 500 }), { deps: [] });
   const kasir = useAsync(() => api.get('/kasir/current'), { deps: [] });
+  // Sesi yang harus menerima pembelian ini. Kalau sedang mengoreksi lewat
+  // "Buka Ulang Sesi Tanggal Lain", tanggal form ikut sesi itu.
+  const [sesiAktif, setSesiAktif] = useState(null);
   const akunList = useMemo(() => akun.data?.items || [], [akun.data]);
   const produkList = useMemo(
     () => (produk.data?.items || []).filter((p) => !p.deleted_at && Number(p.kategori_lacak_stok || 0) === 1),
@@ -46,6 +49,21 @@ export default function BeliStokPage() {
     []
   );
   useEffect(() => { load().catch(() => {}); }, [load]);
+
+  // Sesi aktif diambil ulang berkala supaya tanggal default ikut berubah begitu
+  // sesi dibuka ulang / ditutup dari halaman Kasir.
+  useEffect(() => {
+    const poll = setInterval(() => { api.get('/kasir/aktif').then(setSesiAktif).catch(() => {}); }, 15000);
+    api.get('/kasir/aktif').then(setSesiAktif).catch(() => {});
+    return () => clearInterval(poll);
+  }, []);
+
+  // Ikuti sesi aktif: begitu tahu sesi mana yang dibuka, tanggal form diisi
+  // dengan tanggal itu. Jangan menimpa pilihan manual pengguna.
+  useEffect(() => {
+    const tgl = sesiAktif?.tanggal;
+    if (tgl) setForm((f) => (f.touchedTanggal ? f : { ...f, tanggal: tgl }));
+  }, [sesiAktif?.tanggal]);
 
   const saldoOf = (nama) => {
     const s = (kasir.data?.saldo || []).find((x) => x.nama_akun === nama);
@@ -143,8 +161,18 @@ export default function BeliStokPage() {
                 ))}
               </Select>
             </Field>
-            <Field label="Tanggal" required>
-              <Input type="date" value={form.tanggal} onChange={set('tanggal')} />
+            <Field
+              label="Tanggal"
+              required
+              hint={sesiAktif?.reopened
+                ? `Sesi ${sesiAktif.tanggal} sedang dibuka ulang — pembelian ini masuk ke sesi itu, bukan ke kasir hari ini.`
+                : undefined}
+            >
+              <Input
+                type="date"
+                value={form.tanggal}
+                onChange={(e) => { setForm((f) => ({ ...f, tanggal: e.target.value, touchedTanggal: true })); }}
+              />
             </Field>
           </div>
           <Field label="Catatan (opsional)">

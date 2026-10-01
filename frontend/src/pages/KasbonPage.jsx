@@ -49,6 +49,8 @@ export default function KasbonPage() {
 
   const [createOpen, setCreateOpen] = useState(false);
   const [lunasTarget, setLunasTarget] = useState(null);
+  const [hapusTarget, setHapusTarget] = useState(null);
+  const [hapusBusy, setHapusBusy] = useState(false);
   const [lunasAkun, setLunasAkun] = useState('');
   const [lunasBusy, setLunasBusy] = useState(false);
 
@@ -76,6 +78,23 @@ export default function KasbonPage() {
   }, [rows]);
 
   const toggleGroup = (gkey) => setExpanded((s) => ({ ...s, [gkey]: !s[gkey] }));
+
+  const doHapus = async () => {
+    if (!hapusTarget) return;
+    setHapusBusy(true);
+    try {
+      await api.del(`/kasbon/${hapusTarget.id}`);
+      toast.success(`Kasbon ${formatRupiah(hapusTarget.nominal)} dihapus.`);
+      setHapusTarget(null);
+      load().catch(() => {});
+    } catch (err) {
+      // Backend menolak kalau kasbon sudah punya pembayaran atau terikat transaksi.
+      toast.error(err.message);
+      setHapusTarget(null);
+    } finally {
+      setHapusBusy(false);
+    }
+  };
 
   const doLunas = async () => {
     setLunasBusy(true);
@@ -183,35 +202,54 @@ export default function KasbonPage() {
                           key: 'aksi',
                           header: '',
                           align: 'right',
-                          render: (r) =>
-                            can('kasbon') && r.status === 'belum_lunas' ? (
+                          render: (r) => {
+                            if (!can('kasbon')) return null;
+                            const belumLunas = r.status === 'belum_lunas';
+                            return (
                               <div className="flex items-center justify-end gap-2">
-                                <Input
-                                  type="text"
-                                  inputMode="numeric"
-                                  aria-label={`Bayar kasbon ${r.id}`}
-                                  placeholder="Bayar…"
-                                  value={bayar[r.id] || ''}
-                                  onChange={(e) => setBayar((s) => ({ ...s, [r.id]: formatRupiahInput(e.target.value) }))}
-                                  style={{ width: 110 }}
-                                />
+                                {belumLunas && (
+                                  <>
+                                    <Input
+                                      type="text"
+                                      inputMode="numeric"
+                                      aria-label={`Bayar kasbon ${r.id}`}
+                                      placeholder="Bayar…"
+                                      value={bayar[r.id] || ''}
+                                      onChange={(e) => setBayar((s) => ({ ...s, [r.id]: formatRupiahInput(e.target.value) }))}
+                                      style={{ width: 110 }}
+                                    />
+                                    <Button
+                                      size="sm"
+                                      loading={Boolean(bayarBusy[r.id])}
+                                      disabled={!bayar[r.id] || parseRupiah(bayar[r.id]) < 1 || parseRupiah(bayar[r.id]) > sisaBon(r)}
+                                      onClick={() => doBayar(r)}
+                                    >
+                                      Bayar
+                                    </Button>
+                                    <Button
+                                      variant="secondary"
+                                      size="sm"
+                                      onClick={(e) => { e.stopPropagation(); setLunasTarget(r); setLunasAkun(''); }}
+                                    >
+                                      <Icon name="check" size={14} /> Set Lunas
+                                    </Button>
+                                  </>
+                                )}
+                                {/* Hapus selalu tampil. Kalau kasbon sudah ada pembayaran
+                                    atau terikat transaksi, backend menolak dengan alasan
+                                    jelas — jadi tidak bisa hilang tanpa penjelasan. */}
                                 <Button
+                                  variant="ghost"
                                   size="sm"
-                                  loading={Boolean(bayarBusy[r.id])}
-                                  disabled={!bayar[r.id] || parseRupiah(bayar[r.id]) < 1 || parseRupiah(bayar[r.id]) > sisaBon(r)}
-                                  onClick={() => doBayar(r)}
+                                  className="text-danger"
+                                  aria-label={`Hapus kasbon ${r.id}`}
+                                  onClick={(e) => { e.stopPropagation(); setHapusTarget(r); }}
                                 >
-                                  Bayar
-                                </Button>
-                                <Button
-                                  variant="secondary"
-                                  size="sm"
-                                  onClick={(e) => { e.stopPropagation(); setLunasTarget(r); setLunasAkun(''); }}
-                                >
-                                  <Icon name="check" size={14} /> Set Lunas
+                                  <Icon name="trash" size={14} />
                                 </Button>
                               </div>
-                            ) : null,
+                            );
+                          },
                         },
                       ]}
                       rows={g.bons}
@@ -234,6 +272,25 @@ export default function KasbonPage() {
           }}
         />
       </Modal>
+
+      <ConfirmDialog
+        open={Boolean(hapusTarget)}
+        title="Hapus Kasbon"
+        danger
+        confirmLabel="Hapus"
+        loading={hapusBusy}
+        onCancel={() => setHapusTarget(null)}
+        onConfirm={doHapus}
+      >
+        <p style={{ fontSize: '0.9rem', marginBottom: 'var(--space-4)' }}>
+          Kasbon {hapusTarget ? formatRupiah(hapusTarget.nominal) : ''} milik{' '}
+          {hapusTarget?.pelanggan_nama || 'pelanggan'} akan dihapus permanen dari daftar.
+        </p>
+        <p style={{ fontSize: '0.82rem' }}>
+          Hanya bisa kalau kasbon ini belum punya pembayaran dan tidak terikat transaksi.
+          Kalau sudah, sistem akan menolak dan alasannya ditampilkan.
+        </p>
+      </ConfirmDialog>
 
       <ConfirmDialog
         open={Boolean(lunasTarget)}

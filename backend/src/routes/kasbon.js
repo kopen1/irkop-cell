@@ -1,7 +1,7 @@
 import { err } from '../lib/errors.js';
 import { readBody, asInt, asDate, asEnum } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
-import { nowIso, wibDateToday } from '../lib/time.js';
+import { nowIso, wibDateToday, isValidCalendarDate } from '../lib/time.js';
 import { requireOpenSession } from '../financial/kasir.js';
 import { getAccount } from '../financial/akun.js';
 
@@ -29,7 +29,9 @@ export async function updateKasbon(db, request, ctx, idStr) {
   if (body.catatan !== undefined) { sets.push('catatan = ?'); vals.push(body.catatan || null); }
   if (body.status === 'lunas' && old.status !== 'lunas') {
     const sisa = Number(old.nominal) - Number(old.terbayar || 0); if (sisa <= 0) throw err(409, 'already_lunas', 'Kasbon sudah lunas; tidak ada sisa tagihan');
-    const sesi = await requireOpenSession(db); const akun = body.akun ? (await getAccount(db, body.akun)).nama_akun : 'Tunai Laci'; const key = `kasbon_pelunasan:${id}:${akun}`;
+    // Terima tanggal opsional supaya bisa masuk ke sesi yang sedang dibuka ulang.
+    const tglLunas = body.tanggal && isValidCalendarDate(body.tanggal) ? body.tanggal : wibDateToday();
+    const sesi = await requireOpenSession(db, tglLunas); const akun = body.akun ? (await getAccount(db, body.akun)).nama_akun : 'Tunai Laci'; const key = `kasbon_pelunasan:${id}:${akun}`;
     // WAJIB buat baris kasbon_pembayaran juga. Kalau tidak, rekonsiliasi
     // menghitung mutasi (aktual) tapi tidak menghitung kasbonBayar, sehingga
     // selisih muncul padahal kasbon sudah lunas.
