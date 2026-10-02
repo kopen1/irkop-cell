@@ -1257,7 +1257,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
               <Field label="Teknisi" hint="Untuk bagi hasil service. Kosong = tidak dibagi.">
                 <Select value={technisiId} onChange={(e) => setTechnisiId(e.target.value)}>
                   <option value="">— Tanpa teknisi —</option>
-                  {(teknisiList.data || []).map((u) => (
+                  {((teknisiList.data?.items || teknisiList.data || [])).map((u) => (
                     <option key={u.id} value={u.id}>{u.nama}</option>
                   ))}
                 </Select>
