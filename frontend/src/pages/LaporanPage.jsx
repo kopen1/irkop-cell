@@ -528,9 +528,29 @@ export default function LaporanPage() {
                 <Table
                   className="table-fit"
                   columns={[
-                    { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
+                    {
+                      key: 'nama_akun',
+                      header: 'Akun',
+                      render: (r) => (
+                        <span className="flex items-center gap-2">
+                          <span className={`badge badge-${r.tipe === 'tunai' ? 'success' : 'warning'}`}>
+                            {r.tipe === 'tunai' ? 'Tunai' : 'Non-tunai'}
+                          </span>
+                          <span style={{ fontWeight: 600 }}>{r.nama_akun}</span>
+                        </span>
+                      ),
+                    },
                     { key: 'saldo_awal', header: 'Saldo Awal', align: 'right', render: (r) => <span className="num">{formatRupiah(r.saldo_awal)}</span> },
-                    { key: 'saldo_akhir', header: 'Saldo Akhir', align: 'right', render: (r) => <span className="num font-bold">{formatRupiah(r.saldo_akhir)}</span> },
+                    {
+                      key: 'saldo_akhir',
+                      header: 'Saldo Akhir',
+                      align: 'right',
+                      render: (r) => (
+                        <span className={`num font-bold ${r.tipe === 'tunai' ? 'text-success' : 'text-warning'}`}>
+                          {formatRupiah(r.saldo_akhir)}
+                        </span>
+                      ),
+                    },
                   ]}
                   rows={(data.saldo_akun || []).map((a) => ({ ...a, key: a.nama_akun }))}
                   empty={<EmptyState title="Belum ada saldo" icon="akun" />}

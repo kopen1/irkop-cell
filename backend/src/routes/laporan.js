@@ -236,6 +236,11 @@ export async function reportBulanan(db, request, ctx) {
     }
   }
   const saldoAkun = [...saldoAkunMap.values()].sort((a, b) => (a.nama_akun < b.nama_akun ? -1 : 1));
+  // Sertakan tipe akun supaya FE bisa membedakan uang tunai vs non-tunai (warna).
+  const tipeAkunMap = Object.fromEntries(
+    (await db.many('SELECT nama_akun, tipe FROM akun_master')).map((a) => [a.nama_akun, a.tipe])
+  );
+  for (const a of saldoAkun) a.tipe = tipeAkunMap[a.nama_akun] || 'lainnya';
   const totalSaldoAwal = saldoAkun.reduce((s, a) => s + a.saldo_awal, 0);
   const totalSaldoAkhir = saldoAkun.reduce((s, a) => s + a.saldo_akhir, 0);
 

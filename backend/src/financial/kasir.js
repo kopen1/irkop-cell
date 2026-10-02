@@ -219,12 +219,17 @@ export async function opening(db, { body, user, ip }) {
 // Dibatasi: sesi harus buka + belum ada transaksi, supaya tidak pernah
 // membuat saldo sistem tidak sinkron dengan mutasi yang sudah terjadi.
 export async function revisiOpening(db, { body, user, ip }) {
-  const today = wibDateToday();
-  const sesi = await getTodaySession(db, { date: today });
-  if (!sesi) throw err(404, 'not_found', 'Sesi kasir hari ini belum dibuka');
+  // Pakai sesi yang SEDANG AKTIF, bukan selalu hari ini. Kalau pengguna sedang
+  // mengoreksi lewat "Buka Ulang Sesi Tanggal Lain", sesi itulah yang diedit.
+  const aktif = await sesiAktif(db);
+  const sesi = aktif.kasir_sesi_id
+    ? await getSessionById(db, aktif.kasir_sesi_id)
+    : null;
+  if (!sesi) throw err(404, 'not_found', 'Belum ada sesi kasir yang sedang buka untuk dikoreksi');
   if (sesi.status !== 'buka') {
     throw err(400, 'session_closed', 'Sesi sudah ditutup. Gunakan "Buka Ulang Sesi Tanggal Lain" untuk mengoreksi.');
   }
+  const today = sesi.tanggal;
 
   const sudahAda = await db.one('SELECT COUNT(*) AS n FROM transaksi WHERE kasir_sesi_id = ?', sesi.id);
   if (sudahAda && sudahAda.n > 0) {
@@ -245,10 +250,20 @@ export async function revisiOpening(db, { body, user, ip }) {
   const beforeMap = Object.fromEntries(before.map((b) => [b.nama_akun, Number(b.saldo_sistem)]));
 
   for (const { nama_akun, saldo } of rows) {
-    await db.exec(
+    // UPDATE dulu; kalau tidak ada baris (akun baru ditambahkan di tengah sesi
+    // yang sudah terbuka) baru INSERT. kasir_saldo tidak punya UNIQUE, jadi
+    // ON CONFLICT tidak bisa dipakai di sini.
+    const upd = await db.exec(
       "UPDATE kasir_saldo SET saldo_sistem = ?, saldo_real = ? WHERE kasir_sesi_id = ? AND nama_akun = ? AND tipe = 'opening'",
       saldo, saldo, sesi.id, nama_akun
     );
+    if (!upd.changes) {
+      await db.exec(
+        `INSERT INTO kasir_saldo (kasir_sesi_id, nama_akun, saldo_sistem, saldo_real, selisih, tipe, created_at)
+         VALUES (?, ?, ?, ?, 0, 'opening', ?)`,
+        sesi.id, nama_akun, saldo, saldo, nowIso()
+      );
+    }
   }
 
   await writeAudit(db, {

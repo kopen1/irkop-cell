@@ -612,12 +612,22 @@
 /* ---------- Stats / dashboard ---------- */
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  /* min(100%, 190px) + min-width:0 supaya kartu boleh menyusut & membungkus,
+     tidak meluber keluar kotak saat labelnya panjang ("Net (Laba - Pengeluaran)")
+     atau nilai rupiahnya banyak digit. */
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 190px), 1fr));
   gap: var(--space-4);
 }
-.stat-card { background: var(--bg-surface); border: 1px solid var(--border); border-radius: var(--radius-md); padding: var(--space-4); }
-.stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); }
-.stat-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: 1.4rem; font-weight: 800; margin-top: var(--space-2); }
+.stat-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.stat-label { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-secondary); overflow-wrap: anywhere; }
+.stat-value { font-family: var(--font-mono); font-variant-numeric: tabular-nums; font-size: clamp(1.05rem, 2.6vw, 1.4rem); font-weight: 800; margin-top: var(--space-2); overflow-wrap: anywhere; }
 .stat-foot { font-size: 0.75rem; color: var(--text-muted); margin-top: var(--space-2); }
 
 /* ---------- Layout: shell ---------- */

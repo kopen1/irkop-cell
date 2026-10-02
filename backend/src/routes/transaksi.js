@@ -207,8 +207,12 @@ export async function getTransaksi(db, request, ctx, idStr) {
 
 export async function generateTransaksiKode(db, date, attempts = 3, excludeId = null) {
   const excl = excludeId ? 'AND id != ?' : '';
+  // Hitung SEMUA transaksi tanggal itu, termasuk yang sudah di-soft-delete.
+  // Kalau hanya menghitung yang aktif, nomor akan dipakai ulang setelah ada
+  // transaksi dihapus — padahal kode_transaksi UNIQUE dan baris lamanya masih ada
+  // -> "Gagal membuat kode transaksi yang unik".
   const row = await db.one(
-    `SELECT COUNT(*) AS n FROM transaksi WHERE tanggal_transaksi = ? AND deleted_at IS NULL ${excl}`,
+    `SELECT COUNT(*) AS n FROM transaksi WHERE tanggal_transaksi = ? ${excl}`,
     ...[date, ...(excludeId ? [excludeId] : [])]
   );
   const base = Number(row.n);
@@ -303,7 +307,20 @@ function computeItems(items, produkMap) {
       svc._biayaFinal = biaya;
     } else {
       const prod = produkMap.get(`p:${it.produk_id}`);
-      harga = Number(prod.harga);
+      // Harga jual boleh berbeda dari harga master produk (mis. harga per
+      // pelanggan, atau master belum di-update).WAJIB pakai harga_jual dari
+      // form kalau ada, karena snapshot & tampilan ikut harga itu — kalau tidak,
+      // laba diam-diam dihitung dari harga master dan jadi tidak cocok dengan
+      // total yang dilihat user.
+      if (it.harga_jual !== undefined && it.harga_jual !== null && it.harga_jual !== '') {
+        const formHarga = Number(it.harga_jual);
+        if (!Number.isInteger(formHarga) || formHarga < 0) {
+          throw err(400, 'invalid_value', `harga_jual item "${prod.nama}" harus integer >= 0`);
+        }
+        harga = formHarga;
+      } else {
+        harga = Number(prod.harga);
+      }
       // Produk digital: modal bisa diisi manual di form (mis. harga beli beda
       // dari master produk). Pakai nilai form bila dikirim, fallback ke master.
       if (it.harga_modal !== undefined && it.harga_modal !== null && it.harga_modal !== '') {

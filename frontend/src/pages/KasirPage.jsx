@@ -36,6 +36,15 @@ export default function KasirPage() {
   const [opening, setOpening] = useState(null);
   const [openingBusy, setOpeningBusy] = useState(false);
   const [konfirmasiOpening, setKonfirmasiOpening] = useState(null);
+  // Float uang laci untuk besok (bisa diubah, disimpan di perangkat).
+  const [floatLaci, setFloatLaci] = useState(() => {
+    const v = Number(localStorage.getItem('irkop_cell_float_laci'));
+    return Number.isFinite(v) && v >= 0 ? v : 500000;
+  });
+  const [siapkanTarget, setSiapkanTarget] = useState(null);
+  const [siapkanBusy, setSiapkanBusy] = useState(false);
+  const AKUN_LACI = 'Tunai Laci';
+  const AKUN_CADANGAN = 'Uang Cadangan';
   const [koreksiBusy, setKoreksiBusy] = useState(false);
   const [koreksiRows, setKoreksiRows] = useState(null);
   const [closing, setClosing] = useState(null);
@@ -151,6 +160,50 @@ export default function KasirPage() {
       toast.error(err.message);
     } finally {
       setKoreksiBusy(false);
+    }
+  };
+
+  // Saldo real Tunai Laci yang sedang diketik di form Closing (bukan saldo sistem),
+  // supaya angkanya sama dengan yang akan benar-benar dihitung user.
+  const saldoLaciSekarang = () => {
+    const c = (closing || []).find((x) => x.nama_akun === AKUN_LACI);
+    if (!c) return 0;
+    const v = Number(c.saldo_real);
+    return Number.isFinite(v) ? v : Number(c.saldo_sistem || 0);
+  };
+
+  const bukaSiapkan = () => {
+    const kini = saldoLaciSekarang();
+    const sisa = Math.max(0, kini - floatLaci);
+    if (sisa <= 0) {
+      toast.info(`Uang laci ${formatRupiah(kini)} sudah <= float ${formatRupiah(floatLaci)}. Tidak ada yang perlu dipindahkan.`);
+      return;
+    }
+    setSiapkanTarget({ kini, float: floatLaci, sisa });
+  };
+
+  // Pindahkan kelebihan laci ke Uang Cadangan sebagai transfer antar akun
+  // (uang tetap milik toko, jadi Total Saldo tidak berubah dan rekonsiliasi aman).
+  const eksekusiSiapkan = async () => {
+    if (!siapkanTarget) return;
+    setSiapkanBusy(true);
+    try {
+      await api.post('/transfer-saldo', {
+        dari_akun: AKUN_LACI,
+        ke_akun: AKUN_CADANGAN,
+        nominal: siapkanTarget.sisa,
+        tanggal: sesi.data?.tanggal,
+        catatan: `Float kasir besok ${formatRupiah(siapkanTarget.float)}`,
+      });
+      toast.success(`${formatRupiah(siapkanTarget.sisa)} dipindahkan ke ${AKUN_CADANGAN}.`);
+      setSiapkanTarget(null);
+      sesi.run();
+      akun.run?.();
+      setClosing((c) => c.map((x) => (x.nama_akun === AKUN_LACI ? { ...x, saldo_real: x.saldo_sistem } : x)));
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSiapkanBusy(false);
     }
   };
 
@@ -429,6 +482,36 @@ export default function KasirPage() {
                     />
                   </Field>
                   {errForm && <p className="field-error" role="alert">{errForm}</p>}
+
+                  {/* Siapkan kasir besok: sisihkan kelebihan uang laci ke Uang
+                      Cadangan supaya laci besok hanya berisi float. */}
+                  <div className="card" style={{ padding: 'var(--space-3)', background: 'var(--bg-surface-alt)' }}>
+                    <div style={{ fontWeight: 600, marginBottom: 4 }}>Siapkan Kasir Besok</div>
+                    <p className="text-sm text-secondary" style={{ marginBottom: 'var(--space-3)' }}>
+                      Uang laci sekarang <span className="num">{formatRupiah(saldoLaciSekarang())}</span>.
+                      Sisakan <span className="num">{formatRupiah(floatLaci)}</span> untuk laci besok, sisanya
+                      dipindahkan ke <strong>{AKUN_CADANGAN}</strong>. Total uang tidak berubah.
+                    </p>
+                    <div className="flex items-end gap-2" style={{ flexWrap: 'wrap' }}>
+                      <Field label="Float laci besok (Rp)">
+                        <Input
+                          type="text"
+                          inputMode="numeric"
+                          value={formatRupiahInput(String(floatLaci))}
+                          onChange={(e) => {
+                            const v = parseRupiah(e.target.value) || 0;
+                            setFloatLaci(v);
+                            localStorage.setItem('irkop_cell_float_laci', String(v));
+                          }}
+                          style={{ width: 150 }}
+                        />
+                      </Field>
+                      <Button type="button" variant="secondary" onClick={bukaSiapkan} disabled={siapkanBusy}>
+                        <Icon name="transfer" size={15} /> Hitung &amp; Pindahkan
+                      </Button>
+                    </div>
+                  </div>
+
                   <div className="page-actions">
                     <Button type="submit" variant="primary" loading={closingBusy}>
                       <Icon name="check" size={16} /> Tutup Kasir
@@ -491,6 +574,48 @@ export default function KasirPage() {
           </div>
         </>
       )}
+
+      <Modal
+        open={Boolean(siapkanTarget)}
+        onClose={() => (siapkanBusy ? null : setSiapkanTarget(null))}
+        title="Siapkan Kasir Besok"
+        footer={
+          <>
+            <Button variant="ghost" onClick={() => setSiapkanTarget(null)} disabled={siapkanBusy}>
+              Batal
+            </Button>
+            <Button onClick={eksekusiSiapkan} loading={siapkanBusy}>
+              <Icon name="transfer" size={16} /> Ya, Pindahkan
+            </Button>
+          </>
+        }
+      >
+        <div className="table-wrap table-fit">
+          <table className="table">
+            <tbody>
+              <tr>
+                <td>Uang laci sekarang</td>
+                <td className="col-right num">{formatRupiah(siapkanTarget?.kini ?? 0)}</td>
+              </tr>
+              <tr>
+                <td>Float untuk laci besok</td>
+                <td className="col-right num">-{formatRupiah(siapkanTarget?.float ?? 0)}</td>
+              </tr>
+              <tr>
+                <td style={{ fontWeight: 700 }}>Dipindah ke {AKUN_CADANGAN}</td>
+                <td className="col-right num" style={{ fontWeight: 700 }}>
+                  {formatRupiah(siapkanTarget?.sisa ?? 0)}
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+        <p className="field-hint mt-3">
+          Dicatat sebagai transfer antar akun: <strong>{AKUN_LACI}</strong> berkurang,{' '}
+          <strong>{AKUN_CADANGAN}</strong> bertambah. Total uang dan rekonsiliasi tidak berubah —
+          uang hanya dipindah dari laci ke tempat aman. Setelah itu tinggal tekan <strong>Tutup Kasir</strong>.
+        </p>
+      </Modal>
 
       <Modal
         open={Boolean(konfirmasiOpening)}
