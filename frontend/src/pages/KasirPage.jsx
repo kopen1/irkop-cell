@@ -179,7 +179,7 @@ export default function KasirPage() {
       toast.info(`Uang laci ${formatRupiah(kini)} sudah <= float ${formatRupiah(floatLaci)}. Tidak ada yang perlu dipindahkan.`);
       return;
     }
-    setSiapkanTarget({ kini, float: floatLaci, sisa });
+    setSiapkanTarget({ kini, float: floatLaci, sisa, tanggal: sesi.data?.tanggal });
   };
 
   // Pindahkan kelebihan laci ke Uang Cadangan sebagai transfer antar akun
@@ -192,7 +192,7 @@ export default function KasirPage() {
         dari_akun: AKUN_LACI,
         ke_akun: AKUN_CADANGAN,
         nominal: siapkanTarget.sisa,
-        tanggal: sesi.data?.tanggal,
+        tanggal: siapkanTarget.tanggal || sesi.data?.tanggal,
         catatan: `Float kasir besok ${formatRupiah(siapkanTarget.float)}`,
       });
       toast.success(`${formatRupiah(siapkanTarget.sisa)} dipindahkan ke ${AKUN_CADANGAN}.`);
@@ -423,6 +423,7 @@ export default function KasirPage() {
                 <p className="text-sm text-muted">Belum ada akun. Admin dapat menambah akun di Pengaturan.</p>
               )}
               {errForm && <p className="field-error" role="alert">{errForm}</p>}
+
               <div className="page-actions">
                 <Button type="submit" loading={openingBusy} disabled={!opening?.length}>
                   <Icon name="wallet" size={16} /> Buka Kasir

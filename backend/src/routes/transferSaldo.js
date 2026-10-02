@@ -128,6 +128,8 @@ export async function createTransferSaldo(db, body, ctx, request) {
 
   // Pakai tanggal yang dipilih, BUKAN hari ini. Kalau user membuka ulang sesi
   // tanggal lain untuk mencatat, transfernya harus masuk ke sesi itu juga.
+  // Wajib ada sesi: mutasi_saldo.kasir_sesi_id NOT NULL, jadi transfer tidak
+  // bisa dicatat sebelum kasir dibuka.
   const sesi = await requireOpenSession(db, v.tanggal);
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
 
@@ -150,6 +152,12 @@ export async function createTransferSaldo(db, body, ctx, request) {
   const id = res.lastRowId;
 
   const { results } = await db.batch(insertMutationStmts(db, sesi.id, id, dari, ke, v.nominal, idempotencyKey, now));
+  // Tanpa cek ini, mutasi yang gagal (mis.constraint) tetap dilapor sukses padahal
+  // uang tidak bergerak sama sekali.
+  if (!results.every((r) => r?.success)) {
+    await db.exec('DELETE FROM transfer_saldo WHERE id = ?', id);
+    throw err(500, 'transfer_failed', 'Gagal menyimpan mutasi transfer — saldo tidak berubah');
+  }
 
   // Race idempotency: kalau kedua mutasi ter-IGNORE karena key sudah dipakai
   // penulis lain, hapus baris phantom kita dan kembalikan milik penulis pertama.

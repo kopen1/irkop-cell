@@ -54,6 +54,18 @@ export default function IsiSaldoPage() {
     return () => clearInterval(t);
   }, [kasirRun]);
 
+  // Total uang toko (live). Baris "Total Saldo" dari backend sengaja tidak
+  // menghitung Tunai Laci, jadi dijumlah ulang di sini dari seluruh akun uang
+  // supaya angkanya benar-benar semua uang yang dimiliki toko.
+  const saldoRows = useMemo(
+    () => (kasir.data?.saldo || []).filter((x) => x.nama_akun !== 'Total Saldo'),
+    [kasir.data]
+  );
+  const totalLive = useMemo(
+    () => saldoRows.reduce((s, x) => s + (Number(x.saldo_sistem) || 0), 0),
+    [saldoRows]
+  );
+
   const [form, setForm] = useState({ dari_akun: '', ke_akun: '', nominal: '', tanggal: todayWIB(), catatan: '' });
   const [formError, setFormError] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -101,8 +113,18 @@ export default function IsiSaldoPage() {
 
       <Card className="mb-4">
         <p className="text-sm" style={{ color: 'var(--warning)', marginBottom: 12 }}>
-          Memindahkan saldo antar akun internal (mis. SeaBank → OrderKuota). <b>Bukan</b> kirim uang ke pelanggan dan <b>bukan</b> pembelian.
+          Memindahkan saldo antar akun internal (mis. SeaBank → OrderKuota). <b>Not</b> kirim uang ke pelanggan dan <b>bukan</b> pembelian.
         </p>
+        <div
+          className="card"
+          style={{ padding: 'var(--space-3)', marginBottom: 'var(--space-4)', background: 'var(--bg-surface-alt)' }}
+        >
+          <div className="stat-label">Total uang toko (live)</div>
+          <div className="stat-value">{formatRupiah(totalLive)}</div>
+          <div className="text-sm text-secondary">
+            {saldoRows.length} akun uang · ikut <span className="num">Tunai Laci</span> · berubah tiap 15 detik
+          </div>
+        </div>
         <form onSubmit={onSubmit}>
           <div className="grid-2">
             <Field
@@ -146,7 +168,8 @@ export default function IsiSaldoPage() {
 
           {form.dari_akun && form.ke_akun && form.dari_akun !== form.ke_akun && nominalNum > 0 && (
             <div className="text-sm" style={{ marginTop: 8, color: 'var(--text-secondary)' }}>
-              {form.dari_akun} −{formatRupiah(nominalNum)} · {form.ke_akun} +{formatRupiah(nominalNum)} · Total Saldo tetap
+              {form.dari_akun} −{formatRupiah(nominalNum)} · {form.ke_akun} +{formatRupiah(nominalNum)} · total uang tetap{' '}
+              <span className="num">{formatRupiah(totalLive)}</span>
             </div>
           )}
           {formError && <p className="field-error" role="alert">{formError}</p>}
