@@ -575,7 +575,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
         pelanggan_id: pelangganId || null,
         service: {
           nama_device: namaDevice.trim(),
-          teknisi_id: teknisiId ? Number(technisiId) : null,
+          teknisi_id: technisiId ? Number(technisiId) : null,
           deskripsi_kerusakan: kerusakan.trim(),
           biaya: biayaServiceNum,
           harga_modal: modalServiceNum,
