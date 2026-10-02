@@ -32,3 +32,39 @@ export async function getAccount(db, namaAkun) {
   if (acc.aktif !== 1) throw err(400, 'inactive_account', `Akun '${namaAkun}' tidak aktif`);
   return acc;
 }
+
+// Saldo sistem sebuah akun pada satu sesi = opening sesi itu + seluruh mutasi
+// di sesi tersebut. Sama persis dengan cara sessionStatus() menghitung
+// saldo_sistem, jadi angka di form dan angka di backend selalu cocok.
+export async function saldoSistemSesi(db, sesiId, namaAkun) {
+  const row = await db.one(
+    `SELECT COALESCE((SELECT saldo_sistem FROM kasir_saldo
+                       WHERE kasir_sesi_id = ? AND nama_akun = ? AND tipe = 'opening'), 0)
+          + COALESCE((SELECT SUM(jumlah) FROM mutasi_saldo
+                       WHERE kasir_sesi_id = ? AND nama_akun = ?), 0) AS saldo`,
+    sesiId, namaAkun, sesiId, namaAkun
+  );
+  return Number(row?.saldo || 0);
+}
+
+// Penjaga saldo: tolak operasi yang menyebabkan saldo akun minus.
+export async function ensureSaldoCukup({ db, sesiId, akun, nominal, alasan }) {
+  const saldo = await saldoSistemSesi(db, sesiId, akun);
+  if (nominal > saldo) {
+    throw err(
+      400,
+      'insufficient_balance',
+      `Saldo ${akun} tidak cukup untuk ${alasan}: tersedia ${formatRupiah(saldo)}, dibutuhkan ${formatRupiah(nominal)}`
+    );
+  }
+  return saldo;
+}
+
+// -Rp1.234.567 — format manual, tidak bergantung pada locale worker.
+// Tanda minus WAJIB ikut: kalau saldo akun minus, user harus lihat minusnya
+// supaya tidak mengira saldo itu positif.
+export function formatRupiah(n) {
+  const v = Math.trunc(Number(n) || 0);
+  const s = String(Math.abs(v)).replace(/\B(?=(\d{3})+(?!\d))/g, '.');
+  return v < 0 ? `-Rp${s}` : `Rp${s}`;
+}

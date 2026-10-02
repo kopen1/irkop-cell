@@ -1,6 +1,6 @@
 import { err } from '../lib/errors.js';
 import { nowIso, wibDateToday, wibDateToUtcRange, isValidCalendarDate } from '../lib/time.js';
-import { getAccount } from '../financial/akun.js';
+import { getAccount, ensureSaldoCukup } from '../financial/akun.js';
 import { requireOpenSession } from '../financial/kasir.js';
 import { reverseFullSource } from '../financial/reversal.js';
 import { writeAudit } from '../lib/audit.js';
@@ -81,6 +81,7 @@ export async function createPengeluaran(db, body, ctx, request) {
   // Pakai tanggal yang dipilih supaya bisa dipakai saat sesi tanggal lain
   // dibuka ulang, bukan hanya sesi hari ini.
   const sesi = await requireOpenSession(db, v.tanggal);
+  await ensureSaldoCukup({ db, sesiId: sesi.id, akun: v.akunSumber, nominal: v.nominal, alasan: 'pengeluaran' });
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
 
   if (idempotencyKey) {

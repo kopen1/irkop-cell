@@ -5,7 +5,7 @@
 // - kalau modal beli > harga server, buat harga_alert (beli di atas harga server)
 import { err } from '../lib/errors.js';
 import { nowIso, wibDateToday, isValidCalendarDate } from '../lib/time.js';
-import { getAccount } from '../financial/akun.js';
+import { getAccount, ensureSaldoCukup } from '../financial/akun.js';
 import { requireOpenSession } from '../financial/kasir.js';
 import { reverseFullSource } from '../financial/reversal.js';
 import { writeAudit } from '../lib/audit.js';
@@ -160,6 +160,7 @@ export async function createPembelianStok(db, body, ctx, request) {
   // Pakai tanggal yang dipilih, bukan hari ini — supaya bisa dipakai setelah
   // "Buka Ulang Sesi Tanggal Lain" (mis. inject voucherclosing).
   const sesi = await requireOpenSession(db, tanggal);
+  await ensureSaldoCukup({ db, sesiId: sesi.id, akun, nominal: total, alasan: 'pembelian stok' });
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
   if (idempotencyKey) {
     const existing = await db.one('SELECT sumber_id FROM mutasi_saldo WHERE mutation_key = ?', mutationKey(idempotencyKey, null, akun));

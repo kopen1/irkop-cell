@@ -5,7 +5,7 @@
 // (cuma pindah) dan tidak dihitung sebagai omzet/laba.
 import { err } from '../lib/errors.js';
 import { nowIso, wibDateToday, isValidCalendarDate } from '../lib/time.js';
-import { getAccount } from '../financial/akun.js';
+import { getAccount, ensureSaldoCukup } from '../financial/akun.js';
 import { requireOpenSession } from '../financial/kasir.js';
 import { reverseFullSource } from '../financial/reversal.js';
 import { writeAudit } from '../lib/audit.js';
@@ -131,6 +131,7 @@ export async function createTransferSaldo(db, body, ctx, request) {
   // Wajib ada sesi: mutasi_saldo.kasir_sesi_id NOT NULL, jadi transfer tidak
   // bisa dicatat sebelum kasir dibuka.
   const sesi = await requireOpenSession(db, v.tanggal);
+  await ensureSaldoCukup({ db, sesiId: sesi.id, akun: dari, nominal: v.nominal, alasan: 'transfer ke ' + ke });
   const idempotencyKey = request.headers.get('Idempotency-Key') || null;
 
   if (idempotencyKey) {
