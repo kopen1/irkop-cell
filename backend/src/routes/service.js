@@ -2,6 +2,7 @@ import { err } from '../lib/errors.js';
 import { readBody, asInt, asDate, asBool } from '../lib/validate.js';
 import { writeAudit } from '../lib/audit.js';
 import { nowIso, wibDateToday } from '../lib/time.js';
+import { ensureGajiBagiHasilTeknisi } from '../financial/gaji.js';
 
 const STATUS_SERVICE = ['masuk', 'proses', 'selesai', 'diambil'];
 
@@ -35,15 +36,23 @@ export async function createService(db, request, ctx) {
   if (!deskripsi) throw err(400, 'missing_field', 'deskripsi_kerusakan wajib diisi');
   const tanggalMasuk = asDate(body.tanggal_masuk, { field: 'tanggal_masuk' }) || wibDateToday();
   const hargaModal = body.harga_modal === undefined || body.harga_modal === null || body.harga_modal === '' ? null : asInt(body.harga_modal, { field: 'harga_modal', min: 0 });
+  let status = 'masuk';
+  if (body.status !== undefined && body.status !== null && body.status !== '') {
+    if (!STATUS_SERVICE.includes(body.status)) throw err(400, 'invalid_value', 'status tidak valid');
+    status = body.status;
+  }
   const res = await db.exec(
     `INSERT INTO service_hp (pelanggan_id, nama_device, deskripsi_kerusakan, status, estimasi_biaya, harga_modal, teknisi_id, catatan, foto_masuk, tanggal_masuk)
-     VALUES (?, ?, ?, 'masuk', ?, ?, ?, ?, ?, ?)`,
-    pelangganId, namaDevice, deskripsi,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    pelangganId, namaDevice, deskripsi, status,
     body.estimasi_biaya == null || body.estimasi_biaya === '' ? null : asInt(body.estimasi_biaya, { field: 'estimasi_biaya', min: 0 }),
     hargaModal, body.teknisi_id || null, body.catatan || null, body.foto_masuk || null, tanggalMasuk
   );
+  if (body.teknisi_id) {
+    await ensureGajiBagiHasilTeknisi(db, { userId: Number(body.teknisi_id), tanggal: tanggalMasuk });
+  }
   await writeAudit(db, { userId: user.id, aksi: 'create', tabel: 'service_hp', recordId: res.lastRowId, dataAfter: { nama_device: namaDevice, pelanggan_id: pelangganId, tanggal_masuk: tanggalMasuk } });
-  return { id: res.lastRowId, nama_device: namaDevice, status: 'masuk' };
+  return { id: res.lastRowId, nama_device: namaDevice, status };
 }
 
 export async function detailService(db, request, ctx, idStr) {
@@ -86,6 +95,9 @@ export async function updateService(db, request, ctx, idStr) {
   if (!sets.length) throw err(400, 'no_changes', 'Tidak ada perubahan');
   vals.push(id);
   await db.exec(`UPDATE service_hp SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+  if (body.teknisi_id) {
+    await ensureGajiBagiHasilTeknisi(db, { userId: Number(body.teknisi_id), tanggal: old.tanggal_masuk });
+  }
   const after = await db.one('SELECT * FROM service_hp WHERE id = ?', id);
   await writeAudit(db, { userId: user.id, aksi: 'update', tabel: 'service_hp', recordId: id, dataBefore: old, dataAfter: after });
   return { id, message: 'Service HP diperbarui', data: after };

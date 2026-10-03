@@ -16,6 +16,7 @@ import { getAccount } from '../financial/akun.js';
 import { hitungAdmin, normalizeProvider } from '../financial/tarif.js';
 import { requireOpenSession } from '../financial/kasir.js';
 import { writeAudit } from '../lib/audit.js';
+import { ensureGajiBagiHasilTeknisi } from '../financial/gaji.js';
 
 function buildListWhere(url, params) {
   const where = ['t.deleted_at IS NULL'];
@@ -178,6 +179,36 @@ export async function getTransaksi(db, request, ctx, idStr) {
     'SELECT id, metode, akun_id, nominal FROM transaksi_pembayaran WHERE transaksi_id = ? ORDER BY id',
     t.id
   );
+  // Bentuk ulang field per-jenis supaya form Edit bisa terisi lengkap:
+  // - service: objek service_hp utuh (nama_device, teknisi_id, biaya, ...)
+  // - produkdigital: harga_jual/admin_fee/harga_modal/qty/akun_sumber dari item
+  // - tariktunai/transfer: nominal (=total) + admin_fee (=laba)
+  const firstItem = items[0] || null;
+  let serviceDetail = null;
+  const svcItem = items.find((it) => it.service_hp_id);
+  if (svcItem) {
+    const svc = await db.one(
+      'SELECT id, pelanggan_id, nama_device, deskripsi_kerusakan, status, estimasi_biaya, biaya, harga_modal, teknisi_id, catatan, sudah_dihubungi, tanggal_masuk, tanggal_selesai, tanggal_diambil FROM service_hp WHERE id = ?',
+      svcItem.service_hp_id
+    );
+    serviceDetail = svc || null;
+  }
+  let extra = {};
+  if (firstItem && t.jenis === 'produkdigital') {
+    const hargaJual = firstItem.harga_snapshot;
+    const modal = firstItem.harga_modal_snapshot ?? null;
+    extra = {
+      harga_jual: hargaJual,
+      admin_fee: modal == null ? null : hargaJual - modal,
+      harga_modal: modal,
+      qty: firstItem.qty ?? 1,
+      akun_sumber: firstItem.akun_sumber ?? null,
+      sub_jenis: firstItem.sub_jenis ?? null,
+    };
+  } else if (t.jenis === 'tariktunai' || t.jenis === 'transfer') {
+    extra = { nominal: t.total, admin_fee: t.laba ?? null, qty: 1, akun_sumber: t.mitra ?? null };
+  }
+  if (serviceDetail) extra.service = serviceDetail;
   return {
     id: t.kode_transaksi,
     transaksi_id: t.id,
@@ -197,6 +228,7 @@ export async function getTransaksi(db, request, ctx, idStr) {
     manual_entry: t.manual_entry,
     kasir_sesi_id: t.kasir_sesi_id,
     dibuat_oleh: info?.dibuat_oleh_nama ?? null,
+    ...extra,
     items,
     pembayaran,
     mutasi_saldo: mutasi,
@@ -464,7 +496,10 @@ function asIntUser(v) {
 }
 
 export async function createTransaksi(db, body, ctx, request) {
-  const jenis = body.jenis || null;
+  let jenis = body.jenis || null;
+  // Transaksi dari body.service harus berjenis 'service' supaya muncul di
+  // kelompok "Service HP" dan bisa di-edit via body.service.
+  if (!jenis && body.service) jenis = 'service';
   if (jenis === 'tariktunai' || jenis === 'transfer') {
     return createAdminTransaksi(db, body, ctx, request, jenis);
   }
@@ -724,6 +759,11 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     );
     // Replace body.items with a single item referencing the new service_hp
     body.items = [{ service_hp_id: svcResult.lastRowId, qty: 1, biaya: svc.biaya, harga_modal: modalFinal }];
+    // Teknisi yang punya bagi_hasil_service langsung dapat akru gaji (upah + porsi).
+    if (svcTeknisiId) {
+      const tgl = resolveTanggalTransaksi(body);
+      await ensureGajiBagiHasilTeknisi(db, { userId: svcTeknisiId, tanggal: tgl });
+    }
   }
 
   const produkMap = await loadProducts(db, body.items);
@@ -953,6 +993,15 @@ export async function softDeleteTransaksi(db, body, ctx, idStr) {
     if (stmts.length) await db.batch(stmts);
   }
 
+  // Service HP yang terhubung ke transaksi ini ikut di-soft-delete supaya
+  // tidak lagi muncul di halaman Service HP.
+  const svcIds = await db.many(
+    'SELECT DISTINCT service_hp_id AS id FROM transaksi_item WHERE transaksi_id = ? AND service_hp_id IS NOT NULL',
+    tx.id
+  );
+  for (const s of svcIds) {
+    await db.exec('UPDATE service_hp SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL', nowIso(), s.id);
+  }
   await db.exec(
     'UPDATE transaksi SET deleted_at = ?, deleted_by = ?, deleted_reason = ?, updated_at = ? WHERE id = ?',
     nowIso(), user.id, reason, nowIso(), tx.id
@@ -1022,6 +1071,9 @@ export async function updateTransaksi(db, body, ctx, idStr) {
       await db.exec('UPDATE service_hp SET harga_modal = ? WHERE id = ?', hargaModalFinal, svcId);
     }
     body.items = [{ service_hp_id: svcId, qty: 1, biaya: body.service.biaya, harga_modal: hargaModalFinal }];
+    if (body.service.teknisi_id) {
+      await ensureGajiBagiHasilTeknisi(db, { userId: Number(body.service.teknisi_id), tanggal: tx.tanggal_transaksi });
+    }
   }
   if (!body.service && (!Array.isArray(body.items) || body.items.length === 0)) {
     throw err(400, 'missing_field', 'items wajib diisi minimal 1 produk');

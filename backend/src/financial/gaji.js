@@ -316,3 +316,41 @@ export async function ensureOwnerGajiAutoInput(db, { tanggal, jamBuka, kasirSesi
   }
   return dibuat;
 }
+
+// Dipanggil setiap kali teknisi di-assign ke sebuah service: kalau teknisi
+// punya baris bagi_hasil_service, pastikan ada akru gaji (upah + porsi service)
+// untuk tanggal service. Sebelumnya gaji hanya dibuat saat kasir buka/tutup,
+// jadi teknisi yang tidak buka/tutup kasir tidak pernah dapat entri.
+// Aman dipanggil berulang; baris manual_edit tidak pernah ditimpa.
+export async function ensureGajiBagiHasilTeknisi(db, { userId, tanggal, kasirSesiId = null }) {
+  const u = await db.one('SELECT id, role, aktif FROM users WHERE id = ?', userId);
+  if (!u || !u.aktif) return null;
+  const punya = await db.one('SELECT persen FROM bagi_hasil_service WHERE user_id = ?', userId);
+  if (!punya) return null;
+  const jamBuka = await openingHour(db, tanggal);
+  const hitung = u.role === 'admin'
+    ? await hitungGajiOwner(db, tanggal, jamBuka, u.id)
+    : await hitungGajiKaryawan(db, u.id, tanggal, jamBuka);
+  const catatan = u.role === 'admin'
+    ? `[auto] upah ${hitung.upah} + ${hitung.service_pct}% service ${hitung.service_share}`
+    : `[auto] upah ${hitung.upah}${hitung.source_rate ? ` (${hitung.source_rate})` : ''} + ${hitung.service_pct}% service ${hitung.service_share}`;
+  const res = await db.exec(
+    `INSERT INTO gaji_harian (user_id, tanggal, nominal, sumber, catatan, created_at)
+     VALUES (?, ?, ?, 'auto', ?, ?)
+     ON CONFLICT(user_id, tanggal) DO UPDATE SET
+       nominal = excluded.nominal, catatan = excluded.catatan, updated_at = datetime('now')
+     WHERE gaji_harian.sumber = 'auto'`,
+    userId, tanggal, hitung.total, catatan, nowIso()
+  );
+  const row = await getGaji(db, userId, tanggal);
+  if (res.changes > 0 && row) {
+    await writeAudit(db, {
+      userId: null,
+      aksi: 'auto_input_gaji_teknisi',
+      tabel: 'gaji_harian',
+      recordId: row.id,
+      dataAfter: { user_id: userId, tanggal, nominal: hitung.total, sumber: 'auto', kasir_sesi_id: kasirSesiId },
+    });
+  }
+  return row;
+}

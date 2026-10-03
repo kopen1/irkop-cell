@@ -14,6 +14,7 @@ export default function ServiceHpForm({ onCancel, onSaved }) {
   const [users, setUsers] = useState([]);
   const [form, setForm] = useState({
     pelanggan_id: '',
+    status: 'masuk',
     nama_device: '',
     deskripsi_kerusakan: '',
     estimasi_biaya: '',
@@ -48,6 +49,7 @@ export default function ServiceHpForm({ onCancel, onSaved }) {
         teknisi_id: form.teknisi_id ? Number(form.teknisi_id) : null,
         catatan: form.catatan.trim() || undefined,
         tanggal_masuk: form.tanggal_masuk || undefined,
+        status: form.status || undefined,
       });
       onSaved();
     } catch (err) {
@@ -67,6 +69,14 @@ export default function ServiceHpForm({ onCancel, onSaved }) {
           <PelangganSelect value={form.pelanggan_id} onChange={set('pelanggan_id')} />
         </Field>
       </div>
+      <Field label="Status">
+        <Select value={form.status} onChange={set('status')}>
+          <option value="masuk">Masuk</option>
+          <option value="proses">Proses</option>
+          <option value="selesai">Selesai</option>
+          <option value="diambil">Diambil (sudah dibawa pulang)</option>
+        </Select>
+      </Field>
       <Field label="Deskripsi kerusakan" required>
         <Textarea value={form.deskripsi_kerusakan} placeholder="mis. LCD pecah, ganti panel" onChange={set('deskripsi_kerusakan')} />
       </Field>

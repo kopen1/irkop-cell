@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { api, newIdempotencyKey } from '../../lib/api';
 import { useAsync } from '../../hooks/useAsync';
 import { METODE_PEMBAYARAN, formatRupiah, todayWIB, formatTanggal, formatRupiahInput, parseRupiah } from '../../lib/format';
@@ -175,11 +175,11 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   });
 
   const [keranjang, setKeranjang] = useState(() =>
-    (initial?.items || []).map((i) => ({
+    (initial?.items || []).filter((i) => !i.service_hp_id).map((i) => ({
       produk_id: i.produk_id ?? '',
       nama: i.nama_produk_snapshot || i.nama_produk || '',
       harga: i.harga_snapshot ?? i.harga ?? 0,
-      modal: i.harga_modal ?? i.modal ?? 0,
+      modal: i.harga_modal_snapshot ?? i.harga_modal ?? i.modal ?? 0,
       qty: i.qty ?? 1,
     }))
   );
@@ -196,7 +196,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const [qtyDigital, setQtyDigital] = useState(initial?.qty || 1);
   const [adminPresetDigital, setAdminPresetDigital] = useState('');
 
-  const [akunBankTarik, setAkunBankTarik] = useState(initial?.akun_sumber || '');
+  const [akunBankTarik, setAkunBankTarik] = useState(initial?.akun_sumber || initial?.mitra || '');
   const [nominalTarik, setNominalTarik] = useState(initial?.nominal ? String(initial.nominal) : '');
   const [adminFeeTarik, setAdminFeeTarik] = useState(initial?.admin_fee ? String(initial.admin_fee) : '');
   const [tipeAdmin, setTipeAdmin] = useState(initial?.admin_type || 'dalam');
@@ -204,7 +204,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const [adminPresetTarik, setAdminPresetTarik] = useState('');
 
   const [namaDevice, setNamaDevice] = useState(initial?.service?.nama_device || '');
-  const [technisiId, setTechnisiId] = useState(initial?.service?.technisi_id || '');
+  const [technisiId, setTechnisiId] = useState(initial?.service?.teknisi_id || '');
   const [kerusakan, setKerusakan] = useState(initial?.service?.deskripsi_kerusakan || '');
   const [biayaService, setBiayaService] = useState(initial?.service?.biaya ? String(initial.service.biaya) : '');
   const [modalService, setModalService] = useState(initial?.service?.harga_modal ? String(initial.service.harga_modal) : '');
@@ -214,6 +214,24 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const [tanggalGaransi, setTanggalGaransi] = useState(initial?.service?.tanggal_garansi || '');
   const [catatanTeknisi, setCatatanTeknisi] = useState(initial?.service?.catatan || '');
   const [metodeBayarService, setMetodeBayarService] = useState(initial?.metode_bayar || 'tunai');
+
+  // Edit mode: produkdigital perlu selectedDigitalProduk terisi dari item lama
+  // supaya validasi "pilih produk" tidak memblokir simpan ulang.
+  useEffect(() => {
+    if (initial?.jenis === 'produkdigital' && !selectedDigitalProduk && allProduk.length > 0) {
+      const pid = initial.items?.[0]?.produk_id;
+      const found = allProduk.find((p2) => String(p2.id) === String(pid));
+      if (found) {
+        setSelectedDigitalProduk(found);
+        if (!initial?.sub_jenis) {
+          const tebakan = tebakSubJenisDigital(found);
+          setSubJenis(tebakan);
+          const mapped = SUB_JENIS_AKUN_MAP[tebakan];
+          if (mapped) setAkunBankDigital((prev) => prev || mapped);
+        }
+      }
+    }
+  }, [initial, allProduk, selectedDigitalProduk]);
 
   const handleJenisChange = (val) => {
     setJenis(val);

@@ -191,7 +191,7 @@ export default function TransaksiPage() {
   const groupedRows = useMemo(() => {
     const byJenis = new Map();
     for (const r of rows) {
-      const key = r.jenis || 'produk';
+      const key = r.jenis || (r.items && r.items.some((i) => i.service_hp_id) ? 'service' : 'produk');
       if (!byJenis.has(key)) byJenis.set(key, []);
       byJenis.get(key).push(r);
     }
