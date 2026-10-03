@@ -703,8 +703,8 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
 
     // Teknisi (pembagi hasil service). NULL = tidak ada pembagian.
     let svcTeknisiId = null;
-    if (svc.technisi_id != null && svc.technisi_id !== '') {
-      svcTeknisiId = asIntUser(svc.technisi_id);
+    if (svc.teknisi_id != null && svc.teknisi_id !== '') {
+      svcTeknisiId = asIntUser(svc.teknisi_id);
       const t = await db.one("SELECT id, role FROM users WHERE id = ? AND aktif = 1", svcTeknisiId);
       if (!t) throw err(400, 'invalid_user', 'Teknisi tidak ditemukan');
     }
@@ -975,7 +975,55 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   }
 
   const metodeBayar = tx.metode_bayar;
-  if (!Array.isArray(body.items) || body.items.length === 0) {
+
+  // Service HP edit: FE mengirim body.service, bukan body.items.
+  if (body.service && tx.jenis === 'service') {
+    const oldItem = await db.one(
+      `SELECT service_hp_id FROM transaksi_item WHERE transaksi_id = ? AND service_hp_id IS NOT NULL`,
+      tx.id
+    );
+    if (!oldItem?.service_hp_id) throw err(400, 'missing_service', 'Transaksi tidak punya rekor service');
+    const svcId = oldItem.service_hp_id;
+
+    let hargaModalFinal = body.service.harga_modal != null ? Number(body.service.harga_modal) : null;
+    if (Array.isArray(body.service.parts) && body.service.parts.length > 0) {
+      let partModal = 0;
+      for (const pt of body.service.parts) {
+        const produkId = Number(pt.produk_id);
+        const qty = Number(pt.qty) || 1;
+        if (!Number.isInteger(produkId) || produkId < 1 || !Number.isInteger(qty) || qty < 1) {
+          throw err(400, 'invalid_value', 'Sparepart tidak valid');
+        }
+        const prod = await db.one(
+          `SELECT harga_modal FROM produk WHERE id = ? AND deleted_at IS NULL`,
+          produkId
+        );
+        if (!prod) throw err(400, 'invalid_product', `Sparepart id ${produkId} tidak ditemukan`);
+        partModal += (prod.harga_modal == null ? 0 : Number(prod.harga_modal)) * qty;
+      }
+      hargaModalFinal = partModal;
+    }
+
+    const existingSvc = await db.one('SELECT * FROM service_hp WHERE id = ?', svcId);
+    const sets = [];
+    const vals = [];
+    for (const [k, v] of Object.entries(body.service)) {
+      if (k === 'parts') continue;
+      if (existingSvc && Object.prototype.hasOwnProperty.call(existingSvc, k)) {
+        sets.push(`${k} = ?`);
+        vals.push(v === '' ? null : (v === undefined ? null : v));
+      }
+    }
+    if (sets.length > 0) {
+      vals.push(svcId);
+      await db.exec(`UPDATE service_hp SET ${sets.join(', ')} WHERE id = ?`, ...vals);
+    }
+    if (hargaModalFinal !== null && !Number.isNaN(hargaModalFinal)) {
+      await db.exec('UPDATE service_hp SET harga_modal = ? WHERE id = ?', hargaModalFinal, svcId);
+    }
+    body.items = [{ service_hp_id: svcId, qty: 1, biaya: body.service.biaya, harga_modal: hargaModalFinal }];
+  }
+  if (!body.service && (!Array.isArray(body.items) || body.items.length === 0)) {
     throw err(400, 'missing_field', 'items wajib diisi minimal 1 produk');
   }
   // Tanggal target: body mengubah tanggal, atau sama dengan tanggal aslinya.

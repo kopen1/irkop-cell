@@ -46,6 +46,20 @@ export async function createService(db, request, ctx) {
   return { id: res.lastRowId, nama_device: namaDevice, status: 'masuk' };
 }
 
+export async function detailService(db, request, ctx, idStr) {
+  const id = asInt(idStr, { required: true, field: 'id' });
+  const row = await db.one(
+    `SELECT s.*, p.nama AS pelanggan_nama, u.nama AS teknisi_nama
+       FROM service_hp s
+       LEFT JOIN pelanggan p ON p.id = s.pelanggan_id
+       LEFT JOIN users u ON u.id = s.teknisi_id
+      WHERE s.id = ? AND s.deleted_at IS NULL`,
+    id
+  );
+  if (!row) throw err(404, 'not_found', 'Service HP tidak ditemukan');
+  return { service_hp: row };
+}
+
 export async function updateService(db, request, ctx, idStr) {
   const { user } = ctx.auth;
   const id = asInt(idStr, { required: true, field: 'id' });
