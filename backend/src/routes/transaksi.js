@@ -665,6 +665,9 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
 
 async function createProductTransaksi(db, body, ctx, request, jenis) {
   const { user } = ctx.auth;
+  // Teknisi service yang butuh akru gaji (diisi di blok service, dipakai
+  // setelah transaksi tersimpan).
+  let serviceTeknisiGaji = null;
   // Service HP tidak butuh items — nanti dibuat otomatis dari body.service
   if (!body.service && (!Array.isArray(body.items) || body.items.length === 0)) {
     throw err(400, 'missing_field', 'items wajib diisi minimal 1 produk');
@@ -757,12 +760,16 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
       'selesai',
       svcTeknisiId
     );
-    // Replace body.items with a single item referencing the new service_hp
+    // Replace body.items dengan satu item yang menunjuk ke service_hp baru.
     body.items = [{ service_hp_id: svcResult.lastRowId, qty: 1, biaya: svc.biaya, harga_modal: modalFinal }];
-    // Teknisi yang punya bagi_hasil_service langsung dapat akru gaji (upah + porsi).
+    // Catat teknisi untuk akru gaji — TAPI helper TIDAK boleh dipanggil di sini
+    // karena transaksi & transaksi_item belum di-insert, sehingga laba service
+    // baru ini belum terhitung. Dipanggil setelah db.batch() di bawah.
     if (svcTeknisiId) {
-      const tgl = resolveTanggalTransaksi(body);
-      await ensureGajiBagiHasilTeknisi(db, { userId: svcTeknisiId, tanggal: tgl });
+      serviceTeknisiGaji = {
+        userId: svcTeknisiId,
+        tanggal: resolveTanggalTransaksi(body),
+      };
     }
   }
 
@@ -959,6 +966,14 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
 
   const saved = await db.one('SELECT * FROM transaksi WHERE kode_transaksi = ?', kode);
   await writeTransaksiAudit(db, user, saved);
+
+  // Akru gaji teknisi SESUDAH transaksi + item + mutasi tersimpan, supaya laba
+  // service yang baru dicatat ikut terhitung (sebelumnya helper dipanggil sebelum
+  // insert, jadi setiap service terbaru selalu hilang dari baris gaji).
+  if (serviceTeknisiGaji) {
+    await ensureGajiBagiHasilTeknisi(db, serviceTeknisiGaji);
+  }
+
   return { 
     id: saved.kode_transaksi, 
     total: saved.total, 
@@ -1016,6 +1031,8 @@ export async function softDeleteTransaksi(db, body, ctx, idStr) {
 
 export async function updateTransaksi(db, body, ctx, idStr) {
   const { user } = ctx.auth;
+  // Teknisi service yang butuh akru gaji setelah transaksi tersimpan.
+  let serviceTeknisiGaji = null;
   const tx = await findTransaksiByRef(db, idStr);
   if (!tx) throw err(404, 'not_found', 'Transaksi tidak ditemukan');
   if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
@@ -1072,7 +1089,9 @@ export async function updateTransaksi(db, body, ctx, idStr) {
     }
     body.items = [{ service_hp_id: svcId, qty: 1, biaya: body.service.biaya, harga_modal: hargaModalFinal }];
     if (body.service.teknisi_id) {
-      await ensureGajiBagiHasilTeknisi(db, { userId: Number(body.service.teknisi_id), tanggal: tx.tanggal_transaksi });
+      // Ditunda sampai after commit: kalau dipanggil sekarang, laba service dari
+      // transaksi ini belum masuk DB sehingga gaji teknisi kurang terhitung.
+      serviceTeknisiGaji = { userId: Number(body.service.teknisi_id), tanggal: tx.tanggal_transaksi };
     }
   }
   if (!body.service && (!Array.isArray(body.items) || body.items.length === 0)) {
@@ -1160,6 +1179,11 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   }
 
   const saved = await db.one('SELECT * FROM transaksi WHERE id = ?', tx.id);
+  // Akru gaji teknisi SETELAH reversal + mutasi baru tersimpan, supaya laba
+  // service versi terbaru yang terhitung.
+  if (serviceTeknisiGaji) {
+    await ensureGajiBagiHasilTeknisi(db, serviceTeknisiGaji);
+  }
   await writeAudit(db, {
     userId: user.id, aksi: 'update', tabel: 'transaksi', recordId: tx.id,
     dataBefore: { kode_transaksi: tx.kode_transaksi, total: tx.total },

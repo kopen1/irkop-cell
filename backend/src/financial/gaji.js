@@ -294,9 +294,18 @@ export async function ensureOwnerGajiAutoInput(db, { tanggal, jamBuka, kasirSesi
   for (const owner of owners) {
     const hitung = await hitungGajiOwner(db, tanggal, jamBuka, owner.id);
     if (hitung.total <= 0) continue;
+    // UPSERT, bukan INSERT OR IGNORE: kalau baris sudah ada (mis. dibuat saat
+    // service dicatat), nominal & catatan harus ikut hitungan TERBARU. Tanpa ini
+    // baris bisa basi — angka service yang tertulis bukan angka live.
+    // Baris `manual_edit` tidak pernah disentuh karena ada WHERE sumber='auto'.
     const res = await db.exec(
-      `INSERT OR IGNORE INTO gaji_harian (user_id, tanggal, nominal, sumber, catatan, created_at)
-       VALUES (?, ?, ?, 'auto', ?, ?)`,
+      `INSERT INTO gaji_harian (user_id, tanggal, nominal, sumber, catatan, created_at)
+       VALUES (?, ?, ?, 'auto', ?, ?)
+       ON CONFLICT(user_id, tanggal) DO UPDATE SET
+         nominal = excluded.nominal,
+         catatan = excluded.catatan,
+         updated_at = datetime('now')
+       WHERE gaji_harian.sumber = 'auto'`,
       owner.id,
       tanggal,
       hitung.total,

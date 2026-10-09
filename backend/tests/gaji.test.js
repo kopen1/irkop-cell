@@ -178,7 +178,7 @@ test('GAJI owner: akru otomatis saat Closing (upah 50k + bagi hasil servis SENDI
     method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-owner-1' },
     body: {
       jenis: 'service', metode_bayar: 'tunai', items: [],
-      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'Ganti LCD', biaya: 200000, harga_modal: 120000, tanggal_masuk: today, technisi_id: adminId },
+      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'Ganti LCD', biaya: 200000, harga_modal: 120000, tanggal_masuk: today, teknisi_id: adminId },
     },
   });
   assert.equal(svc.status, 200, JSON.stringify(svc.data));
@@ -247,7 +247,7 @@ test('GAJI owner: upah TETAP 50.000 walaupun jam buka >= 16 (tidak ikut shift)',
     method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-flat-owner' },
     body: {
       jenis: 'service', metode_bayar: 'tunai', items: [],
-      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'Ganti LCD', biaya: 300000, harga_modal: 100000, tanggal_masuk: today, technisi_id: adminId },
+      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'Ganti LCD', biaya: 300000, harga_modal: 100000, tanggal_masuk: today, teknisi_id: adminId },
     },
   });
   assert.equal(svc.status, 200, JSON.stringify(svc.data));
@@ -290,7 +290,7 @@ test('Bagi hasil service: porsi per teknisi, hanya servis yang dikerjakan', asyn
     method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-tek-1' },
     body: {
       jenis: 'service', metode_bayar: 'tunai', items: [],
-      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 200000, harga_modal: 120000, tanggal_masuk: today, technisi_id: karyawanId },
+      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 200000, harga_modal: 120000, tanggal_masuk: today, teknisi_id: karyawanId },
     },
   });
   assert.equal(s1.status, 200, JSON.stringify(s1.data));
@@ -369,7 +369,7 @@ test('Gaji owner: GLOBAL untuk semua admin, tidak dikunci ke satu akun', async (
     method: 'POST', token: adminToken, headers: { 'Idempotency-Key': 'svc-multi-owner' },
     body: {
       jenis: 'service', metode_bayar: 'tunai', items: [],
-      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 200000, harga_modal: 100000, tanggal_masuk: today, technisi_id: adminId },
+      service: { nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 200000, harga_modal: 100000, tanggal_masuk: today, teknisi_id: adminId },
     },
   });
   assert.equal(svc.status, 200, JSON.stringify(svc.data));
@@ -400,7 +400,7 @@ test('Bagi hasil: TIDAK ada default di kode — owner tanpa porsi = 0%', async (
       jenis: 'service', metode_bayar: 'tunai', items: [],
       service: {
         nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 200000,
-        harga_modal: 100000, tanggal_masuk: today, technisi_id: adminId,
+        harga_modal: 100000, tanggal_masuk: today, teknisi_id: adminId,
       },
     },
   });
@@ -430,7 +430,7 @@ test('Bagi hasil: porsi 0% bisa DISIMPAN (tidak diam-diam jadi default)', async 
       jenis: 'service', metode_bayar: 'tunai', items: [],
       service: {
         nama_device: 'iPhone', deskripsi_kerusakan: 'LCD', biaya: 400000,
-        harga_modal: 100000, tanggal_masuk: today, technisi_id: adminId,
+        harga_modal: 100000, tanggal_masuk: today, teknisi_id: adminId,
       },
     },
   });
@@ -467,7 +467,7 @@ test('Bagi hasil: teknisi baru bisa dapat porsi apa saja tanpa sentuh kode', asy
       jenis: 'service', metode_bayar: 'tunai', items: [],
       service: {
         nama_device: 'iPhone', deskripsi_kerusakan: 'Baterai', biaya: 200000,
-        harga_modal: 100000, tanggal_masuk: today, technisi_id: baru,
+        harga_modal: 100000, tanggal_masuk: today, teknisi_id: baru,
       },
     },
   });

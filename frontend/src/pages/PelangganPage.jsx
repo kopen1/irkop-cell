@@ -16,7 +16,7 @@ import { Loader, ErrorState, EmptyState } from '../components/ui/States';
 import { Badge, PelunasanBadge } from '../components/ui/Badge';
 import { Icon } from '../components/ui/Icon';
 
-const LIMIT = 100;
+const LIMIT = 1000;
 
 
 // Label tipe alias & sumber yang mudah dibaca (bukan nilai mentah database).
@@ -83,6 +83,8 @@ export default function PelangganPage() {
 
   const data = state.data || {};
   const rows = (data.items || []).map((p) => ({ ...p, key: p.id }));
+  const totalPelanggan = Number(data.total_pelanggan ?? (rows.length || 0));
+  const totalTampil = Number(data.total_tampil ?? (rows.length || 0));
 
   const reloadDetail = async () => {
     if (!detail?.id) return;
@@ -248,7 +250,7 @@ export default function PelangganPage() {
   };
 
   return (
-    <div className="page">
+    <div className="page pelanggan-page">
       <PageHeader
         title="Pelanggan"
         subtitle="Ranking pelanggan setia berdasarkan total belanja & frekuensi. Transaksi tanpa pelanggan masuk baris Umum (informasi)."
@@ -277,6 +279,18 @@ export default function PelangganPage() {
         <Field label="Cari pelanggan">
           <Input type="search" value={q} placeholder="Nama / nomor HP…" onChange={(e) => setQ(e.target.value)} />
         </Field>
+        {state.status === 'success' && (
+          <>
+            <div className="summary-item">
+              <div className="summary-label">Total Pelanggan</div>
+              <div className="summary-value">{totalPelanggan}</div>
+            </div>
+            <div className="summary-item">
+              <div className="summary-label">Tampil</div>
+              <div className="summary-value">{totalTampil}</div>
+            </div>
+          </>
+        )}
       </div>
 
       {createOpen && can('pelanggan') && (
@@ -292,9 +306,13 @@ export default function PelangganPage() {
         </div>
       )}
 
-      {detailOpen && (
-        <div className="card mb-4" style={{ padding: 'var(--space-4)' }}>
-          {detailLoading ? (
+      <Modal
+        open={detailOpen}
+        onClose={() => { setDetailOpen(false); setDetail(null); }}
+        title="Detail Pelanggan"
+        size="lg"
+      >
+        {detailLoading ? (
             <Loader />
           ) : detail?._error ? (
             <ErrorState error={{ message: detail._error }} />
@@ -435,8 +453,7 @@ export default function PelangganPage() {
               </div>
             </>
           ) : null}
-        </div>
-      )}
+      </Modal>
 
       {state.status === 'error' ? (
         <ErrorState error={state.error} onRetry={() => load().catch(() => {})} />
@@ -445,9 +462,10 @@ export default function PelangganPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="Belum ada pelanggan" description="Tambahkan pelanggan atau transaksi akan berjalan sebagai Umum/Tanpa Nama." icon="pelanggan" />
       ) : (
-        <div className="table-fit">
-          <Table
-            onRowClick={(r) => openDetail(r)}
+        <div className="pelanggan-table-area">
+          <div className="table-fit">
+            <Table
+              onRowClick={(r) => openDetail(r)}
             columns={[
               {
                 key: 'nama',
@@ -475,7 +493,8 @@ export default function PelangganPage() {
               },
             ]}
             rows={rows}
-          />
+            />
+          </div>
         </div>
       )}
 

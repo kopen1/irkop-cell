@@ -1045,6 +1045,37 @@
 .alias-form { display: grid; grid-template-columns: 150px minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; }
 .alias-form-aksi { display: flex; gap: var(--space-2); }
 
+/* ---------- Pelanggan: muat satu layar & tidak menggeser ---------- */
+.pelanggan-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: calc(100dvh - var(--topbar-height, 60px));
+  gap: var(--space-3);
+}
+.pelanggan-page .filter-bar {
+  flex: 0 0 auto;
+  margin-bottom: 0;
+}
+.pelanggan-page .summary-item {
+  min-width: 130px;
+}
+.pelanggan-table-area {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.pelanggan-table-area > .table-fit {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+.pelanggan-table-area .table-wrap {
+  height: 100%;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
 /* ---------- Tabel yang muat tanpa geser horizontal ---------- */
 .table-fit .table { min-width: 0; }
 .table-fit .table td,

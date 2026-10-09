@@ -6,7 +6,7 @@
 --
 -- Hitungan: sebuah servis (service_hp) punya teknisi_id. Laba servis itu
 -- dibagi ke teknisi sesuai persennya. Sisa persen menjadi bagian toko.
--- Servis tanpa teknisi (technisi_id NULL) tidak ikut dibagi ke siapa pun.
+-- Servis tanpa teknisi (teknisi_id NULL) tidak ikut dibagi ke siapa pun.
 --
 -- Kolom persen 0..100. Default user tanpa baris = 0 (tidak dapat bagi hasil).
 CREATE TABLE IF NOT EXISTS bagi_hasil_service (

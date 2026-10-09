@@ -23,7 +23,16 @@ export async function listPelanggan(db, request, ctx) {
        FROM pelanggan p WHERE ${where.join(' AND ')} ORDER BY total_belanja DESC`,
     ...bind
   );
-  return { items: rows };
+  // Total keseluruhan pelanggan (tanpa filter), dipakai UI supaya angka total
+  // tidak ikut berubah saat pencarian aktif.
+  const totalSemua = await db.one(
+    `SELECT COUNT(*) AS total FROM pelanggan p WHERE p.merged_into_id IS NULL`
+  );
+  return {
+    items: rows,
+    total_pelanggan: Number(totalSemua?.total || 0),
+    total_tampil: rows.length,
+  };
 }
 
 export async function getPelanggan(db, request, ctx, idStr) {
