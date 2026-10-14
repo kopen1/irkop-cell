@@ -1,4 +1,4 @@
-import { err } from '../lib/errors.js';
+import { err, ApiError } from '../lib/errors.js';
 import { nowIso, wibDateToday, isValidCalendarDate } from '../lib/time.js';
 
 function resolveTanggalTransaksi(body) {
@@ -238,20 +238,20 @@ export async function getTransaksi(db, request, ctx, idStr) {
   };
 }
 
-export async function generateTransaksiKode(db, date, attempts = 3, excludeId = null) {
+export async function generateTransaksiKode(db, date, attempts = 10, excludeId = null) {
   const excl = excludeId ? 'AND id != ?' : '';
-  // Hitung SEMUA transaksi tanggal itu, termasuk yang sudah di-soft-delete.
-  // Kalau hanya menghitung yang aktif, nomor akan dipakai ulang setelah ada
-  // transaksi dihapus — padahal kode_transaksi UNIQUE dan baris lamanya masih ada
-  // -> "Gagal membuat kode transaksi yang unik".
+  // Ambil MAX sequence number dari kode_transaksi yg sudah ada (termasuk soft-delete).
+  // Pakai MAX biar gak ngulang nomor meski ada yg dihapus (gap).
+  const dateCompact = date.replace(/-/g, '');
   const row = await db.one(
-    `SELECT COUNT(*) AS n FROM transaksi WHERE tanggal_transaksi = ? ${excl}`,
+    `SELECT COALESCE(MAX(CAST(SUBSTR(kode_transaksi, -3) AS INTEGER)), 0) AS max_seq
+       FROM transaksi WHERE tanggal_transaksi = ? ${excl}`,
     ...[date, ...(excludeId ? [excludeId] : [])]
   );
-  const base = Number(row.n);
+  const base = Number(row.max_seq);
   for (let i = 0; i < attempts; i += 1) {
     const seq = String(base + 1 + i).padStart(3, '0');
-    const kode = `TX-${date.replace(/-/g, '')}-${seq}`;
+    const kode = `TX-${dateCompact}-${seq}`;
     const dup = await db.one(
       'SELECT id FROM transaksi WHERE kode_transaksi = ? AND id != ?',
       kode,
@@ -998,58 +998,60 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
 }
 
 export async function softDeleteTransaksi(db, body, ctx, idStr) {
-  const { user } = ctx.auth;
-  const tx = await findTransaksiByRef(db, idStr);
-  if (!tx) throw err(404, 'not_found', 'Transaksi tidak ditemukan');
-  if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
+  try {
+    const { user } = ctx.auth;
+    const tx = await findTransaksiByRef(db, idStr);
+    if (!tx) throw err(404, 'not_found', 'Transaksi tidak ditemukan');
+    if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
 
-  // Transaksi dengan bonus SUDAH DIBAYAR tidak boleh dihapus:
-  // uangnya sudah keluar lewat pengeluaran. Hapus pengeluaran
-  // bonus terkait dulu (halaman Pengeluaran) agar pembayarannya
-  // ikut dibatalkan, baru hapus transaksi ini.
-  if (await adaBonusDibayar(db, tx.id)) {
-    throw err(409, 'bonus_sudah_dibayar', 'Transaksi ini punya bonus yang sudah dibayar. Hapus pengeluaran bonus-nya dulu di halaman Pengeluaran.');
+    // Transaksi dengan bonus SUDAH DIBAYAR tidak boleh dihapus:
+    // uangnya sudah keluar lewat pengeluaran. Hapus pengeluaran
+    // bonus terkait dulu (halaman Pengeluaran) agar pembayarannya
+    // ikut dibatalkan, baru hapus transaksi ini.
+    if (await adaBonusDibayar(db, tx.id)) {
+      throw err(409, 'bonus_sudah_dibayar', 'Transaksi ini punya bonus yang sudah dibayar. Hapus pengeluaran bonus-nya dulu di halaman Pengeluaran.');
+    }
+
+    const reason = body.deleted_reason || 'manual soft-delete';
+    // Reversal masuk ke sesi tanggal transaksi. Pakai requireSessionForToday
+    // (bukan requireOpenSession) supaya bisa hapus transaksi sesi yg sudah tutup.
+    const sesi = await requireSessionForToday(db, tx.tanggal_transaksi);
+    const actionKey = ctx.idempotencyKey || `del-${tx.id}-${Date.now()}`;
+
+    const reversalResult = await reverseFullSource(db, {
+      sumberTipe: 'transaksi', sumberId: tx.id, kasirSesiId: sesi.id, actionKey,
+    });
+
+    // Kembalikan stok yang tadinya berkurang (penjualan fisik).
+    if (tx.jenis !== 'produkdigital') {
+      const oldStock = await loadStockItemsOfTransaksi(db, tx.id);
+      const stmts = stockStatements(db, oldStock, 1, nowIso());
+      if (stmts.length) await db.batch(stmts);
+    }
+
+    // Service HP yang terhubung ke transaksi ini ikut di-soft-delete supaya
+    // tidak lagi muncul di halaman Service HP.
+    const svcIds = await db.many(
+      'SELECT DISTINCT service_hp_id AS id FROM transaksi_item WHERE transaksi_id = ? AND service_hp_id IS NOT NULL',
+      tx.id
+    );
+    for (const s of svcIds) {
+      await db.exec('UPDATE service_hp SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL', nowIso(), s.id);
+    }
+    await db.exec(
+      'UPDATE transaksi SET deleted_at = ?, deleted_by = ?, deleted_reason = ?, updated_at = ? WHERE id = ?',
+      nowIso(), user.id, reason, nowIso(), tx.id
+    );
+    // Bonus belum dibayar ikut dibatalkan: penjualannya tidak
+    // berlaku lagi. (Yang sudah dibayar sudah ditolak di atas.)
+    await voidBonusTransaksi(db, tx.id);
+
+    return { id: tx.kode_transaksi, status: 'soft_deleted', reversal: reversalResult };
+  } catch (e) {
+    // Pastikan semua error dibungkus ApiError agar tidak jadi "Internal server error"
+    if (e instanceof ApiError) throw e;
+    throw err(500, 'soft_delete_failed', `Gagal hapus transaksi: ${e.message || e}`);
   }
-
-  const reason = body.deleted_reason || 'manual soft-delete';
-  // Reversal masuk ke sesi tanggal transaksi. Pakai requireSessionForToday
-  // (bukan requireOpenSession) supaya bisa hapus transaksi sesi yg sudah tutup.
-  const sesi = await requireSessionForToday(db, tx.tanggal_transaksi);
-  const actionKey = ctx.idempotencyKey || `del-${tx.id}-${Date.now()}`;
-
-  const reversalResult = await reverseFullSource(db, {
-    sumberTipe: 'transaksi', sumberId: tx.id, kasirSesiId: sesi.id, actionKey,
-  });
-
-  // Kembalikan stok yang tadinya berkurang (penjualan fisik).
-  if (tx.jenis !== 'produkdigital') {
-    const oldStock = await loadStockItemsOfTransaksi(db, tx.id);
-    const stmts = stockStatements(db, oldStock, 1, nowIso());
-    if (stmts.length) await db.batch(stmts);
-  }
-
-  // Service HP yang terhubung ke transaksi ini ikut di-soft-delete supaya
-  // tidak lagi muncul di halaman Service HP.
-  const svcIds = await db.many(
-    'SELECT DISTINCT service_hp_id AS id FROM transaksi_item WHERE transaksi_id = ? AND service_hp_id IS NOT NULL',
-    tx.id
-  );
-  for (const s of svcIds) {
-    await db.exec('UPDATE service_hp SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL', nowIso(), s.id);
-  }
-  await db.exec(
-    'UPDATE transaksi SET deleted_at = ?, deleted_by = ?, deleted_reason = ?, updated_at = ? WHERE id = ?',
-    nowIso(), user.id, reason, nowIso(), tx.id
-  );
-  // Bonus belum dibayar ikut dibatalkan: penjualannya tidak
-  // berlaku lagi. (Yang sudah dibayar sudah ditolak di atas.)
-  await voidBonusTransaksi(db, tx.id);
-  await writeAudit(db, {
-    userId: user.id, aksi: 'soft_delete', tabel: 'transaksi', recordId: tx.id,
-    dataBefore: { kode_transaksi: tx.kode_transaksi, total: tx.total, metode_bayar: tx.metode_bayar },
-    dataAfter: { deleted_reason: reason, reversal: reversalResult },
-  });
-  return { id: tx.kode_transaksi, status: 'soft_deleted', reversal: reversalResult };
 }
 
 export async function updateTransaksi(db, body, ctx, idStr) {
