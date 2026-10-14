@@ -57,6 +57,7 @@ export default function KasbonPage() {
   const [expanded, setExpanded] = useState({});
   const [bayar, setBayar] = useState({});
   const [bayarBusy, setBayarBusy] = useState({});
+  const [search, setSearch] = useState('');
 
   const data = state.data || {};
   const rows = (data.items || []).map((k) => ({ ...k, key: k.id }));
@@ -66,8 +67,11 @@ export default function KasbonPage() {
   const totalKasbon = rows.reduce((s, k) => s + Number(k.nominal), 0);
 
   const groups = useMemo(() => {
+    const q = search.trim().toLowerCase();
     const map = new Map();
     for (const k of rows) {
+      const nama = (k.pelanggan_nama || 'Umum').toLowerCase();
+      if (q && !nama.includes(q)) continue;
       const key = String(k.pelanggan_id ?? 'umum');
       if (!map.has(key)) {
         map.set(key, { key, pelanggan_id: k.pelanggan_id, nama: k.pelanggan_nama || 'Umum', bons: [] });
@@ -75,7 +79,7 @@ export default function KasbonPage() {
       map.get(key).bons.push(k);
     }
     return Array.from(map.values());
-  }, [rows]);
+  }, [rows, search]);
 
   const toggleGroup = (gkey) => setExpanded((s) => ({ ...s, [gkey]: !s[gkey] }));
 
@@ -165,8 +169,20 @@ export default function KasbonPage() {
       ) : rows.length === 0 ? (
         <EmptyState title="Belum ada kasbon" description="Kasbon dibuat dari transaksi ber-metode Bon atau ditambah manual." icon="kasbon" />
       ) : (
-        <div className="flex flex-col gap-3">
-          {groups.map((g) => {
+        <>
+          <div className="summary-bar" style={{ marginBottom: 'var(--space-3)' }}>
+            <Field label="Cari pelanggan" style={{ maxWidth: 360 }}>
+              <Input
+                type="search"
+                placeholder="Ketik nama pelanggan…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoComplete="off"
+              />
+            </Field>
+          </div>
+          <div className="flex flex-col gap-3">
+            {groups.map((g) => {
             const isOpen = Boolean(expanded[g.key]);
             const groupSisa = g.bons.reduce((s, k) => s + (k.status === 'lunas' ? 0 : sisaBon(k)), 0);
             return (
@@ -260,7 +276,7 @@ export default function KasbonPage() {
             );
           })}
         </div>
-      )}
+      </>)}
 
       <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Tambah Kasbon">
         <KasbonForm
@@ -327,6 +343,14 @@ function KasbonForm({ onCancel, onSaved }) {
   const [newPelangganNama, setNewPelangganNama] = useState('');
   const [newPelangganTelepon, setNewPelangganTelepon] = useState('');
   const [busyPelanggan, setBusyPelanggan] = useState(false);
+  const [pelangganSearch, setPelangganSearch] = useState('');
+  const [pelangganDropdownOpen, setPelangganDropdownOpen] = useState(false);
+
+  const filteredPelanggan = useMemo(() => {
+    const q = pelangganSearch.trim().toLowerCase();
+    if (!q) return pelanggan.slice(0, 50);
+    return pelanggan.filter((p) => (p.nama || '').toLowerCase().includes(q)).slice(0, 50);
+  }, [pelanggan, pelangganSearch]);
 
   useEffect(() => {
     api.get('/pelanggan', { limit: 200 }).then((r) => setPelanggan(r.items || [])).catch(() => {});
@@ -378,30 +402,72 @@ function KasbonForm({ onCancel, onSaved }) {
   return (
     <form onSubmit={submit} className="flex flex-col gap-4">
       <Field label="Pelanggan" required>
-        <div className="input-group">
-          <Select value={form.pelanggan_id} onChange={set('pelanggan_id')} style={{ flex: 1 }}>
-            <option value="">Pilih pelanggan…</option>
-            {pelanggan.map((p) => (
-              <option key={p.id} value={p.id}>{p.nama}</option>
-            ))}
-          </Select>
-          <Button type="button" variant="secondary" onClick={() => setShowPelangganForm(true)} style={{ flexShrink: 0 }}>
-            <Icon name="plus" size={14} />
-          </Button>
-        </div>
-        {showPelangganForm && (
-          <div style={{ marginTop: 8, padding: 10, background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
-            <div className="text-xs font-bold mb-2">Tambah Pelanggan Baru</div>
-            <div className="flex gap-2 mb-2">
-              <Input placeholder="Nama *" value={newPelangganNama} onChange={(e) => setNewPelangganNama(e.target.value)} style={{ flex: 1 }} />
-              <Input placeholder="Telepon" value={newPelangganTelepon} onChange={(e) => setNewPelangganTelepon(e.target.value)} style={{ flex: 1 }} />
-            </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="secondary" size="sm" onClick={() => setShowPelangganForm(false)}>Batal</Button>
-              <Button type="button" size="sm" onClick={handleCreatePelanggan} loading={busyPelanggan} disabled={!newPelangganNama.trim()}>Simpan</Button>
-            </div>
+        <div className="relative">
+          <div className="input-group">
+            <Input
+              type="search"
+              placeholder="Ketik nama pelanggan…"
+              value={pelangganSearch}
+              onChange={(e) => {
+                setPelangganSearch(e.target.value);
+                setPelangganDropdownOpen(true);
+              }}
+              onFocus={() => setPelangganDropdownOpen(true)}
+              onBlur={(e) => {
+                setTimeout(() => setPelangganDropdownOpen(false), 150);
+              }}
+              style={{ flex: 1 }}
+              required
+              autoComplete="off"
+              aria-expanded={pelangganDropdownOpen && filteredPelanggan.length > 0}
+              aria-controls="kasbon-pelanggan-dropdown"
+            />
+            <Button type="button" variant="secondary" onClick={() => {
+              setNewPelangganNama('');
+              setShowPelangganForm(true);
+            }} style={{ flexShrink: 0 }} title="Tambah pelanggan baru">
+              <Icon name="plus" size={14} />
+            </Button>
           </div>
-        )}
+          {pelangganDropdownOpen && filteredPelanggan.length > 0 && (
+            <div
+              id="kasbon-pelanggan-dropdown"
+              className="absolute z-10 w-full mt-1"
+              style={{ maxHeight: 240, overflowY: 'auto', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)' }}
+            >
+              {filteredPelanggan.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className={`w-full text-left px-3 py-2 hover:bg-[var(--bg-hover)] flex items-center gap-2 ${form.pelanggan_id === String(p.id) ? 'bg-[var(--accent-soft)]' : ''}`}
+                  onClick={() => {
+                    setForm((f) => ({ ...f, pelanggan_id: String(p.id) }));
+                    setPelangganSearch(p.nama);
+                    setPelangganDropdownOpen(false);
+                  }}
+                >
+                  <span className="font-medium">{p.nama}</span>
+                </button>
+              ))}
+              {pelanggan.length > 0 && filteredPelanggan.length === 0 && (
+                <div className="px-3 py-2 text-sm text-muted">Tidak ditemukan</div>
+              )}
+            </div>
+          )}
+          {showPelangganForm && (
+            <div style={{ marginTop: 8, padding: 10, background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
+              <div className="text-xs font-bold mb-2">Tambah Pelanggan Baru</div>
+              <div className="flex gap-2 mb-2">
+                <Input placeholder="Nama *" value={newPelangganNama} onChange={(e) => setNewPelangganNama(e.target.value)} style={{ flex: 1 }} />
+                <Input placeholder="Telepon" value={newPelangganTelepon} onChange={(e) => setNewPelangganTelepon(e.target.value)} style={{ flex: 1 }} />
+              </div>
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" size="sm" onClick={() => setShowPelangganForm(false)}>Batal</Button>
+                <Button type="button" size="sm" onClick={handleCreatePelanggan} loading={busyPelanggan} disabled={!newPelangganNama.trim()}>Simpan</Button>
+              </div>
+            </div>
+          )}
+        </div>
       </Field>
       <div className="grid-2">
         <Field label="Nominal (Rp)" required>

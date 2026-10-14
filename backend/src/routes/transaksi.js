@@ -14,7 +14,7 @@ function resolveTanggalTransaksi(body) {
 import { reverseFullSource } from '../financial/reversal.js';
 import { getAccount } from '../financial/akun.js';
 import { hitungAdmin, normalizeProvider } from '../financial/tarif.js';
-import { requireOpenSession } from '../financial/kasir.js';
+import { requireOpenSession, requireSessionForToday } from '../financial/kasir.js';
 import { writeAudit } from '../lib/audit.js';
 import { ensureGajiBagiHasilTeknisi } from '../financial/gaji.js';
 import { accrualBonusPenjualan, voidBonusTransaksi, adaBonusDibayar } from '../financial/bonus.js';
@@ -1012,8 +1012,9 @@ export async function softDeleteTransaksi(db, body, ctx, idStr) {
   }
 
   const reason = body.deleted_reason || 'manual soft-delete';
-  // Reversal harus masuk ke sesi tanggal transaksi, bukan sesi hari ini.
-  const sesi = await requireOpenSession(db, tx.tanggal_transaksi);
+  // Reversal masuk ke sesi tanggal transaksi. Pakai requireSessionForToday
+  // (bukan requireOpenSession) supaya bisa hapus transaksi sesi yg sudah tutup.
+  const sesi = await requireSessionForToday(db, tx.tanggal_transaksi);
   const actionKey = ctx.idempotencyKey || `del-${tx.id}-${Date.now()}`;
 
   const reversalResult = await reverseFullSource(db, {

@@ -534,35 +534,69 @@ export default function KasirPage() {
           </div>
           <Card title="Hasil Rekonsiliasi">
             {sesi.data?.closing?.length ? (
-              <div className="table-wrap">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th>Akun</th>
-                      <th className="col-right">Saldo Sistem</th>
-                      <th className="col-right">Saldo Real</th>
-                      <th className="col-right">Selisih</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {sesi.data.closing.map((c) => {
-                      const selisih = Number(c.selisih) || 0;
-                      return (
-                        <tr key={c.nama_akun}>
-                          <td>{c.nama_akun}</td>
-                          <td className="col-right num">{formatRupiah(c.saldo_sistem)}</td>
-                          <td className="col-right num">{formatRupiah(c.saldo_real)}</td>
-                          <td
-                            className={`col-right num ${selisih === 0 ? 'text-success' : 'text-warning'}`}
-                          >
-                            {formatSignedRupiah(selisih)}
-                          </td>
+<div className="table-wrap">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Akun</th>
+                    <th className="col-right">Saldo Sistem</th>
+                    <th className="col-right">Saldo Real</th>
+                    <th className="col-right">Selisih</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(() => {
+                    const CASH_AKUN = ['Tunai Laci', 'Uang Cadangan'];
+                    const cashRows = sesi.data.closing.filter((c) => CASH_AKUN.includes(c.nama_akun));
+                    const saldoRows = sesi.data.closing.filter((c) => !CASH_AKUN.includes(c.nama_akun));
+                    return (
+                      <>
+                        {cashRows.map((c) => {
+                          const selisih = Number(c.selisih) || 0;
+                          return (
+                            <tr key={c.nama_akun} style={{ background: 'var(--success-soft)' }}>
+                              <td style={{ fontWeight: 700 }}><Icon name="wallet" size={14} style={{ marginRight: 4 }} /> {c.nama_akun} (CASH)</td>
+                              <td className="col-right num">{formatRupiah(c.saldo_sistem)}</td>
+                              <td className="col-right num">{formatRupiah(c.saldo_real)}</td>
+                              <td className={`col-right num ${selisih === 0 ? 'text-success' : 'text-warning'}`}>{formatSignedRupiah(selisih)}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-surface-alt)' }}>
+                          <td style={{ fontWeight: 700 }}><Icon name="wallet" size={14} style={{ marginRight: 4 }} /> TOTAL CASH</td>
+                          <td className="col-right num font-bold">{formatRupiah(cashRows.reduce((s,c)=>s+Number(c.saldo_sistem||0),0))}</td>
+                          <td className="col-right num font-bold">{formatRupiah(cashRows.reduce((s,c)=>s+Number(c.saldo_real||0),0))}</td>
+                          <td className="col-right num font-bold">{formatSignedRupiah(cashRows.reduce((s,c)=>s+Number(c.selisih||0),0))}</td>
                         </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+                        {saldoRows.map((c) => {
+                          const selisih = Number(c.selisih) || 0;
+                          return (
+                            <tr key={c.nama_akun}>
+                              <td><Icon name="bank" size={14} style={{ marginRight: 4 }} /> {c.nama_akun} (SALDO)</td>
+                              <td className="col-right num">{formatRupiah(c.saldo_sistem)}</td>
+                              <td className="col-right num">{formatRupiah(c.saldo_real)}</td>
+                              <td className={`col-right num ${selisih === 0 ? 'text-success' : 'text-warning'}`}>{formatSignedRupiah(selisih)}</td>
+                            </tr>
+                          );
+                        })}
+                        <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-surface-alt)' }}>
+                          <td style={{ fontWeight: 700 }}><Icon name="bank" size={14} style={{ marginRight: 4 }} /> TOTAL SALDO</td>
+                          <td className="col-right num font-bold">{formatRupiah(saldoRows.reduce((s,c)=>s+Number(c.saldo_sistem||0),0))}</td>
+                          <td className="col-right num font-bold">{formatRupiah(saldoRows.reduce((s,c)=>s+Number(c.saldo_real||0),0))}</td>
+                          <td className="col-right num font-bold">{formatSignedRupiah(saldoRows.reduce((s,c)=>s+Number(c.selisih||0),0))}</td>
+                        </tr>
+                      </>
+                    );
+                  })()}
+                  <tr style={{ borderTop: '3px double var(--accent)', background: 'var(--accent-soft)', fontWeight: 800, fontSize: '0.95rem' }}>
+                    <td><Icon name="calculator" size={12} style={{ marginRight: 4 }} /> GRAND TOTAL</td>
+                    <td className="col-right num">{formatRupiah(cashRows.reduce((s,c)=>s+Number(c.saldo_sistem||0),0) + saldoRows.reduce((s,c)=>s+Number(c.saldo_sistem||0),0))}</td>
+                    <td className="col-right num">{formatRupiah(cashRows.reduce((s,c)=>s+Number(c.saldo_real||0),0) + saldoRows.reduce((s,c)=>s+Number(c.saldo_real||0),0))}</td>
+                    <td className="col-right num">{formatSignedRupiah(cashRows.reduce((s,c)=>s+Number(c.selisih||0),0) + saldoRows.reduce((s,c)=>s+Number(c.selisih||0),0))}</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
             ) : (
               <EmptyState title="Belum ada data closing" description="Data rekonsiliasi akan tampil setelah sesi ditutup." icon="kasir" />
             )}
@@ -773,28 +807,109 @@ function BalanceTable({ rows }) {
   if (!rows || rows.length === 0) {
     return <EmptyState title="Tidak ada akun pada sesi ini" description="Opening terlebih dahulu." icon="kasir" />;
   }
+
+  const CASH_AKUN = ['Tunai Laci', 'Uang Cadangan'];
+  // Filter out total/summary rows that might come from backend
+  const dataRows = rows.filter((r) => {
+    const n = (r.nama_akun || '').toUpperCase();
+    return !n.includes('TOTAL') && !n.includes('GRAND') && n !== 'TOTAL CASH' && n !== 'TOTAL SALDO';
+  });
+
+  const CASH_AKUN_LIST = ['Tunai Laci', 'Uang Cadangan'];
+  const cashRows = dataRows.filter((r) => CASH_AKUN_LIST.includes(r.nama_akun));
+  const saldoRows = dataRows.filter((r) => !CASH_AKUN_LIST.includes(r.nama_akun));
+
+  const sum = (arr, field) => arr.reduce((s, r) => s + (Number(r[field]) || 0), 0);
+
+  const cashOpening = sum(cashRows, 'saldo_opening');
+  const cashMutasi = sum(cashRows, 'mutasi');
+  const cashSistem = sum(cashRows, 'saldo_sistem');
+
+  const saldoOpening = sum(saldoRows, 'saldo_opening');
+  const saldoMutasi = sum(saldoRows, 'mutasi');
+  const saldoSistem = sum(saldoRows, 'saldo_sistem');
+
   return (
     <div className="table-wrap">
-      <table className="table">
-        <thead>
-          <tr>
-            <th>Akun</th>
-            <th className="col-right">Saldo Opening</th>
-            <th className="col-right">Mutasi</th>
-            <th className="col-right">Saldo Sistem</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr key={r.nama_akun}>
-              <td>{r.nama_akun}</td>
-              <td className="col-right num text-primary font-bold">{formatRupiah(r.saldo_opening)}</td>
-              <td className="col-right num text-success">+{formatSignedRupiah(r.mutasi || 0)}</td>
-              <td className="col-right num" style={{ fontWeight: 800 }}>{formatRupiah(r.saldo_sistem)}</td>
+      {/* UANG CASH */}
+      <div style={{ marginBottom: 'var(--space-4)' }}>
+        <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--success)' }}>
+          <Icon name="wallet" size={16} style={{ marginRight: 6 }} /> Uang Cash (Tunai Laci + Uang Cadangan)
+        </div>
+        <table className="table" style={{ minWidth: 0 }}>
+          <thead>
+            <tr>
+              <th>Akun</th>
+              <th className="col-right">Saldo Opening</th>
+              <th className="col-right">Mutasi</th>
+              <th className="col-right">Saldo Sistem</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {cashRows.map((r) => (
+              <tr key={r.nama_akun}>
+                <td>{r.nama_akun}</td>
+                <td className="col-right num text-primary font-bold">{formatRupiah(r.saldo_opening)}</td>
+                <td className="col-right num text-success">+{formatSignedRupiah(r.mutasi || 0)}</td>
+                <td className="col-right num" style={{ fontWeight: 800 }}>{formatRupiah(r.saldo_sistem)}</td>
+              </tr>
+            ))}
+            {cashRows.length > 0 && (
+              <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-surface-alt)' }}>
+                <td style={{ fontWeight: 700 }}>TOTAL CASH</td>
+                <td className="col-right num text-primary font-bold">{formatRupiah(cashOpening)}</td>
+                <td className="col-right num text-success font-bold">+{formatSignedRupiah(cashMutasi)}</td>
+                <td className="col-right num" style={{ fontWeight: 800, fontSize: '1.1rem' }}>{formatRupiah(cashSistem)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* SALDO DIGITAL / BANK */}
+      <div>
+        <div style={{ fontWeight: 700, marginBottom: 8, color: 'var(--accent)' }}>
+          <Icon name="bank" size={16} style={{ marginRight: 6 }} /> Saldo Digital / Bank
+        </div>
+        <table className="table" style={{ minWidth: 0 }}>
+          <thead>
+            <tr>
+              <th>Akun</th>
+              <th className="col-right">Saldo Opening</th>
+              <th className="col-right">Mutasi</th>
+              <th className="col-right">Saldo Sistem</th>
+            </tr>
+          </thead>
+          <tbody>
+            {saldoRows.map((r) => (
+              <tr key={r.nama_akun}>
+                <td>{r.nama_akun}</td>
+                <td className="col-right num text-primary font-bold">{formatRupiah(r.saldo_opening)}</td>
+                <td className="col-right num text-success">+{formatSignedRupiah(r.mutasi || 0)}</td>
+                <td className="col-right num" style={{ fontWeight: 800 }}>{formatRupiah(r.saldo_sistem)}</td>
+              </tr>
+            ))}
+            {saldoRows.length > 0 && (
+              <tr style={{ borderTop: '2px solid var(--border)', background: 'var(--bg-surface-alt)' }}>
+                <td style={{ fontWeight: 700 }}>TOTAL SALDO</td>
+                <td className="col-right num text-primary font-bold">{formatRupiah(saldoOpening)}</td>
+                <td className="col-right num text-success font-bold">+{formatSignedRupiah(saldoMutasi)}</td>
+                <td className="col-right num" style={{ fontWeight: 800, fontSize: '1.1rem' }}>{formatRupiah(saldoSistem)}</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      {/* GRAND TOTAL */}
+      <div style={{ marginTop: 'var(--space-3)', padding: 'var(--space-2)', background: 'var(--accent-soft)', border: '1px solid var(--accent-border)', borderRadius: 'var(--radius-sm)' }}>
+        <div className="flex justify-between items-center" style={{ fontSize: '0.95rem' }}>
+          <span style={{ fontWeight: 800 }}>GRAND TOTAL (Cash + Saldo)</span>
+          <span className="num" style={{ fontWeight: 800, color: 'var(--accent)' }}>
+            {formatRupiah(cashSistem + saldoSistem)}
+          </span>
+        </div>
+      </div>
     </div>
   );
 }

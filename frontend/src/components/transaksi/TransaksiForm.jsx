@@ -135,6 +135,10 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
     transfer: settings.data?.digital_bank_map?.transfer || 'SeaBank',
   }), [settings.data]);
 
+  // Idempotency key for this form session — generated once, reused on retries,
+  // reset only after successful submit so double-clicks use same key.
+  const [idempotencyKey, setIdempotencyKey] = useState(() => `ir-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
+
   const allProduk = useMemo(() => (produk.data?.items || []).filter((p) => !p.deleted_at), [produk.data]);
   const kategoriList = useMemo(() => (kategori.data?.items || []).filter((k) => !k.deleted_at), [kategori.data]);
   const akunList = useMemo(() => akun.data?.items || [], [akun.data]);
@@ -489,6 +493,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
 
   const onSubmit = async (e) => {
     e.preventDefault();
+    if (busy) return; // prevent double submit
     setSubmitError(null);
 
     if (!jenis) {
@@ -632,7 +637,9 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
       if (isEdit) {
         await api.put(`/transaksi/${initial.id}`, body);
       } else {
-        const res = await api.post('/transaksi', body, newIdempotencyKey());
+        const res = await api.post('/transaksi', body, idempotencyKey);
+        // Success — rotate key for next transaction
+        setIdempotencyKey(`ir-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`);
         if (metodeBayar === 'cash_tunai' && res?.id) {
           for (const sp of splitPayments) {
             await api.post('/payments', {
