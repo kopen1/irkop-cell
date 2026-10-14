@@ -270,6 +270,11 @@
   border-bottom: 1px solid var(--border);
   cursor: pointer;
 }
+.plist-row-tanpa-modal {
+  background: var(--warning-soft) !important;
+}
+.plist-row-tanpa-modal:hover { background: var(--warning) !important; }
+.plist-row-tanpa-modal:active { background: var(--warning) !important; }
 .plist-row:active { background: var(--bg-hover); }
 .plist-body { flex: 1; min-width: 0; }
 .plist-name {

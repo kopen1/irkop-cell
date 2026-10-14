@@ -17,6 +17,7 @@ import { hitungAdmin, normalizeProvider } from '../financial/tarif.js';
 import { requireOpenSession } from '../financial/kasir.js';
 import { writeAudit } from '../lib/audit.js';
 import { ensureGajiBagiHasilTeknisi } from '../financial/gaji.js';
+import { accrualBonusPenjualan, voidBonusTransaksi, adaBonusDibayar } from '../financial/bonus.js';
 
 function buildListWhere(url, params) {
   const where = ['t.deleted_at IS NULL'];
@@ -974,6 +975,16 @@ async function createProductTransaksi(db, body, ctx, request, jenis) {
     await ensureGajiBagiHasilTeknisi(db, serviceTeknisiGaji);
   }
 
+  // Akru bonus penjualan (aturan produk/kategori tertentu) untuk
+  // kasir yang menjual — dievaluasi setelah transaksi tersimpan.
+  await accrualBonusPenjualan(db, {
+    transaksiId: saved.id,
+    transaksiKode: saved.kode_transaksi,
+    userId: saved.dibuat_oleh,
+    itemRows,
+    dibuatOleh: user.id,
+  });
+
   return { 
     id: saved.kode_transaksi, 
     total: saved.total, 
@@ -991,6 +1002,14 @@ export async function softDeleteTransaksi(db, body, ctx, idStr) {
   const tx = await findTransaksiByRef(db, idStr);
   if (!tx) throw err(404, 'not_found', 'Transaksi tidak ditemukan');
   if (tx.deleted_at) throw err(409, 'already_deleted', 'Transaksi sudah dihapus');
+
+  // Transaksi dengan bonus SUDAH DIBAYAR tidak boleh dihapus:
+  // uangnya sudah keluar lewat pengeluaran. Hapus pengeluaran
+  // bonus terkait dulu (halaman Pengeluaran) agar pembayarannya
+  // ikut dibatalkan, baru hapus transaksi ini.
+  if (await adaBonusDibayar(db, tx.id)) {
+    throw err(409, 'bonus_sudah_dibayar', 'Transaksi ini punya bonus yang sudah dibayar. Hapus pengeluaran bonus-nya dulu di halaman Pengeluaran.');
+  }
 
   const reason = body.deleted_reason || 'manual soft-delete';
   // Reversal harus masuk ke sesi tanggal transaksi, bukan sesi hari ini.
@@ -1021,6 +1040,9 @@ export async function softDeleteTransaksi(db, body, ctx, idStr) {
     'UPDATE transaksi SET deleted_at = ?, deleted_by = ?, deleted_reason = ?, updated_at = ? WHERE id = ?',
     nowIso(), user.id, reason, nowIso(), tx.id
   );
+  // Bonus belum dibayar ikut dibatalkan: penjualannya tidak
+  // berlaku lagi. (Yang sudah dibayar sudah ditolak di atas.)
+  await voidBonusTransaksi(db, tx.id);
   await writeAudit(db, {
     userId: user.id, aksi: 'soft_delete', tabel: 'transaksi', recordId: tx.id,
     dataBefore: { kode_transaksi: tx.kode_transaksi, total: tx.total, metode_bayar: tx.metode_bayar },
@@ -1184,6 +1206,18 @@ export async function updateTransaksi(db, body, ctx, idStr) {
   if (serviceTeknisiGaji) {
     await ensureGajiBagiHasilTeknisi(db, serviceTeknisiGaji);
   }
+
+  // Bonus penjualan: batalkan akru lama lalu akru ulang dari
+  // item terbaru, supaya bonus selalu mengikuti isi transaksi.
+  await voidBonusTransaksi(db, tx.id);
+  await accrualBonusPenjualan(db, {
+    transaksiId: tx.id,
+    transaksiKode: saved.kode_transaksi,
+    userId: saved.dibuat_oleh,
+    itemRows,
+    dibuatOleh: user.id,
+  });
+
   await writeAudit(db, {
     userId: user.id, aksi: 'update', tabel: 'transaksi', recordId: tx.id,
     dataBefore: { kode_transaksi: tx.kode_transaksi, total: tx.total },

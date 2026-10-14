@@ -84,7 +84,6 @@ export default function PelangganPage() {
   const data = state.data || {};
   const rows = (data.items || []).map((p) => ({ ...p, key: p.id }));
   const totalPelanggan = Number(data.total_pelanggan ?? (rows.length || 0));
-  const totalTampil = Number(data.total_tampil ?? (rows.length || 0));
 
   const reloadDetail = async () => {
     if (!detail?.id) return;
@@ -280,16 +279,10 @@ export default function PelangganPage() {
           <Input type="search" value={q} placeholder="Nama / nomor HP…" onChange={(e) => setQ(e.target.value)} />
         </Field>
         {state.status === 'success' && (
-          <>
-            <div className="summary-item">
-              <div className="summary-label">Total Pelanggan</div>
-              <div className="summary-value">{totalPelanggan}</div>
-            </div>
-            <div className="summary-item">
-              <div className="summary-label">Tampil</div>
-              <div className="summary-value">{totalTampil}</div>
-            </div>
-          </>
+          <div className="summary-item">
+            <div className="summary-label">Total Pelanggan</div>
+            <div className="summary-value">{totalPelanggan}</div>
+          </div>
         )}
       </div>
 

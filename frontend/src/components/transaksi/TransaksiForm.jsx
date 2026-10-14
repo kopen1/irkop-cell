@@ -24,7 +24,8 @@ const SUB_JENIS_OPTIONS = [
   { value: 'transfer', label: 'Transfer / Kirim Bank' },
 ];
 
-const SUB_JENIS_AKUN_MAP = {
+// Default fallback (digunakan sebelum settings termuat)
+const _DEFAULT_AKUN_MAP = {
   pulsa: 'OrderKuota',
   dana: 'DANA',
   transfer: 'SeaBank',
@@ -126,6 +127,13 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const pelanggan = useAsync(() => api.get('/pelanggan', { limit: 500 }), { deps: [] });
   const kasir = useAsync(() => api.get('/kasir/current'), { deps: [] });
   const teknisiList = useAsync(() => api.get('/gaji/teknisi'), { deps: [] });
+  const settings = useAsync(() => api.get('/settings'), { deps: [] });
+
+  const digitalBankMap = useMemo(() => ({
+    pulsa: settings.data?.digital_bank_map?.pulsa || 'OrderKuota',
+    dana: settings.data?.digital_bank_map?.dana || 'DANA',
+    transfer: settings.data?.digital_bank_map?.transfer || 'SeaBank',
+  }), [settings.data]);
 
   const allProduk = useMemo(() => (produk.data?.items || []).filter((p) => !p.deleted_at), [produk.data]);
   const kategoriList = useMemo(() => (kategori.data?.items || []).filter((k) => !k.deleted_at), [kategori.data]);
@@ -135,6 +143,17 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
     [akunList]
   );
   const pelangganList = useMemo(() => pelanggan.data?.items || [], [pelanggan.data]);
+  const [pelangganSearch, setPelangganSearch] = useState('');
+  const [pelangganDropdownOpen, setPelangganDropdownOpen] = useState(false);
+
+  const filteredPelanggan = useMemo(() => {
+    const q = pelangganSearch.trim().toLowerCase();
+    if (!q) return pelangganList.slice(0, 50);
+    return pelangganList.filter((p) =>
+      (p.nama || '').toLowerCase().includes(q) ||
+      (p.telepon || '').includes(q)
+    ).slice(0, 50);
+  }, [pelangganList, pelangganSearch]);
   const kasirData = kasir.data;
 
   const getSaldo = (namaAkun) => {
@@ -214,6 +233,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const [tanggalGaransi, setTanggalGaransi] = useState(initial?.service?.tanggal_garansi || '');
   const [catatanTeknisi, setCatatanTeknisi] = useState(initial?.service?.catatan || '');
   const [metodeBayarService, setMetodeBayarService] = useState(initial?.metode_bayar || 'tunai');
+  const [akunPenerimaService, setAkunPenerimaService] = useState(initial?.akun_penerima || '');
 
   // Edit mode: produkdigital perlu selectedDigitalProduk terisi dari item lama
   // supaya validasi "pilih produk" tidak memblokir simpan ulang.
@@ -226,7 +246,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
         if (!initial?.sub_jenis) {
           const tebakan = tebakSubJenisDigital(found);
           setSubJenis(tebakan);
-          const mapped = SUB_JENIS_AKUN_MAP[tebakan];
+          const mapped = digitalBankMap[tebakan];
           if (mapped) setAkunBankDigital((prev) => prev || mapped);
         }
       }
@@ -237,7 +257,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
     setJenis(val);
     setSubmitError(null);
     if (val === 'produkdigital' && !akunBankDigital && bankAkun.length > 0) {
-      setAkunBankDigital(SUB_JENIS_AKUN_MAP[subJenis] || bankAkun[0]?.nama_akun || '');
+      setAkunBankDigital(digitalBankMap[subJenis] || bankAkun[0]?.nama_akun || '');
     }
     if (val === 'tariktunai') {
       if (!akunBankTarik && bankAkun.length > 0) {
@@ -253,7 +273,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
 
   const handleSubJenisChange = (val) => {
     setSubJenis(val);
-    const mapped = SUB_JENIS_AKUN_MAP[val];
+    const mapped = digitalBankMap[val];
     if (mapped) setAkunBankDigital(mapped);
   };
 
@@ -386,7 +406,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
     if (jenis === 'produkdigital') {
       const tebakan = tebakSubJenisDigital(p);
       setSubJenis(tebakan);
-      const akun = SUB_JENIS_AKUN_MAP[tebakan];
+      const akun = digitalBankMap[tebakan];
       if (akun && bankAkun.some((a2) => a2.nama_akun === akun)) setAkunBankDigital(akun);
     }
   };
@@ -536,7 +556,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
         setSubmitError('Biaya service harus diisi!');
         return;
       }
-      if (metodeBayarService === 'transfer' && !akunPenerima) {
+      if (metodeBayarService === 'transfer' && !akunPenerimaService) {
         setSubmitError('Transfer wajib memilih akun penerima!');
         return;
       }
@@ -602,6 +622,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
           tanggal_garansi: tanggalGaransi || null,
           catatan: catatanTeknisi || null,
         },
+        ...(metodeBayarService === 'transfer' ? { akun_penerima: akunPenerimaService } : {}),
         ...(isEdit ? {} : { tanggal_transaksi: tanggal || null }),
       };
     }
@@ -652,19 +673,73 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
               </div>
             </Field>
             <Field label={`Pelanggan${metodeBayar === 'bon' ? ' (Wajib untuk Bon)' : ''}`}>
-              <div className="input-group">
-                <Select value={pelangganId} onChange={(e) => setPelangganId(e.target.value)} style={{ flex: 1 }} required={metodeBayar === 'bon'}>
-                  <option value="">Umum / Tanpa Pelanggan</option>
-                  {pelangganList.map((p) => (
-                    <option key={p.id} value={p.id}>{p.nama}{p.telepon ? ` (${p.telepon})` : ''}</option>
-                  ))}
-                </Select>
-                <Button type="button" variant="secondary" onClick={() => {
-                  setNewPelangganNama('');
-                  setShowPelangganForm(true);
-                }} style={{ flexShrink: 0 }} title="Tambah pelanggan baru">
-                  <Icon name="plus" size={14} />
-                </Button>
+              <div className="relative">
+                <div className="input-group">
+                  <Input
+                    type="search"
+                    placeholder="Ketik nama/telepon untuk cari pelanggan..."
+                    value={pelangganSearch}
+                    onChange={(e) => {
+                      setPelangganSearch(e.target.value);
+                      setPelangganDropdownOpen(true);
+                    }}
+                    onFocus={() => setPelangganDropdownOpen(true)}
+                    onBlur={(e) => {
+                      // Delay close to allow click on dropdown item
+                      setTimeout(() => setPelangganDropdownOpen(false), 150);
+                    }}
+                    style={{ flex: 1 }}
+                    required={metodeBayar === 'bon'}
+                    autoComplete="off"
+                    aria-expanded={pelangganDropdownOpen && filteredPelanggan.length > 0}
+                    aria-controls="pelanggan-dropdown"
+                  />
+                  <Button type="button" variant="secondary" onClick={() => {
+                    setNewPelangganNama('');
+                    setShowPelangganForm(true);
+                  }} style={{ flexShrink: 0 }} title="Tambah pelanggan baru">
+                    <Icon name="plus" size={14} />
+                  </Button>
+                </div>
+                {pelangganDropdownOpen && filteredPelanggan.length > 0 && (
+                  <div
+                    id="pelanggan-dropdown"
+                    className="absolute z-10 w-full mt-1"
+                    style={{ maxHeight: 240, overflowY: 'auto', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius-md)', boxShadow: 'var(--shadow-lg)' }}
+                  >
+                    <button
+                      type="button"
+                      className={`w-full text-left px-3 py-2 hover:bg-[var(--bg-hover)] flex items-center gap-2 ${!pelangganId ? 'bg-[var(--accent-soft)]' : ''}`}
+                      onClick={() => {
+                        setPelangganId('');
+                        setPelangganSearch('');
+                        setPelangganDropdownOpen(false);
+                      }}
+                    >
+                      <span className="font-medium">Umum / Tanpa Pelanggan</span>
+                      {!pelangganId && <Icon name="check" size={14} style={{ color: 'var(--accent)', marginLeft: 'auto' }} />}
+                    </button>
+                    <hr style={{ border: 0, borderTop: '1px solid var(--border)', margin: 0 }} />
+                    {filteredPelanggan.map((p) => (
+                      <button
+                        key={p.id}
+                        type="button"
+                        className="w-full text-left px-3 py-2 hover:bg-[var(--bg-hover)] flex items-center gap-2"
+                        onClick={() => {
+                          setPelangganId(p.id);
+                          setPelangganSearch(p.nama);
+                          setPelangganDropdownOpen(false);
+                        }}
+                      >
+                        <span className="font-medium">{p.nama}</span>
+                        {p.telepon && <span className="text-sm text-muted">({p.telepon})</span>}
+                      </button>
+                    ))}
+                    {pelangganList.length > 0 && filteredPelanggan.length === 0 && (
+                      <div className="px-3 py-2 text-sm text-muted">Tidak ditemukan</div>
+                    )}
+                  </div>
+                )}
               </div>
               {showPelangganForm && (
                 <div style={{ marginTop: 8, padding: 10, background: 'var(--bg-surface-alt)', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border)' }}>
@@ -1409,7 +1484,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
               </Field>
               {metodeBayarService === 'transfer' && (
                 <Field label="Akun Penerima Transfer" required>
-                  <Select value={akunPenerima} onChange={(e) => setAkunPenerima(e.target.value)}>
+                  <Select value={akunPenerimaService} onChange={(e) => setAkunPenerimaService(e.target.value)}>
                     <option value="">Pilih akun...</option>
                     {bankAkun.map((a) => (
                       <option key={a.id} value={a.nama_akun}>{a.nama_akun}</option>

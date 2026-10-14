@@ -123,7 +123,7 @@ export async function createProduk(db, request, ctx) {
     lacakStok = k.lacak_stok;
   }
 
-  const dup = await db.one('SELECT * FROM produk WHERE kode = ?', kode);
+  const dup = await db.one('SELECT * FROM produk WHERE lower(kode) = lower(?)', kode);
   if (dup && !dup.deleted_at) throw err(409, 'duplicate_kode', 'Kode produk sudah ada');
 
   const stok = lacakStok ? asInt(body.stok, { field: 'stok', min: 0, defaultVal: 0 }) || 0 : 0;
@@ -164,7 +164,13 @@ export async function updateProduk(db, request, ctx, idStr) {
 
   const sets = [];
   const vals = [];
-  if (body.kode !== undefined) { const kode = cleanName(body.kode); if (!kode) throw err(400, 'missing_field', 'kode wajib diisi'); const dup = await db.one('SELECT id FROM produk WHERE kode = ? AND id != ?', kode, id); if (dup) throw err(409, 'duplicate_kode', 'Kode produk sudah ada'); sets.push('kode = ?'); vals.push(kode); }
+  if (body.kode !== undefined) {
+    const kode = cleanName(body.kode);
+    if (!kode) throw err(400, 'missing_field', 'kode wajib diisi');
+    const dup = await db.one('SELECT id FROM produk WHERE lower(kode) = lower(?) AND id != ?', kode, id);
+    if (dup) throw err(409, 'duplicate_kode', 'Kode produk sudah ada');
+    sets.push('kode = ?'); vals.push(kode);
+  }
   if (body.nama !== undefined) { const nama = cleanName(body.nama); if (!nama) throw err(400, 'missing_field', 'nama wajib diisi'); sets.push('nama = ?'); vals.push(nama); }
   if (body.harga !== undefined) { sets.push('harga = ?'); vals.push(asInt(body.harga, { field: 'harga', min: 0 })); }
   if (body.harga_modal !== undefined) { sets.push('harga_modal = ?'); vals.push(body.harga_modal === null || body.harga_modal === '' ? null : asInt(body.harga_modal, { field: 'harga_modal', min: 0 })); }

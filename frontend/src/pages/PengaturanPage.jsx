@@ -23,6 +23,7 @@ export default function PengaturanPage() {
     { key: 'notifhook', label: 'NotifHook' },
     { key: 'users', label: 'User & Permission' },
     { key: 'akun', label: 'Akun Uang' },
+    { key: 'engine', label: 'Engine & Produk Digital' },
     { key: 'log', label: 'Log / Audit' },
   ];
 
@@ -40,6 +41,7 @@ export default function PengaturanPage() {
       {tab === 'notifhook' && <NotifHookTab />}
       {tab === 'users' && <UsersTab />}
       {tab === 'akun' && <AkunTab />}
+      {tab === 'engine' && <EngineTab />}
       {tab === 'log' && <LogTab />}
     </div>
   );
@@ -953,6 +955,109 @@ function RawDetail({ data, onClose }) {
       <div className="flex justify-end">
         <Button variant="secondary" onClick={onClose}>Tutup</Button>
       </div>
+    </div>
+  );
+}
+
+/* ---------------- Engine & Produk Digital ---------------- */
+function EngineTab() {
+  const toast = useToast();
+  const [cfg, setCfg] = useState({});
+  const [loaded, setLoaded] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  useEffect(() => {
+    api.get('/settings').then((s) => {
+      setCfg({
+        scan_days: s.auto_produk_scan_days ?? 7,
+        scan_min_count: s.auto_produk_min_count ?? 3,
+        digital_bank_map: s.digital_bank_map || {
+          pulsa: 'OrderKuota',
+          dana: 'DANA',
+          transfer: 'SeaBank',
+        },
+      });
+      setLoaded(true);
+    }).catch(() => setLoaded(true));
+  }, []);
+
+  if (!loaded) return <Loader />;
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const payload = {
+        auto_produk_scan_days: Number(cfg.scan_days) || 7,
+        auto_produk_min_count: Number(cfg.scan_min_count) || 3,
+        digital_bank_map: cfg.digital_bank_map || {
+          pulsa: 'OrderKuota',
+          dana: 'DANA',
+          transfer: 'SeaBank',
+        },
+      };
+      await api.put('/settings', payload);
+      toast.success('Pengaturan engine & produk digital disimpan.');
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const bankOptions = [
+    { value: 'OrderKuota', label: 'OrderKuota (Saldo Pulsa/Data)' },
+    { value: 'DANA', label: 'DANA' },
+    { value: 'SeaBank', label: 'SeaBank' },
+    { value: 'ShopeePay', label: 'ShopeePay' },
+    { value: 'GoPay', label: 'GoPay' },
+    { value: 'OVO', label: 'OVO' },
+    { value: 'LinkAja', label: 'LinkAja' },
+  ];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card title="Auto-Create Produk dari Transaksi" subtitle="Transaksi Produk Digital & Transfer yang sering muncul akan otomatis dibuat produknya (kategori Saldo).">
+        <div className="grid-2">
+          <Field label="Hari scan (SCAN_DAYS)">
+            <Input type="number" min="1" max="30" value={cfg.scan_days} onChange={(e) => setCfg((c) => ({ ...c, scan_days: e.target.value }))} />
+          </Field>
+          <Field label="Minimal transaksi (MIN_COUNT)" hint="Berapa kali (provider+nominal) muncul baru dibuat produk. Default 3.">
+            <Input type="number" min="1" max="50" value={cfg.scan_min_count} onChange={(e) => setCfg((c) => ({ ...c, scan_min_count: e.target.value }))} />
+          </Field>
+        </div>
+        <p className="text-sm text-muted">
+          Contoh: scan 7 hari, min 3x. Kalau "Bank 100k" muncul 3x dalam 7 hari \u2192 produk B100 otomatis dibuat.
+        </p>
+        <div style={{"marginTop": 12}}>
+          <Button onClick={save} loading={busy}>Simpan Engine</Button>
+        </div>
+      </Card>
+
+      <Card title="Mapping Bank / Akun Sumber untuk Produk Digital" subtitle="Saat kasir pilih produk digital (DANA/Transfer/Pulsa), akun sumber modal otomatis terisi dari mapping ini. Admin bebas mengubah.">
+        <div className="grid-3">
+          <Field label="Pulsa / Data / Token (akun modal)">
+            <Select value={cfg.digital_bank_map?.pulsa || 'OrderKuota'} onChange={(e) => setCfg((c) => ({ ...c, digital_bank_map: { ...c.digital_bank_map, pulsa: e.target.value } }))}>
+              {bankOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+            </Select>
+          </Field>
+          <Field label="DANA / GoPay / OVO / ShopeePay (akun modal)">
+            <Select value={cfg.digital_bank_map?.dana || 'DANA'} onChange={(e) => setCfg((c) => ({ ...c, digital_bank_map: { ...c.digital_bank_map, dana: e.target.value } }))}>
+              {bankOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+            </Select>
+          </Field>
+          <Field label="Transfer / Kirim Bank (akun modal)">
+            <Select value={cfg.digital_bank_map?.transfer || 'SeaBank'} onChange={(e) => setCfg((c) => ({ ...c, digital_bank_map: { ...c.digital_bank_map, transfer: e.target.value } }))}>
+              {bankOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+            </Select>
+          </Field>
+        </div>
+        <p className="text-sm text-muted">
+          Produk digital dengan sub-jenis "Pulsa" pakai akun Pulsa; "DANA" pakai akun DANA; "Transfer" pakai akun Transfer.
+        </p>
+        <div style={{"marginTop": 12}}>
+          <Button onClick={save} loading={busy}>Simpan Mapping Bank</Button>
+        </div>
+      </Card>
     </div>
   );
 }

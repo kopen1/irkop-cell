@@ -53,7 +53,7 @@ test('scan otomatis: DANA 295k muncul >=10x -> produk D295 dibuat (admin 5k)', a
   assert.equal(d.nama, 'Dana 295k');
 });
 
-test('scan otomatis: transfer Bank 100k -> produk B100 (admin 5k); <10x tidak dibuat', async () => {
+test('scan otomatis: transfer Bank 100k -> produk B100 (admin 5k); <3x tidak dibuat', async () => {
   const { env, token } = await bootstrap();
   for (let i = 0; i < 10; i += 1) {
     const r = await call(env, '/api/transaksi', {
@@ -62,8 +62,8 @@ test('scan otomatis: transfer Bank 100k -> produk B100 (admin 5k); <10x tidak di
     });
     assert.equal(r.status, 200, JSON.stringify(r.data));
   }
-  // nominal jarang (3x) tidak boleh dibuat
-  for (let i = 0; i < 3; i += 1) {
+  // nominal jarang (2x, <3) tidak boleh dibuat
+  for (let i = 0; i < 2; i += 1) {
     await call(env, '/api/transaksi', {
       method: 'POST', token, headers: { 'Idempotency-Key': `ap-rare-${i}` },
       body: { jenis: 'transfer', nominal: 777000, mitra: 'SeaBank', admin: 0 },
@@ -78,5 +78,5 @@ test('scan otomatis: transfer Bank 100k -> produk B100 (admin 5k); <10x tidak di
   assert.equal(Number(b.harga), 105000);
 
   const rare = await env.DB.prepare("SELECT * FROM produk WHERE kode = 'B777'").first();
-  assert.equal(rare, null, 'nominal jarang tidak dibuat');
+  assert.equal(rare, null, 'nominal jarang (<3) tidak dibuat');
 });

@@ -22,6 +22,7 @@ import { Icon } from '../components/ui/Icon';
 import { PlistKat, PlistSub } from '../components/ui/PlistGroup';
 
 const SORT_OPTIONS = [
+  { value: 'tanpa_modal', label: 'Tanpa Modal di Atas' },
   { value: 'harga_asc', label: 'Harga jual: termurah' },
   { value: 'harga_desc', label: 'Harga jual: termahal' },
   { value: 'laba_desc', label: 'Laba: terbesar' },
@@ -542,11 +543,12 @@ export default function DaftarBarangPage() {
               const labaCls = laba < 0 ? 'text-danger' : laba === 0 ? 'text-warning' : 'text-success';
               // Laba positif tapi di bawah 1.000 = margin terlalu tipis.
               const labaTipis = laba > 0 && laba < 1000;
+              const tanpaModal = r.harga_modal == null || Number(r.harga_modal) <= 0;
               const selected = selectedIds.has(r.id);
               return (
                 <div
                   key={r.id}
-                  className={`plist-row${selectMode ? ' plist-row-check' : ''}`}
+                  className={`plist-row${selectMode ? ' plist-row-check' : ''}${tanpaModal ? ' plist-row-tanpa-modal' : ''}`}
                   role="button"
                   tabIndex={0}
                   onClick={() => {
@@ -945,6 +947,8 @@ function stokTag(p) {
 function comparatorFor(sort) {
   const harga = (r) => Number(r.harga) || 0;
   const laba = (r) => harga(r) - (Number(r.harga_modal) || 0);
+  const hasModal = (r) => r.harga_modal != null && Number(r.harga_modal) > 0;
+  if (sort === 'tanpa_modal') return (a, b) => (hasModal(a) ? 1 : 0) - (hasModal(b) ? 1 : 0) || laba(b) - laba(a);
   if (sort === 'harga_asc') return (a, b) => harga(a) - harga(b);
   if (sort === 'harga_desc') return (a, b) => harga(b) - harga(a);
   if (sort === 'laba_desc') return (a, b) => laba(b) - laba(a);

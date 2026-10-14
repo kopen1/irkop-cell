@@ -5,7 +5,7 @@
 import { nowIso } from '../lib/time.js';
 
 export const SCAN_DAYS = 7;
-export const SCAN_MIN_COUNT = 10;
+export const SCAN_MIN_COUNT = 3;
 
 const PREFIX = { Dana: 'D', Bank: 'B', Ovo: 'O', Gopay: 'G' };
 
