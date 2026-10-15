@@ -7,12 +7,12 @@ import { nowIso } from '../lib/time.js';
 export const SCAN_DAYS = 7;
 export const SCAN_MIN_COUNT = 3;
 
-const PREFIX = { Dana: 'D', Bank: 'B', Ovo: 'O', Gopay: 'G' };
+const PREFIX = { Dana: 'D', Bank: 'B', OrderKuota: 'Q', Ovo: 'O', Gopay: 'G' };
 
 function providerDariNama(nama) {
   const n = String(nama || '').toLowerCase();
-  if (/\bgopay\b|\bgo ?pay\b/.test(n)) return 'Gopay';
-  if (/\bovo\b/.test(n)) return 'Ovo';
+  if (/\bgopay\b|\bgo ?pay\b/.test(n)) return 'OrderKuota';
+  if (/\bovo\b/.test(n)) return 'OrderKuota';
   if (/\bdana\b/.test(n)) return 'Dana';
   return '';
 }
@@ -26,7 +26,8 @@ export function adminFee(provider, nominal) {
   if (n >= 95000) return 5000;
   if (provider === 'Dana') return n <= 30000 ? 2000 : 3000;
   if (provider === 'Bank') return 5000; // 10k–940k
-  return 3000; // Gopay / Ovo (<= 94k)
+  if (provider === 'OrderKuota') return n <= 30000 ? 2000 : 3000; // OVO/GoPay pakai aturan Dana
+  return 3000;
 }
 
 function kodeProduk(provider, nominal) {
