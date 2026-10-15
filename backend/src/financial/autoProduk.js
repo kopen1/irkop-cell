@@ -71,6 +71,8 @@ export async function autoCreateProdukFromTransaksi(db, { days = SCAN_DAYS, minC
     add(provider, nominal, r.tx_id);
   }
 
+  // Transfer murni (jenis='transfer')
+  // Transfer murni (jenis='transfer')
   const transfer = await db.many(
     `SELECT id AS tx_id, total, COALESCE(laba, 0) AS laba
        FROM transaksi
@@ -79,6 +81,22 @@ export async function autoCreateProdukFromTransaksi(db, { days = SCAN_DAYS, minC
   );
   for (const r of transfer) {
     add('Bank', Number(r.total || 0) - Number(r.laba || 0), r.tx_id);
+  }
+
+  // Transfer via Produk Digital (jenis='produkdigital' + metode_bayar='transfer')
+  const digitalTransfer = await db.many(
+    `SELECT t.id AS tx_id, ti.harga_modal_snapshot, ti.qty
+       FROM transaksi t
+       JOIN transaksi_item ti ON ti.transaksi_id = t.id
+      WHERE t.deleted_at IS NULL 
+        AND t.jenis = 'produkdigital' 
+        AND t.metode_bayar = 'transfer'
+        AND t.tanggal_transaksi >= ?`,
+    start
+  );
+  for (const r of digitalTransfer) {
+    const nominal = Number(r.harga_modal_snapshot || 0) * Number(r.qty || 1);
+    add('Bank', nominal, r.tx_id);
   }
 
   // Kategori Saldo.
