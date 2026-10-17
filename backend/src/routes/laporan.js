@@ -792,3 +792,208 @@ function prevMonth(tahun, mon) {
   if (mon === 1) return { tahun: tahun - 1, mon: 12 };
   return { tahun, mon: mon - 1 };
 }
+// ============================================================================
+// LAPORAN BUKU BESAR (General Ledger)
+// ============================================================================
+
+export async function bukuBesar(db, request, ctx) {
+  const url = new URL(request.url);
+  const namaAkun = url.searchParams.get('akun');
+  const tanggalDari = url.searchParams.get('tanggal_dari');
+  const tanggalSampai = url.searchParams.get('tanggal_sampai');
+
+  if (!namaAkun) throw err(400, 'invalid_filter', 'akun wajib diisi');
+
+  const where = ['ms.nama_akun = ?', 'ms.deleted_at IS NULL'];
+  const bind = [namaAkun];
+
+  if (tanggalDari) {
+    where.push('ks.tanggal >= ?');
+    bind.push(tanggalDari);
+  }
+  if (tanggalSampai) {
+    where.push('ks.tanggal <= ?');
+    bind.push(tanggalSampai);
+  }
+
+  const rows = await db.many(
+    `SELECT ms.id, ms.nama_akun, ms.jumlah, ms.sumber_tipe, ms.kategori,
+            ms.created_at, ks.tanggal AS tanggal_transaksi, ks.id AS kasir_sesi_id,
+            t.kode_transaksi, t.jenis AS jenis_transaksi
+       FROM mutasi_saldo ms
+       JOIN kasir_sesi ks ON ks.id = ms.kasir_sesi_id
+       LEFT JOIN transaksi t ON t.id = ms.sumber_id AND ms.sumber_tipe = 'transaksi'
+      WHERE ms.nama_akun = ? AND ms.deleted_at IS NULL
+        ${where.slice(1).join(' AND ')}
+      ORDER BY ks.tanggal, ms.id`,
+    bind
+  );
+
+  const items = [];
+  let saldo = 0;
+  for (const r of rows) {
+    const jumlah = Number(r.jumlah || 0);
+    saldo += jumlah;
+    items.push({
+      id: r.id,
+      tanggal: r.tanggal_transaksi || (r.created_at ? r.created_at.slice(0, 10) : ''),
+      nama_akun: r.nama_akun,
+      jumlah,
+      saldo,
+      sumber_tipe: r.sumber_tipe,
+      kategori: r.kategori || '',
+      kode_transaksi: r.kode_transaksi,
+      jenis_transaksi: r.jenis_transaksi,
+    });
+  }
+
+  return {
+    periode: { tanggal_dari, tanggal_sampai },
+    nama_akun,
+    total_masuk: items.filter(i => i.jumlah > 0).reduce((s, i) => s + i.jumlah, 0),
+    total_keluar: items.filter(i => i.jumlah < 0).reduce((s, i) => s + i.jumlah, 0),
+    saldo_akhir: saldo,
+    items,
+  };
+}
+
+// ============================================================================
+// LAPORAN LABA RUGI (Profit & Loss)
+// ============================================================================
+
+export async function laporanLabaRugi(db, request, ctx) {
+  const url = new URL(request.url);
+  const bulan = url.searchParams.get('bulan');
+  const range = monthRange(bulan || currentBulanWib());
+  const startD = `${range.tahun}-${String(range.mon).padStart(2, '0')}-01`;
+  const endD = lastDayDate(range.tahun, range.mon);
+
+  const pendapatanRow = await db.one(
+    `SELECT COALESCE(SUM(ti.subtotal), 0) AS total
+       FROM transaksi t
+       JOIN transaksi_item ti ON ti.transaksi_id = t.id
+      WHERE t.deleted_at IS NULL AND t.tanggal_transaksi >= ? AND t.tanggal_transaksi <= ?
+        AND (t.jenis IS NULL OR t.jenis NOT IN ('transfer', 'tariktunai'))`,
+    startD, endD
+  );
+  const pendapatan = scalarSum([pendapatanRow], 'total');
+
+  const pengeluaranRow = await db.one(
+    'SELECT COALESCE(SUM(nominal), 0) AS total FROM pengeluaran WHERE deleted_at IS NULL AND tanggal >= ? AND tanggal <= ?',
+    startD, endD
+  );
+  const pengeluaran = scalarSum([pengeluaranRow], 'total');
+
+  const gajiBelumRow = await db.one(
+    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal >= ? AND tanggal <= ? AND dibayar_at IS NULL',
+    startD, endD
+  );
+  const gajiBelum = scalarSum([gajiBelumRow], 'total');
+
+  const beban = pengeluaran + gajiBelum;
+
+  return {
+    periode: `${range.tahun}-${String(range.mon).padStart(2, '0')}`,
+    tanggal_awal: startD,
+    tanggal_akhir: endD,
+    pendapatan,
+    beban_pengeluaran: pengeluaran,
+    beban_gaji_belum_dibayar: gajiBelum,
+    total_beban: beban,
+    laba_bruto: pendapatan,
+    laba_bersih: pendapatan - beban,
+  };
+}
+
+// ============================================================================
+// LAPORAN NERACA (Balance Sheet)
+// ============================================================================
+
+export async function laporanNeraca(db, request, ctx) {
+  const url = new URL(request.url);
+  const tanggal = url.searchParams.get('tanggal') || currentBulanWib().slice(0, 7) + '-01';
+  const range = monthRange(tanggal);
+  const startD = `${range.tahun}-${String(range.mon).padStart(2, '0')}-01`;
+  const endD = lastDayDate(range.tahun, range.mon);
+
+  const akunRows = await db.many(
+    `SELECT ms.nama_akun, COALESCE(SUM(ms.jumlah), 0) AS saldo
+       FROM mutasi_saldo ms
+       JOIN kasir_sesi ks ON ks.id = ms.kasir_sesi_id
+      WHERE ms.deleted_at IS NULL AND ks.tanggal >= ? AND ks.tanggal <= ?
+        AND ms.nama_akun NOT IN ('Saldo Akun', 'Laba')
+      GROUP BY ms.nama_akun`,
+    startD, endD
+  );
+
+  const akunMap = {};
+  for (const r of akunRows) {
+    akunMap[r.nama_akun] = Number(r.saldo || 0);
+  }
+
+  const tunai = Number(akunMap['Tunai Laci'] || 0);
+  const bank = Number(akunMap['Bank'] || 0);
+  const eWallet = Number(akunMap['E_Wallet'] || Number(akunMap['e_wallet'] || 0));
+  const digital = Number(akunMap['digital'] || 0);
+
+  const asetLancar = tunai + bank + eWallet + digital;
+
+  const saldoAkunLedger = Number(akunMap['Saldo Akun'] || 0);
+  const labaTerjaga = Number(akunMap['Laba'] || 0);
+
+  const tx = await db.one(
+    'SELECT COALESCE(SUM(laba), 0) AS laba FROM transaksi WHERE deleted_at IS NULL AND tanggal_transaksi >= ? AND tanggal_transaksi <= ?',
+    startD, endD
+  );
+  const labaTransaksi = scalarSum([tx], 'laba');
+
+  const pengeluaranRow = await db.one(
+    'SELECT COALESCE(SUM(nominal), 0) AS total FROM pengeluaran WHERE deleted_at IS NULL AND tanggal >= ? AND tanggal <= ?',
+    startD, endD
+  );
+  const pengeluaran = scalarSum([pengeluaranRow], 'total');
+
+  const gajiBelumRow = await db.one(
+    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal >= ? AND tanggal <= ? AND dibayar_at IS NULL',
+    startD, endD
+  );
+  const gajiBelum = scalarSum([gajiBelumRow], 'total');
+
+  const labaBersihPeriode = labaTransaksi - pengeluaran - gajiBelum;
+  const ekuitas = saldoAkunLedger + labaBersihPeriode;
+
+  return {
+    tanggal: endD,
+    aset: {
+      tunai,
+      bank,
+      e_wallet: eWallet,
+      digital,
+      total: asetLancar,
+    },
+    ekuitas: {
+      saldo_akun: saldoAkunLedger,
+      laba_bersih_periode: labaBersihPeriode,
+      total: ekuitas,
+    },
+    selisih: asetLancar - ekuitas,
+  };
+}
+
+function ms_tanggal(iso) {
+  if (!iso) return '';
+  return iso.slice(0, 10);
+}
+
+function ms_kategori(r) {
+  if (r.sumber_tipe === 'pengeluaran') return 'Pengeluaran';
+  if (r.sumber_tipe === 'gaji_harian') return 'Gaji';
+  if (r.kategori) return r.kategori;
+  return r.sumber_tipe || '-';
+}
+
+function ms_catatan(r) {
+  if (r.kode_transaksi) return r.kode_transaksi;
+  if (r.jenis_transaksi) return r.jenis_transaksi;
+  return r.sumber_tipe || '-';
+}
