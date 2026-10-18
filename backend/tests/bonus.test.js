@@ -278,3 +278,32 @@ test('bonus: update aturan → aktif=0 tidak hapus akru lama', async () => {
   const row = bonusList.data.items.find((b) => b.aturan_id === aturan.data.id);
   assert.ok(row && !row.deleted_at, 'akru lama tetap utuh saat aturan dinonaktifkan');
 });
+
+test('bonus: transaksi tetap bisa dibuat & dihapus walau tabel bonus belum ada (migrasi 0015 belum jalan)', async () => {
+  const { env, sqliteDb } = setupEnv();
+  await createUserRaw(env, { nama: 'Admin10', username: 'adm10', password: 'adm101234', role: 'admin' });
+  const karyawanId = await createUserRaw(env, { nama: 'Karyawan10', username: 'kry10', password: 'kry1012345', role: 'karyawan' });
+  await setPermission(env, karyawanId, 'kasir');
+  await setPermission(env, karyawanId, 'transaksi');
+  const karyawanToken = await login(env, 'kry10', 'kry1012345');
+
+  // Simulasi produksi: migrasi 0015 belum diterapkan sama sekali
+  sqliteDb.exec('DROP TABLE IF EXISTS bonus_penjualan');
+  sqliteDb.exec('DROP TABLE IF EXISTS bonus_aturan');
+
+  await call(env, '/api/kasir/opening', { method: 'POST', token: karyawanToken, body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 100000 }] } });
+  const katId = await createKategoriRaw(env, 'TanpaBonus');
+  const prodId = await createProdukRaw(env, { kode: 'NOB-01', nama: 'Tanpa Bonus', kategori_id: katId, harga: 10000, harga_modal: 5000, stok: 5 });
+
+  const trx = await call(env, '/api/transaksi', {
+    method: 'POST', token: karyawanToken, headers: { 'Idempotency-Key': 'no-bonus-1' },
+    body: { jenis: 'penjualan', metode_bayar: 'tunai', items: [{ produk_id: prodId, qty: 1 }] },
+  });
+  assert.equal(trx.status, 200, JSON.stringify(trx.data));
+
+  const del = await call(env, '/api/transaksi/' + trx.data.id, {
+    method: 'DELETE', token: karyawanToken, headers: { 'Idempotency-Key': 'no-bonus-del-1' },
+  });
+  assert.equal(del.status, 200, JSON.stringify(del.data));
+  assert.equal(del.data.status, 'soft_deleted');
+});

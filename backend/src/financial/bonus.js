@@ -1,5 +1,14 @@
 import { nowIso } from '../lib/time.js';
 
+// Tabel bonus (bonus_aturan, bonus_penjualan) dibuat oleh migrasi 0015
+// yang dijalankan manual di D1 Console. Karena kode biasanya ter-deploy
+// lebih dulu daripada migrasi, semua akses tabel bonus harus tahan saat
+// tabelnya belum ada ("no such table"): fitur bonus sekadar nonaktif,
+// transaksi inti (buat/hapus) tetap jalan.
+function tabelBelumAda(e) {
+  return /no such table/i.test(String((e && e.message) || e || ''));
+}
+
 // Akru bonus penjualan untuk produk/kategori yang punya aturan aktif.
 // Dipanggil SESUDAH transaksi + transaksi_item tersimpan (dari
 // routes/transaksi.js), sehingga qty dan produk yang dipakai adalah
@@ -9,7 +18,13 @@ import { nowIso } from '../lib/time.js';
 // sudah ada tapi pernah dibatalkan (deleted_at terisi) dan belum
 // dibayar, baris itu dihidupkan kembali dengan nilai terbaru.
 export async function accrualBonusPenjualan(db, { transaksiId, transaksiKode, userId, itemRows, dibuatOleh }) {
-  const aturan = await db.many('SELECT * FROM bonus_aturan WHERE aktif = 1');
+  let aturan;
+  try {
+    aturan = await db.many('SELECT * FROM bonus_aturan WHERE aktif = 1');
+  } catch (e) {
+    if (tabelBelumAda(e)) return 0;
+    throw e;
+  }
   if (!aturan.length) return 0;
 
   const itemNyata = (itemRows || []).filter((it) => it && it.produk_id);
@@ -47,7 +62,14 @@ export async function accrualBonusPenjualan(db, { transaksiId, transaksiKode, us
       );
     }
   }
-  if (stmts.length) await db.batch(stmts);
+  if (stmts.length) {
+    try {
+      await db.batch(stmts);
+    } catch (e) {
+      if (tabelBelumAda(e)) return 0;
+      throw e;
+    }
+  }
   return stmts.length;
 }
 
@@ -56,19 +78,28 @@ export async function accrualBonusPenjualan(db, { transaksiId, transaksiKode, us
 // sudah keluar lewat pengeluaran, jadi pembatalan harus lewat
 // penghapusan pengeluaran itu sendiri.
 export async function voidBonusTransaksi(db, transaksiId) {
-  await db.exec(
-    'UPDATE bonus_penjualan SET deleted_at = ? WHERE transaksi_id = ? AND deleted_at IS NULL AND dibayar_at IS NULL',
-    nowIso(), transaksiId
-  );
+  try {
+    await db.exec(
+      'UPDATE bonus_penjualan SET deleted_at = ? WHERE transaksi_id = ? AND deleted_at IS NULL AND dibayar_at IS NULL',
+      nowIso(), transaksiId
+    );
+  } catch (e) {
+    if (!tabelBelumAda(e)) throw e;
+  }
 }
 
 // Apakah transaksi ini punya bonus yang SUDAH dibayar?
 // Dipakai softDeleteTransaksi: bila ya, transaksi tidak boleh
 // dihapus sebelum pengeluaran bonus-nya dihapus dulu.
 export async function adaBonusDibayar(db, transaksiId) {
-  const row = await db.one(
-    'SELECT COUNT(*) AS n FROM bonus_penjualan WHERE transaksi_id = ? AND deleted_at IS NULL AND dibayar_at IS NOT NULL',
-    transaksiId
-  );
-  return Number(row?.n || 0) > 0;
+  try {
+    const row = await db.one(
+      'SELECT COUNT(*) AS n FROM bonus_penjualan WHERE transaksi_id = ? AND deleted_at IS NULL AND dibayar_at IS NOT NULL',
+      transaksiId
+    );
+    return Number(row?.n || 0) > 0;
+  } catch (e) {
+    if (tabelBelumAda(e)) return false;
+    throw e;
+  }
 }
