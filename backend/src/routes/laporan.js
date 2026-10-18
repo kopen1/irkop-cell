@@ -250,7 +250,7 @@ export async function reportBulanan(db, request, ctx) {
   const gajiBelum = await db.one(
     `SELECT COALESCE(SUM(nominal), 0) AS total, COUNT(*) AS jumlah
        FROM gaji_harian
-      WHERE tanggal >= ? AND tanggal <= ? AND dibayar_at IS NULL`,
+      WHERE tanggal >= ? AND tanggal <= ? AND (dibayar_at IS NULL OR dibayar_at = '')`,
     startD,
     endD
   );
@@ -885,7 +885,7 @@ export async function laporanLabaRugi(db, request, ctx) {
   const pengeluaran = scalarSum([pengeluaranRow], 'total');
 
   const gajiBelumRow = await db.one(
-    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal >= ? AND tanggal <= ? AND dibayar_at IS NULL',
+    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal >= ? AND tanggal <= ? AND (dibayar_at IS NULL OR dibayar_at = \'\')',
     startD, endD
   );
   const gajiBelum = scalarSum([gajiBelumRow], 'total');
@@ -954,7 +954,7 @@ export async function laporanNeraca(db, request, ctx) {
   const pengeluaran = scalarSum([pengeluaranRow], 'total');
 
   const gajiBelumRow = await db.one(
-    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal >= ? AND tanggal <= ? AND dibayar_at IS NULL',
+    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal >= ? AND tanggal <= ? AND (dibayar_at IS NULL OR dibayar_at = \'\')',
     startD, endD
   );
   const gajiBelum = scalarSum([gajiBelumRow], 'total');

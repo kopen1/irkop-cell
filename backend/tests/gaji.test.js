@@ -582,3 +582,36 @@ test('GAJI karyawan: Closing TIDAK menimpa gaji yang sudah diedit manual', async
   assert.equal(row.nominal, 30000, 'nominal manual tidak ditimpa oleh hitungan otomatis');
   assert.equal(row.catatan, 'koreksi manual', 'catatan manual tetap');
 });
+
+test('GAJI: dibayar_at string kosong ("") tetap dianggap BELUM dibayar', async () => {
+  const { env, adminToken, karyawanToken, karyawanId } = await setup();
+  const today = todayWib();
+  await setRate(env, adminToken, karyawanId, 50000);
+  const open = await openKasir(env, karyawanToken);
+  assert.equal(open.status, 200, JSON.stringify(open.data));
+
+  const rows = await gajiFor(env, adminToken, today, karyawanId);
+  assert.equal(rows.length, 1);
+  // Simulasi data lama (mis. hasil SQL manual di D1): dibayar_at = '' bukan NULL.
+  await env.DB.prepare("UPDATE gaji_harian SET dibayar_at = '', dibayar_oleh = 1 WHERE id = ?")
+    .bind(rows[0].id).run();
+
+  const unpaid = await call(env, '/api/gaji/unpaid', { token: adminToken });
+  const unpaidRow = unpaid.data.items.find((x) => x.user_id === karyawanId);
+  assert.ok(unpaidRow, 'baris dibayar_at "" harus muncul di daftar belum dibayar');
+  assert.equal(unpaidRow.total, 50000);
+
+  const laporan = await call(env, `/api/laporan/bulan?bulan=${today.slice(0, 7)}`, { token: adminToken });
+  assert.equal(laporan.status, 200, JSON.stringify(laporan.data));
+  assert.equal(laporan.data.gaji_belum_dibayar.total, 50000, 'laporan bulanan ikut menghitung ""');
+
+  const pay = await call(env, '/api/gaji/bayar', { method: 'POST', token: adminToken, body: { user_id: karyawanId } });
+  assert.equal(pay.status, 200, JSON.stringify(pay.data));
+  assert.equal(pay.data.total, 50000, 'tombol Bayar melunasi baris "" ');
+
+  const after = await call(env, '/api/gaji/unpaid', { token: adminToken });
+  assert.equal(after.data.items.find((x) => x.user_id === karyawanId), undefined, 'setelah dibayar tidak muncul lagi');
+
+  const paidRow = await env.DB.prepare('SELECT dibayar_at FROM gaji_harian WHERE id = ?').bind(rows[0].id).first();
+  assert.ok(paidRow.dibayar_at, 'dibayar_at terisi timestamp asli');
+});

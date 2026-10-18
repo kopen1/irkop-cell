@@ -113,7 +113,7 @@ export async function listGajiUnpaid(db, request, ctx) {
             COALESCE(SUM(g.nominal), 0) AS total,
             MIN(g.tanggal) AS dari_tanggal, MAX(g.tanggal) AS sampai_tanggal
        FROM gaji_harian g LEFT JOIN users u ON u.id = g.user_id
-      WHERE g.dibayar_at IS NULL
+      WHERE (g.dibayar_at IS NULL OR g.dibayar_at = '')
       GROUP BY g.user_id, u.nama ORDER BY nama`
   );
   return { items: rows.map((r) => ({ ...r, jumlah_hari: Number(r.jumlah_hari), total: Number(r.total) })) };
@@ -130,7 +130,7 @@ export async function bayarGaji(db, request, ctx) {
   const akun = body.akun ? (await getAccount(db, body.akun)).nama_akun : 'Tunai Laci';
 
   const unpaid = await db.one(
-    'SELECT COUNT(*) AS n, COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE user_id = ? AND dibayar_at IS NULL',
+    'SELECT COUNT(*) AS n, COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE user_id = ? AND (dibayar_at IS NULL OR dibayar_at = \'\')',
     userId
   );
   const total = Number(unpaid.total);
@@ -151,7 +151,7 @@ export async function bayarGaji(db, request, ctx) {
     sesi.id, akun, -total, pengeluaranId, `gaji-bayar:${userId}:${pengeluaranId}`, ts
   );
   await db.exec(
-    'UPDATE gaji_harian SET dibayar_at = ?, dibayar_oleh = ? WHERE user_id = ? AND dibayar_at IS NULL',
+    'UPDATE gaji_harian SET dibayar_at = ?, dibayar_oleh = ? WHERE user_id = ? AND (dibayar_at IS NULL OR dibayar_at = \'\')',
     ts, admin.id, userId
   );
   await writeAudit(db, {
