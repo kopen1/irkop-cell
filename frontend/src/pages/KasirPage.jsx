@@ -439,7 +439,7 @@ export default function KasirPage() {
           <Card title="Saldo Sistem (berjalan)">
             <div className="mb-3 flex items-center justify-between gap-2 wrap" style={{ flexWrap: 'wrap' }}>
               <span className="text-sm text-muted">
-                Saldo awal masih bisa dikoreksi selama sesi ini belum punya transaksi.
+                Saldo awal bisa dikoreksi selama sesi masih terbuka. Saldo berjalan dihitung ulang otomatis.
               </span>
               <div className="row-actions">
                 <Button variant="secondary" size="sm" onClick={() => sesi.run()}>
@@ -719,7 +719,8 @@ export default function KasirPage() {
         }
       >
         <p className="text-sm">
-          Isi ulang saldo awal sesi hari ini. Bisa dipakai selama sesi <strong>belum punya transaksi</strong>.
+          Isi ulang saldo awal sesi yang sedang terbuka. Koreksi tetap bisa dilakukan
+          walau sesi sudah punya transaksi — saldo berjalan dihitung ulang dari nilai baru.
           Semua perubahan tercatat di audit log.
         </p>
         <div className="flex flex-col gap-2 mt-3">

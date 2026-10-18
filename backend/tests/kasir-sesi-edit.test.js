@@ -139,3 +139,37 @@ test('Closing hari ini (tanpa kasir_sesi_id) tetap berjalan seperti biasa', asyn
   assert.equal(closeRes.data.status, 'tutup');
   assert.equal(closeRes.data.rekonsiliasi[0].selisih, 0);
 });
+
+test('PUT /api/kasir/opening: koreksi saldo awal tetap bisa walau sesi sudah punya transaksi', async () => {
+  const { env, adminId, token } = await bootstrap();
+  const open = await call(env, '/api/kasir/opening', {
+    method: 'POST', token,
+    body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 100000 }] },
+  });
+  assert.equal(open.status, 200);
+  const sesiId = open.data.kasir_sesi_id;
+
+  // Sesi sudah punya 1 transaksi (inilah yang dulu memblokir koreksi).
+  await env.DB.prepare(
+    "INSERT INTO transaksi (kode_transaksi, metode_bayar, subtotal, total, kasir_sesi_id, dibuat_oleh, created_at) VALUES ('TXTEST-OPN-1', 'tunai', 0, 0, ?, ?, ?)"
+  ).bind(sesiId, adminId, new Date().toISOString()).run();
+
+  const put = await call(env, '/api/kasir/opening', {
+    method: 'PUT', token,
+    body: { saldo_awal: [{ nama_akun: 'Tunai Laci', saldo: 250000 }] },
+  });
+  assert.equal(put.status, 200, JSON.stringify(put.data));
+  assert.equal(put.data.message, 'Saldo awal dikoreksi');
+  assert.equal(put.data.saldo_awal.find((r) => r.nama_akun === 'Tunai Laci').saldo, 250000);
+
+  // Saldo berjalan dihitung ulang dari opening baru (opening + mutasi).
+  const cur = await call(env, `/api/kasir/current?kasir_sesi_id=${sesiId}`, { token });
+  assert.equal(cur.status, 200);
+  const row = cur.data.saldo.find((s) => s.nama_akun === 'Tunai Laci');
+  assert.equal(row.saldo_opening, 250000);
+  assert.equal(row.saldo_sistem, 250000);
+
+  // Perubahan tercatat di audit log.
+  const logs = await call(env, '/api/logs?aksi=revisi_opening', { token });
+  assert.ok(logs.data.items.some((x) => x.aksi === 'revisi_opening' && String(x.record_id) === String(sesiId)));
+});

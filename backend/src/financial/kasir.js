@@ -213,11 +213,12 @@ export async function opening(db, { body, user, ip }) {
   return { kasir_sesi_id: sesi.id, tanggal: today, status: 'buka', saldo_awal: openingRows.map((r) => ({ nama_akun: r.nama_akun, saldo: r.saldo })) };
 }
 
-// Koreksi saldo awal sesi yang MASIH BUKA dan belum ada transaksinya.
+// Koreksi saldo awal sesi yang MASIH BUKA.
 // Opening tidak menulis mutasi_saldo (baseline-nya ada di kasir_saldo
 // tipe='opening'), jadi koreksi cukup menulis ulang baris itu.
-// Dibatasi: sesi harus buka + belum ada transaksi, supaya tidak pernah
-// membuat saldo sistem tidak sinkron dengan mutasi yang sudah terjadi.
+// Semua saldo berjalan & rekonsiliasi dihitung ulang dari opening + mutasi,
+// jadi koreksi tetap konsisten walau sesi sudah punya transaksi. Perubahan
+// tercatat di audit log (revisi_opening).
 export async function revisiOpening(db, { body, user, ip }) {
   // Pakai sesi yang SEDANG AKTIF, bukan selalu hari ini. Kalau pengguna sedang
   // mengoreksi lewat "Buka Ulang Sesi Tanggal Lain", sesi itulah yang diedit.
@@ -230,12 +231,6 @@ export async function revisiOpening(db, { body, user, ip }) {
     throw err(400, 'session_closed', 'Sesi sudah ditutup. Gunakan "Buka Ulang Sesi Tanggal Lain" untuk mengoreksi.');
   }
   const today = sesi.tanggal;
-
-  const sudahAda = await db.one('SELECT COUNT(*) AS n FROM transaksi WHERE kasir_sesi_id = ?', sesi.id);
-  if (sudahAda && sudahAda.n > 0) {
-    throw err(409, 'session_has_transaksi',
-      'Sesi ini sudah punya transaksi, jadi saldo awal tidak bisa diubah (akan membuat saldo sistem tidak cocok dengan mutasi).');
-  }
 
   const openingInput = computeOpeningRows(body).filter((r) => isAkunUang(r.nama_akun));
   if (!openingInput.length) throw err(400, 'missing_field', 'Tidak ada akun uang untuk saldo awal');
