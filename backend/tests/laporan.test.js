@@ -261,3 +261,54 @@ test('Laporan Bulanan: gaji SUDAH dibayar tidak dihitung dobel', async () => {
   assert.equal(r.data.gaji_belum_dibayar.total, 0, 'tidak ada gaji akru yang belum dibayar');
   assert.equal(r.data.laba_bersih, r.data.laba - 60000, 'dihitung 1x saja');
 });
+
+function lastDayBulanIni() {
+  const d = wibNow();
+  const last = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 0)).getUTCDate();
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+}
+
+test('Laporan Laba Rugi: HPP & laba bruto dari SUM(laba), laba bersih = laba bulanan', async () => {
+  const { env, token } = await bootstrapLaporan();
+  const r = await call(env, `/api/laporan/laporan-laba-rugi?bulan=${currentBulan()}`, { token });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.pendapatan, 124000);
+  assert.equal(r.data.laba_bruto, 54000, 'laba bruto = SUM(transaksi.laba)');
+  assert.equal(r.data.hpp, 124000 - 54000, 'HPP = pendapatan - laba bruto');
+  assert.equal(r.data.beban_pengeluaran, 15000);
+  assert.equal(r.data.beban_gaji_belum_dibayar, 0);
+  assert.equal(r.data.laba_bersih, 54000 - 15000);
+
+  const bulanan = await call(env, `/api/laporan/bulan?bulan=${currentBulan()}`, { token });
+  assert.equal(bulanan.data.laba, r.data.laba_bruto, 'laba bruto konsisten dengan laporan bulanan');
+  assert.equal(bulanan.data.net, r.data.laba_bersih, 'laba bersih konsisten dengan net bulanan');
+});
+
+test('Laporan Neraca: aset akun uang (opening + mutasi) + piutang kasbon + stok; ekuitas = aset - liabilitas', async () => {
+  const { env, token } = await bootstrapLaporan();
+  const r = await call(env, `/api/laporan/laporan-neraca?tanggal=${currentBulan()}-01`, { token });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.tanggal, lastDayBulanIni(), 'terima YYYY-MM-DD, dipakai sampai akhir bulan');
+
+  const akun = Object.fromEntries(r.data.aset.akun.map((a) => [a.nama_akun, a]));
+  assert.equal(akun['Tunai Laci'].saldo, 639000, '500k + 124k - 15k + 30k pelunasan kasbon');
+  assert.equal(akun['Tunai Laci'].tipe, 'tunai');
+  assert.equal(akun['SeaBank'].saldo, 1000000);
+  assert.equal(r.data.aset.total_akun, 1639000);
+  assert.equal(r.data.aset.piutang_kasbon, 50000, 'kasbon belum lunas');
+  assert.equal(r.data.aset.nilai_stok, 49 * 70000, 'sisa 49 pcs x modal 70k');
+  assert.equal(r.data.aset.total, 1639000 + 50000 + 49 * 70000);
+  assert.equal(r.data.liabilitas.total, 0, 'tidak ada gaji akru');
+  assert.equal(r.data.ekuitas.total, r.data.aset.total - r.data.liabilitas.total);
+});
+
+test('Buku Besar: 200, berisi mutasi akun, saldo berjalan (regresi bind array)', async () => {
+  const { env, token } = await bootstrapLaporan();
+  const url = `/api/laporan/buku-besar?akun=${encodeURIComponent('Tunai Laci')}&tanggal_dari=${currentBulan()}-01&tanggal_sampai=${lastDayBulanIni()}`;
+  const r = await call(env, url, { token });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.nama_akun, 'Tunai Laci');
+  assert.equal(r.data.saldo_awal, 500000, 'opening sesi pertama di rentang');
+  assert.ok(r.data.items.length >= 3, 'penjualan + pengeluaran + pelunasan kasbon');
+  assert.equal(r.data.saldo_akhir, 639000);
+});

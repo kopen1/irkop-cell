@@ -163,24 +163,34 @@ export default function LaporanPage() {
   }, [period, year, month, refresh]);
 
   useEffect(() => {
+    if (!isBulanan) return undefined;
     let cancelled = false;
-    setBukuBesar({ status: 'loading', data: null, error: null });
     setLabaRugi({ status: 'loading', data: null, error: null });
     setNeraca({ status: 'loading', data: null, error: null });
-    if (isBulanan) {
-      const startD = `${year}-${month}-01`;
-      const lastDay = new Date(Number(year), Number(month), 0).getDate();
-      const endD = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
-      api.get('/laporan/buku-besar', { akun: bukuBesarAkun || 'Tunai Laci', tanggal_dari: startD, tanggal_sampai: endD })
-        .then((res) => { if (!cancelled) setBukuBesar({ status: 'success', data: res, error: null }); })
-        .catch((err) => { if (!cancelled) setBukuBesar({ status: 'error', data: null, error: err }); });
-      api.get('/laporan/laporan-laba-rugi', { bulan: bulanParam })
-        .then((res) => { if (!cancelled) setLabaRugi({ status: 'success', data: res, error: null }); })
-        .catch((err) => { if (!cancelled) setLabaRugi({ status: 'error', data: null, error: err }); });
-      api.get('/laporan/laporan-neraca', { tanggal: startD })
-        .then((res) => { if (!cancelled) setNeraca({ status: 'success', data: res, error: null }); })
-        .catch((err) => { if (!cancelled) setNeraca({ status: 'error', data: null, error: err }); });
-    }
+    const startD = `${year}-${month}-01`;
+    api.get('/laporan/laporan-laba-rugi', { bulan: bulanParam })
+      .then((res) => { if (!cancelled) setLabaRugi({ status: 'success', data: res, error: null }); })
+      .catch((err) => { if (!cancelled) setLabaRugi({ status: 'error', data: null, error: err }); });
+    api.get('/laporan/laporan-neraca', { tanggal: startD })
+      .then((res) => { if (!cancelled) setNeraca({ status: 'success', data: res, error: null }); })
+      .catch((err) => { if (!cancelled) setNeraca({ status: 'error', data: null, error: err }); });
+    return () => { cancelled = true; };
+  }, [period, year, month, refresh]);
+
+  useEffect(() => {
+    if (!isBulanan) return undefined;
+    let cancelled = false;
+    setBukuBesar({ status: 'loading', data: null, error: null });
+    const startD = `${year}-${month}-01`;
+    const lastDay = new Date(Number(year), Number(month), 0).getDate();
+    const endD = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+    api.get('/laporan/buku-besar', {
+      akun: bukuBesarAkun || 'Tunai Laci',
+      tanggal_dari: bbTanggalDari || startD,
+      tanggal_sampai: bbTanggalSampai || endD,
+    })
+      .then((res) => { if (!cancelled) setBukuBesar({ status: 'success', data: res, error: null }); })
+      .catch((err) => { if (!cancelled) setBukuBesar({ status: 'error', data: null, error: err }); });
     return () => { cancelled = true; };
   }, [period, year, month, refresh, bukuBesarAkun, bbTanggalDari, bbTanggalSampai]);
 
@@ -405,6 +415,35 @@ export default function LaporanPage() {
       ]
     : [];
 
+  const lr = labaRugi.data;
+  const labaRugiRows = lr
+    ? [
+        { key: 'pendapatan', label: 'Pendapatan (omzet)', nilai: lr.pendapatan || 0 },
+        { key: 'hpp', label: 'HPP / Modal', nilai: -(lr.hpp || 0) },
+        { key: 'bruto', label: 'Laba Bruto', nilai: lr.laba_bruto || 0, bold: true },
+        { key: 'beban', label: 'Beban operasional (pengeluaran)', nilai: -(lr.beban_pengeluaran || 0) },
+        { key: 'gaji', label: 'Beban gaji belum dibayar', nilai: -(lr.beban_gaji_belum_dibayar || 0) },
+        { key: 'bersih', label: 'Laba Bersih', nilai: lr.laba_bersih || 0, bold: true, tone: (lr.laba_bersih || 0) < 0 ? 'danger' : 'success' },
+      ]
+    : [];
+
+  const nr = neraca.data;
+  const neracaAsetRows = nr
+    ? [
+        ...(nr.aset?.akun || []).map((a) => ({ key: 'akun-' + a.nama_akun, label: a.nama_akun, nilai: a.saldo })),
+        { key: 'kasbon', label: 'Piutang kasbon (belum lunas)', nilai: nr.aset?.piutang_kasbon || 0 },
+        { key: 'stok', label: 'Nilai stok (modal)', nilai: nr.aset?.nilai_stok || 0 },
+        { key: 'total-aset', label: 'Total Aset', nilai: nr.aset?.total || 0, bold: true },
+      ]
+    : [];
+  const neracaLiabRows = nr
+    ? [
+        { key: 'gaji', label: 'Gaji belum dibayar', nilai: nr.liabilitas?.gaji_belum_dibayar || 0 },
+        { key: 'total-liab', label: 'Total Liabilitas', nilai: nr.liabilitas?.total || 0, bold: true },
+        { key: 'ekuitas', label: 'Ekuitas (Aset − Liabilitas)', nilai: nr.ekuitas?.total || 0, bold: true, tone: (nr.ekuitas?.total || 0) < 0 ? 'danger' : 'success' },
+      ]
+    : [];
+
   const hasContent = data && (data.jumlah_transaksi || data.omzet || data.pengeluaran || data.net);
 
   return (
@@ -552,41 +591,34 @@ export default function LaporanPage() {
                 <div className="flex justify-between items-center mb-3">
                   <span className="text-sm text-muted">Periode: {periodeLabel}</span>
                 </div>
-                <Table className="table-fit" columns={[
-                  { key: 'komponen', header: 'Komponen', render: (r) => <span style={{ fontWeight: r.bold ? 700 : 400 }}>{r.label}</span> },
-                  { key: 'nilai', header: 'Nilai', align: 'right', render: (r) => <span className={`num ${r.bold ? 'font-bold' : ''} ${r.tone === 'danger' ? 'text-danger' : ''}`}>{formatRupiah(r.nilai)}</span> },
-                ]} rows={[
-                  { komponen: 'Pendapatan', nilai: data.pendapatan || 0 },
-                  { komponen: 'Beban (pengeluaran + gaji belum dibayar)', nilai: -(data.beban_pengeluaran || 0) - (data.beban_gaji_belum_dibayar || 0) },
-                  { key: 'laba', label: 'Laba Bersih', nilai: (data.laba_bersih ?? data.net) || 0, bold: true, tone: (data.laba_bersih ?? 0) < 0 ? 'danger' : 'success' },
-                ]} empty={<EmptyState title="Tidak ada data laba rugi" icon="laporan" />} />
+                {labaRugi.status === 'loading' && <Loader label="Memuat laba rugi ..." />}
+                {labaRugi.status === 'error' && <ErrorState error={labaRugi.error} onRetry={handleRefresh} />}
+                {labaRugi.status === 'success' && (
+                  <Table className="table-fit" columns={[
+                    { key: 'label', header: 'Komponen', render: (r) => <span style={{ fontWeight: r.bold ? 700 : 400 }}>{r.label}</span> },
+                    { key: 'nilai', header: 'Nilai', align: 'right', render: (r) => <span className={`num ${r.bold ? 'font-bold' : ''} ${r.tone === 'danger' ? 'text-danger' : r.tone === 'success' ? 'text-success' : ''}`}>{formatRupiah(r.nilai)}</span> },
+                  ]} rows={labaRugiRows} empty={<EmptyState title="Tidak ada data laba rugi" icon="laporan" />} />
+                )}
               </Card>
 
               <Card className="mt-4" title="Laporan Neraca (Balance Sheet)">
                 <div className="flex justify-between items-center mb-3">
-                  <span className="text-sm text-muted">Tanggal: {data.tanggal}</span>
-                  <span className={`num font-bold ${data.selisih === 0 ? 'text-success' : 'text-warning'}`}>
-                    Selisih: {formatRupiah(data.selisih || 0)} {data.selisih === 0 ? '(Seimbang)' : '(Tidak seimbang)'}
-                  </span>
+                  <span className="text-sm text-muted">Tanggal: {nr?.tanggal || '-'}</span>
                 </div>
-                <Table className="table-fit" columns={[
-                  { key: 'komponen', header: 'Aset', render: (r) => <span style={{ fontWeight: 600 }}>{r.label}</span> },
-                  { key: 'nilai', header: 'Nilai', align: 'right', render: (r) => <span className="num">{formatRupiah(r.nilai)}</span> },
-                ]} rows={[
-                  { komponen: 'Tunai Laci', nilai: data.aset?.tunai || 0 },
-                  { komponen: 'Bank', nilai: data.aset?.bank || 0 },
-                  { komponen: 'E-Wallet', nilai: data.aset?.eWallet || 0 },
-                  { komponen: 'Digital', nilai: data.aset?.digital || 0 },
-                  { komponen: 'Total Aset', nilai: data.aset?.total || 0, bold: true },
-                ]} empty={<EmptyState title="Tidak ada data aset" icon="wallet" />} />
-                <Table className="table-fit mt-3" columns={[
-                  { key: 'komponen', header: 'Ekuitas', render: (r) => <span style={{ fontWeight: 600 }}>{r.label}</span> },
-                  { key: 'nilai', header: 'Nilai', align: 'right', render: (r) => <span className="num">{formatRupiah(r.nilai)}</span> },
-                ]} rows={[
-                  { komponen: 'Saldo Akun (Ledger)', nilai: data.ekuitas?.saldo_akun || 0 },
-                  { komponen: 'Laba Bersih Periode', nilai: data.ekuitas?.laba_bersih_periode || 0 },
-                  { komponen: 'Total Ekuitas', nilai: data.ekuitas?.total || 0, bold: true },
-                ]} empty={<EmptyState title="Tidak ada data ekuitas" icon="wallet" />} />
+                {neraca.status === 'loading' && <Loader label="Memuat neraca ..." />}
+                {neraca.status === 'error' && <ErrorState error={neraca.error} onRetry={handleRefresh} />}
+                {neraca.status === 'success' && (
+                  <>
+                    <Table className="table-fit" columns={[
+                      { key: 'label', header: 'Aset', render: (r) => <span style={{ fontWeight: r.bold ? 700 : 600 }}>{r.label}</span> },
+                      { key: 'nilai', header: 'Nilai', align: 'right', render: (r) => <span className={`num ${r.bold ? 'font-bold' : ''}`}>{formatRupiah(r.nilai)}</span> },
+                    ]} rows={neracaAsetRows} empty={<EmptyState title="Tidak ada data aset" icon="wallet" />} />
+                    <Table className="table-fit mt-3" columns={[
+                      { key: 'label', header: 'Liabilitas & Ekuitas', render: (r) => <span style={{ fontWeight: r.bold ? 700 : 600 }}>{r.label}</span> },
+                      { key: 'nilai', header: 'Nilai', align: 'right', render: (r) => <span className={`num ${r.bold ? 'font-bold' : ''} ${r.tone === 'danger' ? 'text-danger' : r.tone === 'success' ? 'text-success' : ''}`}>{formatRupiah(r.nilai)}</span> },
+                    ]} rows={neracaLiabRows} empty={<EmptyState title="Tidak ada data ekuitas" icon="wallet" />} />
+                  </>
+                )}
               </Card>
 
               <Card className="mt-4" title="Buku Besar (General Ledger)">
@@ -601,8 +633,14 @@ export default function LaporanPage() {
                     <Input type="date" value={bbTanggalSampai || ''} onChange={(e) => setBbTanggalSampai(e.target.value)} />
                   </Field>
                 </div>
-                {bukuBesar.data?.items?.length ? (
+                {bukuBesar.status === 'loading' && <Loader label="Memuat buku besar ..." />}
+                {bukuBesar.status === 'error' && <ErrorState error={bukuBesar.error} onRetry={handleRefresh} />}
+                {bukuBesar.status === 'success' && bukuBesar.data?.items?.length ? (
                   <>
+                    <div className="flex justify-between mb-2">
+                      <span className="text-sm text-muted">Saldo Awal</span>
+                      <span className="num font-bold">{formatRupiah(bukuBesar.data.saldo_awal || 0)}</span>
+                    </div>
                     <Table className="table-fit" columns={[
                       { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
                       { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
@@ -616,7 +654,8 @@ export default function LaporanPage() {
                       <span className="num font-bold">{formatRupiah(bukuBesar.data.saldo_akhir || 0)}</span>
                     </div>
                   </>
-                ) : (
+                ) : null}
+                {bukuBesar.status === 'success' && !bukuBesar.data?.items?.length && (
                   <EmptyState title="Pilih akun dan tanggal" icon="kasir" description="Pilih akun dan rentang tanggal untuk melihat buku besar." />
                 )}
               </Card>

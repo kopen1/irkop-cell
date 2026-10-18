@@ -804,7 +804,7 @@ export async function bukuBesar(db, request, ctx) {
 
   if (!namaAkun) throw err(400, 'invalid_filter', 'akun wajib diisi');
 
-  const where = ['ms.nama_akun = ?', 'ms.deleted_at IS NULL'];
+  const where = ['ms.nama_akun = ?'];
   const bind = [namaAkun];
 
   if (tanggalDari) {
@@ -816,6 +816,21 @@ export async function bukuBesar(db, request, ctx) {
     bind.push(tanggalSampai);
   }
 
+  const openingWhere = ["ks.nama_akun = ?", "ks.tipe = 'opening'"];
+  const openingBind = [namaAkun];
+  if (tanggalDari) { openingWhere.push('s.tanggal >= ?'); openingBind.push(tanggalDari); }
+  if (tanggalSampai) { openingWhere.push('s.tanggal <= ?'); openingBind.push(tanggalSampai); }
+  const openingRow = await db.one(
+    `SELECT ks.saldo_sistem AS saldo_awal
+       FROM kasir_saldo ks
+       JOIN kasir_sesi s ON s.id = ks.kasir_sesi_id
+      WHERE ${openingWhere.join(' AND ')}
+      ORDER BY s.tanggal ASC, s.id ASC
+      LIMIT 1`,
+    ...openingBind
+  );
+  const saldoAwal = Number((openingRow && openingRow.saldo_awal) || 0);
+
   const rows = await db.many(
     `SELECT ms.id, ms.nama_akun, ms.jumlah, ms.sumber_tipe, ms.kategori,
             ms.created_at, ks.tanggal AS tanggal_transaksi, ks.id AS kasir_sesi_id,
@@ -823,14 +838,13 @@ export async function bukuBesar(db, request, ctx) {
        FROM mutasi_saldo ms
        JOIN kasir_sesi ks ON ks.id = ms.kasir_sesi_id
        LEFT JOIN transaksi t ON t.id = ms.sumber_id AND ms.sumber_tipe = 'transaksi'
-      WHERE ms.nama_akun = ? AND ms.deleted_at IS NULL
-        ${where.slice(1).join(' AND ')}
+       WHERE ${where.join(' AND ')}
       ORDER BY ks.tanggal, ms.id`,
-    bind
+    ...bind
   );
 
   const items = [];
-  let saldo = 0;
+  let saldo = saldoAwal;
   for (const r of rows) {
     const jumlah = Number(r.jumlah || 0);
     saldo += jumlah;
@@ -848,8 +862,9 @@ export async function bukuBesar(db, request, ctx) {
   }
 
   return {
-    periode: { tanggal_dari, tanggal_sampai },
-    nama_akun,
+    periode: { tanggal_dari: tanggalDari, tanggal_sampai: tanggalSampai },
+    nama_akun: namaAkun,
+    saldo_awal: saldoAwal,
     total_masuk: items.filter(i => i.jumlah > 0).reduce((s, i) => s + i.jumlah, 0),
     total_keluar: items.filter(i => i.jumlah < 0).reduce((s, i) => s + i.jumlah, 0),
     saldo_akhir: saldo,
@@ -890,6 +905,15 @@ export async function laporanLabaRugi(db, request, ctx) {
   );
   const gajiBelum = scalarSum([gajiBelumRow], 'total');
 
+  const labaRow = await db.one(
+    `SELECT COALESCE(SUM(laba), 0) AS total
+       FROM transaksi
+      WHERE deleted_at IS NULL AND tanggal_transaksi >= ? AND tanggal_transaksi <= ?`,
+    startD, endD
+  );
+  const labaKotor = scalarSum([labaRow], 'total');
+  const hpp = pendapatan - labaKotor;
+
   const beban = pengeluaran + gajiBelum;
 
   return {
@@ -897,11 +921,12 @@ export async function laporanLabaRugi(db, request, ctx) {
     tanggal_awal: startD,
     tanggal_akhir: endD,
     pendapatan,
+    hpp,
+    laba_bruto: labaKotor,
     beban_pengeluaran: pengeluaran,
     beban_gaji_belum_dibayar: gajiBelum,
     total_beban: beban,
-    laba_bruto: pendapatan,
-    laba_bersih: pendapatan - beban,
+    laba_bersih: labaKotor - beban,
   };
 }
 
@@ -911,72 +936,79 @@ export async function laporanLabaRugi(db, request, ctx) {
 
 export async function laporanNeraca(db, request, ctx) {
   const url = new URL(request.url);
-  const tanggal = url.searchParams.get('tanggal') || currentBulanWib().slice(0, 7) + '-01';
-  const range = monthRange(tanggal);
-  const startD = `${range.tahun}-${String(range.mon).padStart(2, '0')}-01`;
+  const raw = (url.searchParams.get('tanggal') || url.searchParams.get('bulan') || currentBulanWib()).slice(0, 7);
+  if (!/^\d{4}-\d{2}$/.test(raw)) throw err(400, 'invalid_filter', 'tanggal harus format YYYY-MM atau YYYY-MM-DD');
+  const range = monthRange(raw);
   const endD = lastDayDate(range.tahun, range.mon);
 
-  const akunRows = await db.many(
-    `SELECT ms.nama_akun, COALESCE(SUM(ms.jumlah), 0) AS saldo
-       FROM mutasi_saldo ms
-       JOIN kasir_sesi ks ON ks.id = ms.kasir_sesi_id
-      WHERE ms.deleted_at IS NULL AND ks.tanggal >= ? AND ks.tanggal <= ?
-        AND ms.nama_akun NOT IN ('Saldo Akun', 'Laba')
-      GROUP BY ms.nama_akun`,
-    startD, endD
+  // Saldo akun uang sampai akhir periode = opening sesi terakhir + mutasi sesi itu.
+  const lastSesi = await db.one(
+    'SELECT id FROM kasir_sesi WHERE tanggal <= ? ORDER BY tanggal DESC, id DESC LIMIT 1',
+    endD
   );
-
-  const akunMap = {};
-  for (const r of akunRows) {
-    akunMap[r.nama_akun] = Number(r.saldo || 0);
+  const akunSaldo = new Map();
+  if (lastSesi) {
+    const opening = await db.many(
+      "SELECT nama_akun, saldo_sistem FROM kasir_saldo WHERE kasir_sesi_id = ? AND tipe = 'opening'",
+      lastSesi.id
+    );
+    for (const o of opening) {
+      if (LEDGER_AKUN.includes(o.nama_akun)) continue;
+      akunSaldo.set(o.nama_akun, Number(o.saldo_sistem || 0));
+    }
+    const mutasi = await db.many(
+      `SELECT nama_akun, COALESCE(SUM(jumlah), 0) AS total
+         FROM mutasi_saldo
+        WHERE kasir_sesi_id = ?
+        GROUP BY nama_akun`,
+      lastSesi.id
+    );
+    for (const m of mutasi) {
+      if (LEDGER_AKUN.includes(m.nama_akun)) continue;
+      akunSaldo.set(m.nama_akun, (akunSaldo.get(m.nama_akun) || 0) + Number(m.total || 0));
+    }
   }
 
-  const tunai = Number(akunMap['Tunai Laci'] || 0);
-  const bank = Number(akunMap['Bank'] || 0);
-  const eWallet = Number(akunMap['E_Wallet'] || Number(akunMap['e_wallet'] || 0));
-  const digital = Number(akunMap['digital'] || 0);
-
-  const asetLancar = tunai + bank + eWallet + digital;
-
-  const saldoAkunLedger = Number(akunMap['Saldo Akun'] || 0);
-  const labaTerjaga = Number(akunMap['Laba'] || 0);
-
-  const tx = await db.one(
-    'SELECT COALESCE(SUM(laba), 0) AS laba FROM transaksi WHERE deleted_at IS NULL AND tanggal_transaksi >= ? AND tanggal_transaksi <= ?',
-    startD, endD
+  const tipeMap = new Map(
+    (await db.many('SELECT nama_akun, tipe FROM akun_master')).map((a) => [a.nama_akun, a.tipe])
   );
-  const labaTransaksi = scalarSum([tx], 'laba');
+  const akunRows = [...akunSaldo.entries()]
+    .map(([nama_akun, saldo]) => ({ nama_akun, tipe: tipeMap.get(nama_akun) || 'lainnya', saldo }))
+    .sort((a, b) => a.nama_akun.localeCompare(b.nama_akun));
+  const totalAkun = akunRows.reduce((s, a) => s + a.saldo, 0);
 
-  const pengeluaranRow = await db.one(
-    'SELECT COALESCE(SUM(nominal), 0) AS total FROM pengeluaran WHERE deleted_at IS NULL AND tanggal >= ? AND tanggal <= ?',
-    startD, endD
+  const kasbonRow = await db.one(
+    `SELECT COALESCE(SUM(nominal - COALESCE(terbayar, 0)), 0) AS total
+       FROM kasbon WHERE status = 'belum_lunas' AND tanggal <= ?`,
+    endD
   );
-  const pengeluaran = scalarSum([pengeluaranRow], 'total');
+  const piutangKasbon = Number(kasbonRow ? kasbonRow.total : 0);
 
-  const gajiBelumRow = await db.one(
-    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal >= ? AND tanggal <= ? AND (dibayar_at IS NULL OR dibayar_at = \'\')',
-    startD, endD
+  const stok = await nilaiStok(db);
+  const nilaiStokTotal = Number((stok.total && stok.total.nilai_modal) || 0);
+
+  const totalAset = totalAkun + piutangKasbon + nilaiStokTotal;
+
+  const gajiRow = await db.one(
+    'SELECT COALESCE(SUM(nominal), 0) AS total FROM gaji_harian WHERE tanggal <= ? AND (dibayar_at IS NULL OR dibayar_at = \'\')',
+    endD
   );
-  const gajiBelum = scalarSum([gajiBelumRow], 'total');
-
-  const labaBersihPeriode = labaTransaksi - pengeluaran - gajiBelum;
-  const ekuitas = saldoAkunLedger + labaBersihPeriode;
+  const gajiBelum = Number(gajiRow ? gajiRow.total : 0);
 
   return {
     tanggal: endD,
     aset: {
-      tunai,
-      bank,
-      e_wallet: eWallet,
-      digital,
-      total: asetLancar,
+      akun: akunRows,
+      total_akun: totalAkun,
+      piutang_kasbon: piutangKasbon,
+      nilai_stok: nilaiStokTotal,
+      total: totalAset,
     },
-    ekuitas: {
-      saldo_akun: saldoAkunLedger,
-      laba_bersih_periode: labaBersihPeriode,
-      total: ekuitas,
+    liabilitas: {
+      gaji_belum_dibayar: gajiBelum,
+      total: gajiBelum,
     },
-    selisih: asetLancar - ekuitas,
+    ekuitas: { total: totalAset - gajiBelum },
   };
 }
 
