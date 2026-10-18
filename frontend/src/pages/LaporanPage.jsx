@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { api, downloadFile } from '../lib/api';
 import { useToast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 import { useSiteName } from '../hooks/useSiteName';
 import { todayWIB, formatRupiah, formatSignedRupiah } from '../lib/format';
 import { kategoriColor } from '../lib/kategoriColor';
@@ -82,6 +83,7 @@ function openPrint(title, html, siteName = 'IRKOP CELL') {
 
 export default function LaporanPage() {
   const toast = useToast();
+  const { can } = useAuth();
   const today = todayWIB();
   const [period, setPeriod] = useState('bulanan');
   const [year, setYear] = useState(today.slice(0, 4));
@@ -100,6 +102,7 @@ export default function LaporanPage() {
   const [bukuBesarAkun, setBukuBesarAkun] = useState('');
   const [bbTanggalDari, setBbTanggalDari] = useState('');
   const [bbTanggalSampai, setBbTanggalSampai] = useState('');
+  const [showHarian, setShowHarian] = useState(false);
   const siteName = useSiteName();
 
   const isBulanan = period === 'bulanan';
@@ -112,7 +115,7 @@ export default function LaporanPage() {
     setData(null);
     setError(null);
     const params = isBulanan ? { bulan: bulanParam } : { tahun: year };
-    api.get(isBulanan ? '/api/laporan/bulan' : '/api/laporan/tahun', params)
+    api.get(isBulanan ? '/laporan/bulan' : '/laporan/tahun', params)
       .then((res) => {
         if (!cancelled) { setData(res); setStatus('success'); }
       })
@@ -123,7 +126,8 @@ export default function LaporanPage() {
   useEffect(() => {
     let cancelled = false;
     setProduk({ status: 'loading', items: [], error: null });
-    api.get('/api/laporan/produk-terlaris', { ...params, limit: 50 })
+    const params = isBulanan ? { bulan: bulanParam } : { tahun: year };
+    api.get('/laporan/produk-terlaris', { ...params, limit: 50 })
       .then((res) => { if (!cancelled) setProduk({ status: 'success', items: res.items || [], error: null }); })
       .catch((err) => { if (!cancelled) setProduk({ status: 'error', items: [], error: err }); });
     return () => { cancelled = true; };
@@ -132,7 +136,7 @@ export default function LaporanPage() {
   useEffect(() => {
     let cancelled = false;
     setNilaiStok((s) => ({ ...s, status: 'loading' }));
-    api.get('/api/laporan/nilai-stok')
+    api.get('/laporan/nilai-stok')
       .then((res) => { if (!cancelled) setNilaiStok({ status: 'success', data: res, error: null }); })
       .catch((err) => { if (!cancelled) setNilaiStok({ status: 'error', data: null, error: err }); });
     return () => { cancelled = true; };
@@ -142,7 +146,7 @@ export default function LaporanPage() {
     if (!isBulanan) return undefined;
     let cancelled = false;
     setRekon({ status: 'loading', data: null, error: null });
-    api.get('/api/laporan/rekonsiliasi', { bulan: bulanParam })
+    api.get('/laporan/rekonsiliasi', { bulan: bulanParam })
       .then((res) => { if (!cancelled) setRekon({ status: 'success', data: res, error: null }); })
       .catch((err) => { if (!cancelled) setRekon({ status: 'error', data: null, error: err }); });
     return () => { cancelled = true; };
@@ -152,7 +156,7 @@ export default function LaporanPage() {
     if (!isBulanan) return undefined;
     let cancelled = false;
     setBukuKas({ status: 'loading', data: null, error: null });
-    api.get('/api/laporan/buku-kas', { bulan: bulanParam })
+    api.get('/laporan/buku-kas', { bulan: bulanParam })
       .then((res) => { if (!cancelled) setBukuKas({ status: 'success', data: res, error: null }); })
       .catch((err) => { if (!cancelled) setBukuKas({ status: 'error', data: null, error: err }); });
     return () => { cancelled = true; };
@@ -165,19 +169,146 @@ export default function LaporanPage() {
     setNeraca({ status: 'loading', data: null, error: null });
     if (isBulanan) {
       const startD = `${year}-${month}-01`;
-      const endD = lastDayDate(year, month);
-      api.get('/api/laporan/buku-besar', { akun: bukuBesarAkun || 'Tunai Laci', tanggal_dari: startD, tanggal_sampai: endD })
+      const lastDay = new Date(Number(year), Number(month), 0).getDate();
+      const endD = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
+      api.get('/laporan/buku-besar', { akun: bukuBesarAkun || 'Tunai Laci', tanggal_dari: startD, tanggal_sampai: endD })
         .then((res) => { if (!cancelled) setBukuBesar({ status: 'success', data: res, error: null }); })
         .catch((err) => { if (!cancelled) setBukuBesar({ status: 'error', data: null, error: err }); });
-      api.get('/api/laporan/laporan-laba-rugi', { bulan: bulanParam })
+      api.get('/laporan/laporan-laba-rugi', { bulan: bulanParam })
         .then((res) => { if (!cancelled) setLabaRugi({ status: 'success', data: res, error: null }); })
         .catch((err) => { if (!cancelled) setLabaRugi({ status: 'error', data: null, error: err }); });
-      api.get('/api/laporan/laporan-neraca', { tanggal: startD })
+      api.get('/laporan/laporan-neraca', { tanggal: startD })
         .then((res) => { if (!cancelled) setNeraca({ status: 'success', data: res, error: null }); })
         .catch((err) => { if (!cancelled) setNeraca({ status: 'error', data: null, error: err }); });
     }
     return () => { cancelled = true; };
   }, [period, year, month, refresh, bukuBesarAkun, bbTanggalDari, bbTanggalSampai]);
+
+  const handleRefresh = () => setRefresh((r) => r + 1);
+
+  async function handleCsv() {
+    try {
+      const filename = 'irkop-laporan-' + period + '-' + (isBulanan ? bulanParam : year) + '.csv';
+      await downloadFile('/laporan/export', { cakupan: isBulanan ? 'bulan' : 'tahun', bulan: bulanParam, tahun: year }, filename);
+      toast.success('Export CSV berhasil diunduh.');
+    } catch (err) {
+      toast.error(err && err.message ? err.message : 'Gagal mengekspor CSV.');
+    }
+  }
+
+  function handlePdf() {
+    const per = data && data.periode;
+    let html = '';
+    let title = '';
+    if (per === 'bulanan') {
+      title = 'Bulanan ' + monthName(data.bulan);
+      html = buildPrintHtml(data, false);
+    } else if (per === 'tahunan') {
+      title = 'Tahunan ' + data.tahun;
+      html = buildPrintHtml(data, true);
+    }
+    if (!html) {
+      toast.error('Data laporan belum tersedia untuk dicetak.');
+      return;
+    }
+    if (!openPrint(title, html, siteName)) {
+      toast.error('Popup diblokir browser. Izinkan popup lalu coba lagi.');
+    }
+  }
+
+  function buildPrintHtml(r, annual) {
+    const cells = [
+      ['Jumlah Transaksi', String(r.jumlah_transaksi || 0)],
+      ['Omzet', formatRupiah(r.omzet || 0)],
+      ['Laba', formatRupiah(r.laba || 0)],
+      ['Pengeluaran', formatRupiah((r.pengeluaran && r.pengeluaran.total) || 0)],
+      ['Net (Laba − Pengeluaran)', formatRupiah(r.net || 0)],
+    ];
+    let html = '<h2>Ringkasan</h2><table><thead><tr><th>Komponen</th><th class="r">Nilai</th></tr></thead><tbody>';
+    for (const c of cells) html += '<tr><td>' + c[0] + '</td><td class="r">' + c[1] + '</td></tr>';
+    html += '</tbody></table>';
+
+    const saldoAkun = r.saldo_akun || [];
+    if (saldoAkun.length) {
+      html += '<h2>Saldo Akun</h2><table><thead><tr><th>Akun</th><th class="r">Saldo Awal</th><th class="r">Saldo Akhir</th></tr></thead><tbody>';
+      for (const a of saldoAkun) {
+        html += '<tr><td>' + a.nama_akun + '</td><td class="r">' + formatRupiah(a.saldo_awal || 0) + '</td><td class="r">' + formatRupiah(a.saldo_akhir || 0) + '</td></tr>';
+      }
+      html += '<tr class="sum"><td>Total uang</td><td class="r">' + formatRupiah(r.total_saldo_awal || 0) + '</td><td class="r">' + formatRupiah(r.total_saldo_akhir || 0) + '</td></tr>';
+      html += '</tbody></table>';
+    }
+
+    const kategori = r.rekap_kategori || [];
+    if (kategori.length) {
+      html += '<h2>Rekap Kategori</h2><table><thead><tr><th>Kategori</th><th>Jumlah Item</th><th>Qty</th><th class="r">Omzet</th></tr></thead><tbody>';
+      for (const k of kategori) {
+        html += '<tr><td>' + k.nama_kategori + '</td><td>' + (k.jumlah_item || 0) + '</td><td>' + (k.qty || 0) + '</td><td class="r">' + formatRupiah(k.omzet || 0) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+
+    const harian = r.rincian_harian || [];
+    if (harian.length) {
+      html += '<h2>Rincian Harian</h2><table><thead><tr><th>Tanggal</th><th>Trx</th><th class="r">Omzet</th><th class="r">Laba</th><th class="r">Pengeluaran</th><th class="r">Beli Stok</th><th class="r">Net</th></tr></thead><tbody>';
+      for (const h of harian) {
+        html += '<tr><td>' + h.tanggal + '</td><td>' + (h.jumlah_transaksi || 0) + '</td><td class="r">' + formatRupiah(h.omzet || 0) + '</td><td class="r">' + formatRupiah(h.laba || 0) + '</td><td class="r">' + formatRupiah(h.pengeluaran || 0) + '</td><td class="r">' + formatRupiah(h.beli_stok || 0) + '</td><td class="r">' + formatRupiah(h.net || 0) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+
+    if (r.arus_dana) {
+      html += '<h2>Arus Dana (bukan omzet)</h2><table><thead><tr><th>Jenis</th><th class="r">Nominal</th></tr></thead><tbody>';
+      html += '<tr><td>Kirim uang (nominal titipan)</td><td class="r">' + formatRupiah(r.arus_dana.kirim_uang || 0) + '</td></tr>';
+      html += '<tr><td>Tarik tunai</td><td class="r">' + formatRupiah(r.arus_dana.tarik_tunai || 0) + '</td></tr>';
+      html += '<tr><td>Transfer</td><td class="r">' + formatRupiah(r.arus_dana.transfer || 0) + '</td></tr>';
+      html += '<tr class="sum"><td>Total Arus Dana</td><td class="r">' + formatRupiah(r.arus_dana.total || 0) + '</td></tr>';
+      html += '<tr><td>Pendapatan admin (fee)</td><td class="r">' + formatRupiah(r.pendapatan_admin || 0) + '</td></tr>';
+      html += '</tbody></table>';
+    }
+
+    if (!annual) {
+      const kasbon = r.kasbon || {};
+      html += '<h2>Kasbon</h2><table><tbody>';
+      html += '<tr><td>Kasbon Baru</td><td>' + (kasbon.baru || 0) + '</td><td class="r">' + formatRupiah(kasbon.nominal_baru || 0) + '</td></tr>';
+      html += '<tr><td>Belum Lunas</td><td>' + (kasbon.belum_lunas || 0) + '</td><td class="r">' + formatRupiah(kasbon.nominal_belum_lunas || 0) + '</td></tr>';
+      html += '</tbody></table>';
+      const perb = r.perbandingan_bulan_sebelumnya;
+      if (perb && perb.bulan) {
+        html += '<h2>Perbandingan Bulan Sebelumnya (' + monthName(perb.bulan) + ')</h2><table><tbody>';
+        html += '<tr><td>Omzet</td><td class="r">' + formatRupiah(perb.omzet || 0) + '</td></tr>';
+        html += '<tr><td>Laba</td><td class="r">' + formatRupiah(perb.laba || 0) + '</td></tr>';
+        html += '<tr><td>Pengeluaran</td><td class="r">' + formatRupiah(perb.pengeluaran || 0) + '</td></tr>';
+        html += '</tbody></table>';
+      }
+    } else {
+      const rank = r.ranking_kategori_terlaris || [];
+      if (rank.length) {
+        html += '<h2>Ranking Kategori Terlaris</h2><table><thead><tr><th>Kategori</th><th>Qty</th><th class="r">Omzet</th></tr></thead><tbody>';
+        for (const c of rank) {
+          html += '<tr><td>' + c.nama_kategori + '</td><td>' + (c.qty || 0) + '</td><td class="r">' + formatRupiah(c.omzet || 0) + '</td></tr>';
+        }
+        html += '</tbody></table>';
+      }
+    }
+    const pl = produk.items || [];
+    if (pl.length) {
+      html += '<h2>Produk Terlaris</h2><table><thead><tr><th>#</th><th>Produk</th><th>Kategori</th><th>Qty</th><th class="r">Omzet</th><th class="r">Laba</th></tr></thead><tbody>';
+      for (const p of pl) {
+        html += '<tr><td>' + p.peringkat + '</td><td>' + p.nama_produk + '</td><td>' + p.nama_kategori + '</td><td>' + p.qty + '</td><td class="r">' + formatRupiah(p.omzet || 0) + '</td><td class="r">' + formatRupiah(p.laba || 0) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+
+    const bkd = bukuKas.data;
+    if (bkd && bkd.per_jenis?.length) {
+      html += '<h2>Buku Kas (semua pergerakan)</h2><table><thead><tr><th>Jenis</th><th class="r">Masuk</th><th class="r">Keluar</th><th class="r">Net</th></tr></thead><tbody>';
+      for (const j of bkd.per_jenis) {
+        html += '<tr><td>' + j.jenis + '</td><td class="r">' + formatRupiah(j.masuk) + '</td><td class="r">' + formatRupiah(j.keluar) + '</td><td class="r">' + formatRupiah(j.net) + '</td></tr>';
+      }
+      html += '</tbody></table>';
+    }
+    return html;
+  }
 
   const q = isBulanan ? bulanParam : year;
   const stats = data ? [
@@ -205,12 +336,16 @@ export default function LaporanPage() {
 
   const harianRows = (data && data.rincian_harian || []).map((h) => ({ ...h, key: h.tanggal }));
 
+  const saldoAkunRows = (data && data.saldo_akun || []).map((a) => ({ ...a, key: a.nama_akun }));
+  const totalSaldoAwal = (data && data.total_saldo_awal) || 0;
+  const totalSaldoAkhir = (data && data.total_saldo_akhir) || 0;
+
   const kasbon = (data && data.kasbon) || {};
   const kasbonRows = [
     { key: 'baru', label: 'Kasbon Baru', qty: kasbon.baru || 0, nominal: kasbon.nominal_baru || 0 },
     { key: 'belum_lunas', label: 'Belum Lunas', qty: kasbon.belum_lunas || 0, nominal: kasbon.nominal_belum_lunas || 0 },
     { key: 'lunas', label: 'Lunas', qty: kasbon.lunas || 0, nominal: null },
-  ]);
+  ];
 
   const perb = data && data.perbandingan_bulan_sebelumnya;
   const perbRows = [
@@ -355,16 +490,30 @@ export default function LaporanPage() {
                 ]} rows={kategoriRows} empty={<EmptyState title="Belum ada item terjual di periode ini" icon="barang" />} />
               </Card>
 
-              <Card className="mt-4" title="Rincian Harian">
-                <Table className="table-fit" columns={[
-                  { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
-                  { key: 'jumlah_transaksi', header: 'Trx', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
-                  { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
-                  { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
-                  { key: 'pengeluaran', header: 'Pengeluaran', align: 'right', className: 'hide-mobile', render: (r) => <span className="num text-danger">{formatRupiah(r.pengeluaran)}</span> },
-                  { key: 'beli_stok', header: 'Beli Stok', align: 'right', className: 'hide-mobile', render: (r) => <span className="num text-muted">{formatRupiah(r.beli_stok)}</span> },
-                  { key: 'net', header: 'Net', align: 'right', render: (r) => <span className="num">{formatSignedRupiah(r.net)}</span> },
-                ]} rows={harianRows} empty={<EmptyState title="Belum ada pergerakan harian" icon="laporan" />} />
+              <Card
+                className="mt-4"
+                title="Rincian Harian"
+                actions={
+                  <Button variant="ghost" size="sm" onClick={() => setShowHarian((v) => !v)}>
+                    {showHarian ? 'Sembunyikan' : 'Tampilkan'}
+                  </Button>
+                }
+              >
+                {showHarian ? (
+                  <Table className="table-fit" columns={[
+                    { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
+                    { key: 'jumlah_transaksi', header: 'Trx', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
+                    { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
+                    { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
+                    { key: 'pengeluaran', header: 'Pengeluaran', align: 'right', className: 'hide-mobile', render: (r) => <span className="num text-danger">{formatRupiah(r.pengeluaran)}</span> },
+                    { key: 'beli_stok', header: 'Beli Stok', align: 'right', className: 'hide-mobile', render: (r) => <span className="num text-muted">{formatRupiah(r.beli_stok)}</span> },
+                    { key: 'net', header: 'Net', align: 'right', render: (r) => <span className="num">{formatSignedRupiah(r.net)}</span> },
+                  ]} rows={harianRows} empty={<EmptyState title="Belum ada pergerakan harian" icon="laporan" />} />
+                ) : (
+                  <p className="field-hint">
+                    {harianRows.length} hari · Omzet {formatRupiah(harianRows.reduce((s, r) => s + (r.omzet || 0), 0))} · Laba {formatRupiah(harianRows.reduce((s, r) => s + (r.laba || 0), 0))} — tekan "Tampilkan" untuk rincian per tanggal.
+                  </p>
+                )}
               </Card>
 
               <Card className="mt-4" title="Arus Dana (bukan omzet)">
@@ -452,19 +601,21 @@ export default function LaporanPage() {
                     <Input type="date" value={bbTanggalSampai || ''} onChange={(e) => setBbTanggalSampai(e.target.value)} />
                   </Field>
                 </div>
-                {bukuBesarData?.items?.length ? (
-                  <Table className="table-fit" columns={[
-                    { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
-                    { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
-                    { key: 'jenis_transaksi', header: 'Jenis', render: (r) => <span className="text-sm text-muted">{r.jenis_transaksi || '-'}</span> },
-                    { key: 'kode_transaksi', header: 'Kode Transaksi', align: 'right', render: (r) => <span className="num text-sm font-mono">{r.kode_transaksi}</span> },
-                    { key: 'jumlah', header: 'Jumlah', align: 'right', render: (r) => <span className={`num ${r.jumlah >= 0 ? 'text-success' : 'text-danger'}`}>{formatRupiah(r.jumlah)}</span> },
-                    { key: 'saldo', header: 'Saldo', align: 'right', render: (r) => <span className="num font-bold">{formatRupiah(r.saldo)}</span> },
-                  ]} rows={bukuBesarData.items} empty={<EmptyState title="Pilih akun dan tanggal" icon="kasir" description="Pilih akun dan rentang tanggal untuk melihat buku besar." />} />
-                  <div className="flex justify-between mt-2">
-                    <span className="text-sm text-muted">Saldo Akhir</span>
-                    <span className="num font-bold">{formatRupiah(bukuBesarData.saldo_akhir || 0)}</span>
-                  </div>
+                {bukuBesar.data?.items?.length ? (
+                  <>
+                    <Table className="table-fit" columns={[
+                      { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
+                      { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
+                      { key: 'jenis_transaksi', header: 'Jenis', render: (r) => <span className="text-sm text-muted">{r.jenis_transaksi || '-'}</span> },
+                      { key: 'kode_transaksi', header: 'Kode Transaksi', align: 'right', render: (r) => <span className="num text-sm font-mono">{r.kode_transaksi}</span> },
+                      { key: 'jumlah', header: 'Jumlah', align: 'right', render: (r) => <span className={`num ${r.jumlah >= 0 ? 'text-success' : 'text-danger'}`}>{formatRupiah(r.jumlah)}</span> },
+                      { key: 'saldo', header: 'Saldo', align: 'right', render: (r) => <span className="num font-bold">{formatRupiah(r.saldo)}</span> },
+                    ]} rows={bukuBesar.data.items} empty={<EmptyState title="Pilih akun dan tanggal" icon="kasir" description="Pilih akun dan rentang tanggal untuk melihat buku besar." />} />
+                    <div className="flex justify-between mt-2">
+                      <span className="text-sm text-muted">Saldo Akhir</span>
+                      <span className="num font-bold">{formatRupiah(bukuBesar.data.saldo_akhir || 0)}</span>
+                    </div>
+                  </>
                 ) : (
                   <EmptyState title="Pilih akun dan tanggal" icon="kasir" description="Pilih akun dan rentang tanggal untuk melihat buku besar." />
                 )}
