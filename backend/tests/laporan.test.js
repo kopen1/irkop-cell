@@ -122,6 +122,12 @@ test('Omzet = penjualan item saja; tarik tunai masuk Arus Dana (bukan omzet)', a
     method: 'POST', token,
     body: { jenis: 'tariktunai', nominal: 100000, mitra: 'DANA', admin_type: 'dalam', tanggal_transaksi: todayWib() },
   });
+  const luar = await call(env, '/api/transaksi', {
+    method: 'POST', token,
+    body: { jenis: 'tariktunai', nominal: 100000, mitra: 'DANA', admin_type: 'luar', tanggal_transaksi: todayWib() },
+  });
+  // Total transaksi admin luar = nominal + fee (uang diterima dari pelanggan).
+  assert.equal(luar.data.total, 105000);
 
   const r = await call(env, `/api/laporan/bulan?bulan=${currentBulan()}`, { token });
   assert.equal(r.status, 200);
@@ -130,8 +136,9 @@ test('Omzet = penjualan item saja; tarik tunai masuk Arus Dana (bukan omzet)', a
   const sumKat = r.data.rekap_kategori.reduce((s, k) => s + Number(k.omzet), 0);
   assert.equal(sumKat, r.data.omzet, 'jumlah rekap kategori = omzet');
 
-  assert.equal(r.data.arus_dana.tarik_tunai, 100000, 'nominal tarik tunai di arus dana');
-  assert.equal(r.data.arus_dana.total, 100000);
+  // Arus dana = nominal titipan saja (fee admin luar tidak ikut).
+  assert.equal(r.data.arus_dana.tarik_tunai, 200000, 'nominal tarik tunai di arus dana');
+  assert.equal(r.data.arus_dana.total, 200000);
 });
 
 test('Export laporan CSV bulanan: berisi header, transaksi, pengeluaran', async () => {

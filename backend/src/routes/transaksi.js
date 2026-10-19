@@ -599,7 +599,10 @@ async function createAdminTransaksi(db, body, ctx, request, jenis) {
   const sesi = await requireOpenSession(db, tanggalTx);
   const kode = await generateTransaksiKode(db, tanggalTx);
   const now = nowIso();
-  const total = jenis === 'transfer' ? nominal + admin : nominal;
+  // total = uang yang diterima dari pelanggan. Tarik tunai admin luar
+  // menambahkan fee ke nominal (lihat buildAdminPlan), jadi total ikut
+  // mencakup fee agar sama dengan mutasi akun penerima.
+  const total = jenis === 'transfer' || adminType === 'luar' ? nominal + admin : nominal;
   const plan = buildAdminPlan(jenis, adminType, nominal, admin, accountName, paymentAkun);
   await validatedAccountNames(db, plan, body);
 

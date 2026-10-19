@@ -64,6 +64,7 @@ test('R6 Tarik Tunai Admin Dalam 100k admin 5k: saldo +100k, laci -95k, laba +5k
     body: { jenis: 'tariktunai', nominal: 100000, mitra: 'DANA', admin_type: 'dalam' },
   });
   assert.equal(r.status, 200);
+  assert.equal(r.data.total, 100000);
   const tx = await call(env, `/api/transaksi/${r.data.id}`, { token });
   const m = mutasiMap(tx.data);
   assert.equal(m['DANA'], 100000);
@@ -80,7 +81,12 @@ test('R6 Tarik Tunai Admin Luar 100k admin 5k: saldo +105k, laci -100k, laba +5k
     body: { jenis: 'tariktunai', nominal: 100000, mitra: 'DANA', admin_type: 'luar' },
   });
   assert.equal(r.status, 200);
+  // Total = uang diterima dari pelanggan (nominal + fee admin luar), sama
+  // dengan mutasi akun penerima.
+  assert.equal(r.data.total, 105000);
   const tx = await call(env, `/api/transaksi/${r.data.id}`, { token });
+  assert.equal(Number(tx.data.total), 105000);
+  assert.equal(Number(tx.data.subtotal), 105000);
   const m = mutasiMap(tx.data);
   assert.equal(m['DANA'], 105000);
   assert.equal(m['Saldo Akun'] ?? 0, 0);

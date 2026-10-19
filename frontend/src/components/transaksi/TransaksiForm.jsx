@@ -223,7 +223,6 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const [nominalTarik, setNominalTarik] = useState(initial?.nominal ? String(initial.nominal) : '');
   const [adminFeeTarik, setAdminFeeTarik] = useState(initial?.admin_fee ? String(initial.admin_fee) : '');
   const [tipeAdmin, setTipeAdmin] = useState(initial?.admin_type || 'dalam');
-  const [qtyTarik, setQtyTarik] = useState(initial?.qty || 1);
   const [adminPresetTarik, setAdminPresetTarik] = useState('');
 
   const [namaDevice, setNamaDevice] = useState(initial?.service?.nama_device || '');
@@ -456,11 +455,10 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const nominalTarikNum = parseRupiah(nominalTarik) || 0;
   const adminFeeTarikNum = parseRupiah(adminFeeTarik) || 0;
   const tunaiDikeluarkan = tipeAdmin === 'dalam' ? nominalTarikNum - adminFeeTarikNum : nominalTarikNum;
-  const totalTarik = nominalTarikNum * qtyTarik;
+  // Uang yang diterima dari pelanggan: admin luar menambahkan fee ke nominal.
+  const totalTarik = tipeAdmin === 'luar' ? nominalTarikNum + adminFeeTarikNum : nominalTarikNum;
   const saldoTarikVal = getSaldo(akunBankTarik);
-  const saldoTarikAfter = tipeAdmin === 'dalam'
-    ? saldoTarikVal + nominalTarikNum - adminFeeTarikNum
-    : saldoTarikVal + nominalTarikNum;
+  const saldoTarikAfter = saldoTarikVal + totalTarik;
 
   const handleAdminPresetTarik = (val) => {
     setAdminPresetTarik(val);
@@ -485,7 +483,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
     return `Pelanggan bayar ${formatRupiah(hargaJualNum)}, toko beli ${formatRupiah(modalDigitalNum)} via ${akunBankDigital || '-'}.`;
   }, [subJenis, hargaJualNum, adminFeeDigitalNum, modalDigitalNum, akunBankDigital]);
 
-  const tarikDesc = `Pelanggan kirim ${formatRupiah(nominalTarikNum)} ke ${akunBankTarik || '-'}, toko berikan tunai ${formatRupiah(tunaiDikeluarkan)}.`;
+  const tarikDesc = `Pelanggan kirim ${formatRupiah(totalTarik)} ke ${akunBankTarik || '-'}, toko berikan tunai ${formatRupiah(tunaiDikeluarkan)}.`;
 
   const handleCancel = () => {
     if (onCancel) onCancel();
@@ -1246,7 +1244,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
             </div>
 
             <div className="grid-3">
-              <Field label="Saldo Masuk dari Pelanggan (Rp)" required>
+              <Field label="Nominal Tarik Tunai (Rp)" required>
                 <Input
                   type="text"
                   inputMode="numeric"
@@ -1254,6 +1252,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
                   onChange={(e) => setNominalTarik(formatRupiahInput(e.target.value))}
                   placeholder="mis. 100.000"
                 />
+                <span className="field-hint">Uang tunai yang diserahkan ke pelanggan</span>
               </Field>
               <Field label="Admin / Fee (Rp)">
                 <AdminPreset
@@ -1272,7 +1271,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
               </Field>
             </div>
 
-            <div className="grid-2" style={{ marginTop: 12 }}>
+            <div style={{ marginTop: 12 }}>
               <Field label="Tunai Dikeluarkan (Rp)">
                 <Input
                   type="text"
@@ -1284,25 +1283,9 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
                 />
                 <span className="field-hint">
                   {tipeAdmin === 'dalam'
-                    ? 'Otomatis: Saldo Masuk - Admin'
-                    : 'Otomatis: = Saldo Masuk'}
+                    ? 'Otomatis: Nominal - Admin'
+                    : 'Otomatis: = Nominal'}
                 </span>
-              </Field>
-              <Field label="Banyak Transaksi">
-                <div className="flex items-center gap-3" style={{ marginTop: 6 }}>
-                  <div className="cart-item-stepper">
-                    <button type="button" className="btn btn-secondary btn-sm"
-                      onClick={() => setQtyTarik((q) => Math.max(1, q - 1))}>-</button>
-                    <span className="num cart-item-qty">{qtyTarik}</span>
-                    <button type="button" className="btn btn-secondary btn-sm"
-                      onClick={() => setQtyTarik((q) => q + 1)}>+</button>
-                  </div>
-                  {qtyTarik > 1 && (
-                    <span className="text-sm text-muted">
-                      Total {qtyTarik}x: {formatRupiah(totalTarik)}
-                    </span>
-                  )}
-                </div>
               </Field>
             </div>
 

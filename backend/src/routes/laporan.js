@@ -92,7 +92,11 @@ export async function reportBulanan(db, request, ctx) {
   );
   const adminDanaRow = await db.one(
     `SELECT
-       COALESCE(SUM(CASE WHEN jenis = 'tariktunai' THEN total ELSE 0 END), 0) AS tarik_tunai,
+       -- Nilai titipan tarik tunai = nominal (bukan fee). Total transaksi
+       -- admin luar sudah termasuk fee, jadi kurangi laba utk mendapat nominal.
+       COALESCE(SUM(CASE WHEN jenis = 'tariktunai' THEN
+         CASE WHEN admin_type = 'luar' THEN total - COALESCE(laba, 0) ELSE total END
+       ELSE 0 END), 0) AS tarik_tunai,
        COALESCE(SUM(CASE WHEN jenis = 'transfer' THEN total - COALESCE(laba, 0) ELSE 0 END), 0) AS transfer
        FROM transaksi WHERE deleted_at IS NULL AND jenis IN ('tariktunai','transfer')
         AND tanggal_transaksi >= ? AND tanggal_transaksi <= ?`,
