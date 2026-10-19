@@ -968,13 +968,17 @@ function EngineTab() {
 
   useEffect(() => {
     api.get('/settings').then((s) => {
+      let map = s.digital_bank_map;
+      if (typeof map === 'string') {
+        try { map = JSON.parse(map); } catch { map = null; }
+      }
       setCfg({
         scan_days: s.auto_produk_scan_days ?? 7,
         scan_min_count: s.auto_produk_min_count ?? 3,
-        digital_bank_map: s.digital_bank_map || {
-          pulsa: 'OrderKuota',
-          dana: 'DANA',
-          transfer: 'SeaBank',
+        digital_bank_map: {
+          pulsa: map?.pulsa || 'OrderKuota',
+          dana: map?.dana || 'DANA',
+          transfer: map?.transfer || 'SeaBank',
         },
       });
       setLoaded(true);
@@ -1026,7 +1030,7 @@ function EngineTab() {
           </Field>
         </div>
         <p className="text-sm text-muted">
-          Contoh: scan 7 hari, min 3x. Kalau "Bank 100k" muncul 3x dalam 7 hari \u2192 produk B100 otomatis dibuat.
+          Contoh: scan 7 hari, min 3x. Kalau "Bank 100k" muncul 3x dalam 7 hari → produk B100 otomatis dibuat.
         </p>
         <div style={{"marginTop": 12}}>
           <Button onClick={save} loading={busy}>Simpan Engine</Button>

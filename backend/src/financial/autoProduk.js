@@ -14,7 +14,30 @@ function providerDariNama(nama) {
   if (/\bgopay\b|\bgo ?pay\b/.test(n)) return 'OrderKuota';
   if (/\bovo\b/.test(n)) return 'OrderKuota';
   if (/\bdana\b/.test(n)) return 'Dana';
+  // Produk transfer bank dijual lewat Produk Digital (mis. "Bank 100k",
+  // "Tf 50k"), bukan hanya transaksi jenis='transfer'.
+  if (/\bbank\b|\btransfer\b|\btf\b/.test(n)) return 'Bank';
   return '';
+}
+
+function bilanganBulat(nilai, bawaan, min, max) {
+  const n = Number(nilai);
+  if (!Number.isFinite(n) || n < min) return bawaan;
+  return Math.min(Math.floor(n), max);
+}
+
+// Baca konfigurasi dari Settings > Engine & Produk Digital. Dipakai juga
+// saat closing (auto-run) supaya hasilnya sama dengan tombol Scan.
+export async function bacaKonfigurasiEngine(db) {
+  const rows = await db.many(
+    "SELECT key, value FROM settings WHERE key IN ('auto_produk_scan_days','auto_produk_min_count')"
+  );
+  const conf = {};
+  for (const r of rows) conf[r.key] = r.value;
+  return {
+    days: bilanganBulat(conf.auto_produk_scan_days, SCAN_DAYS, 1, 30),
+    minCount: bilanganBulat(conf.auto_produk_min_count, SCAN_MIN_COUNT, 1, 50),
+  };
 }
 
 // Admin (fee) per provider & nominal sesuai aturan bisnis. Minimal nominal 10k.
@@ -48,7 +71,10 @@ function wibDateOffset(days) {
   return `${t.getUTCFullYear()}-${String(t.getUTCMonth() + 1).padStart(2, '0')}-${String(t.getUTCDate()).padStart(2, '0')}`;
 }
 
-export async function autoCreateProdukFromTransaksi(db, { days = SCAN_DAYS, minCount = SCAN_MIN_COUNT } = {}) {
+export async function autoCreateProdukFromTransaksi(db, opts = {}) {
+  const conf = await bacaKonfigurasiEngine(db);
+  const days = opts.days ?? conf.days;
+  const minCount = opts.minCount ?? conf.minCount;
   const start = wibDateOffset(days);
 
   // Kumpulkan kandidat: provider + nominal (per transaksi unik).
@@ -73,7 +99,6 @@ export async function autoCreateProdukFromTransaksi(db, { days = SCAN_DAYS, minC
   }
 
   // Transfer murni (jenis='transfer')
-  // Transfer murni (jenis='transfer')
   const transfer = await db.many(
     `SELECT id AS tx_id, total, COALESCE(laba, 0) AS laba
        FROM transaksi
@@ -82,22 +107,6 @@ export async function autoCreateProdukFromTransaksi(db, { days = SCAN_DAYS, minC
   );
   for (const r of transfer) {
     add('Bank', Number(r.total || 0) - Number(r.laba || 0), r.tx_id);
-  }
-
-  // Transfer via Produk Digital (jenis='produkdigital' + metode_bayar='transfer')
-  const digitalTransfer = await db.many(
-    `SELECT t.id AS tx_id, ti.harga_modal_snapshot, ti.qty
-       FROM transaksi t
-       JOIN transaksi_item ti ON ti.transaksi_id = t.id
-      WHERE t.deleted_at IS NULL 
-        AND t.jenis = 'produkdigital' 
-        AND t.metode_bayar = 'transfer'
-        AND t.tanggal_transaksi >= ?`,
-    start
-  );
-  for (const r of digitalTransfer) {
-    const nominal = Number(r.harga_modal_snapshot || 0) * Number(r.qty || 1);
-    add('Bank', nominal, r.tx_id);
   }
 
   // Kategori Saldo.

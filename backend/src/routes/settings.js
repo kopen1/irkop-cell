@@ -10,6 +10,14 @@ export async function getSettings(db, request, ctx) {
   const rows = await db.many('SELECT key, value, updated_at FROM settings ORDER BY key');
   const conf = {};
   for (const r of rows) conf[r.key] = r.value;
+  // Nilai JSON disimpan sebagai string di tabel settings; FE memakai object.
+  if (typeof conf.digital_bank_map === 'string') {
+    try {
+      conf.digital_bank_map = JSON.parse(conf.digital_bank_map);
+    } catch {
+      conf.digital_bank_map = null;
+    }
+  }
 
   const sources = await db.many('SELECT * FROM notifhook_source ORDER BY id');
   const lastLog = await db.one('SELECT diterima_at, status FROM notifhook_log ORDER BY id DESC LIMIT 1');
