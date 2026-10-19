@@ -368,10 +368,12 @@ export async function updateModalFromServer(db, request, ctx) {
   // Ambil baris harga_server sesuai target
   let serverRows;
   if (targets) {
-    const placeholders = targets.map(() => '?').join(',');
-    serverRows = await db.many(
-      `SELECT * FROM harga_server WHERE kode_produk IN (${placeholders})`,
-      ...targets
+    const unik = [...new Set(targets)];
+    serverRows = await db.inChunks(unik, (chunk) =>
+      db.many(
+        `SELECT * FROM harga_server WHERE kode_produk IN (${chunk.map(() => '?').join(',')})`,
+        ...chunk
+      )
     );
   } else {
     // all_naik: ambil semua yang punya produk, filter efektif > modal di bawah.

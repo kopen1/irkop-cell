@@ -141,3 +141,32 @@ test('sesi yang sudah ditutup: edit ditolak dengan pesan yang menyebut tanggal',
   assert.equal(r.data.error.code, 'session_closed');
   assert.match(r.data.error.message, new RegExp(KEMARIN));
 });
+
+test('list transaksi limit 150 memuat semua item (bind IN dipecah)', async () => {
+  const { env, token, adminId } = await bootstrap();
+  const sesi = await sisipSesi(env, adminId, HARI_INI, 'buka');
+  const now = new Date().toISOString();
+  const N = 120;
+
+  const txStmts = [];
+  for (let i = 0; i < N; i++) {
+    txStmts.push(env.DB.prepare(
+      `INSERT INTO transaksi (kode_transaksi, metode_bayar, konfirmasi_pembayaran, subtotal, total, laba,
+                              kasir_sesi_id, dibuat_oleh, tanggal_transaksi, created_at)
+       VALUES (?, 'tunai', 'tidak_perlu', 10000, 10000, 1000, ?, ?, ?, ?)`
+    ).bind(`TX-BULK-${i}`, sesi, adminId, HARI_INI, now));
+  }
+  await env.DB.batch(txStmts);
+
+  const { results } = await env.DB.prepare('SELECT id FROM transaksi ORDER BY id').all();
+  await env.DB.batch(results.map((r) => env.DB.prepare(
+    `INSERT INTO transaksi_item (transaksi_id, produk_id, nama_produk_snapshot, harga_snapshot,
+                                 harga_modal_snapshot, qty, subtotal)
+     VALUES (?, NULL, 'Item', 10000, 9000, 1, 10000)`
+  ).bind(r.id)));
+
+  const res = await call(env, `/api/transaksi?date=${HARI_INI}&limit=150`, { token });
+  assert.equal(res.status, 200, JSON.stringify(res.data));
+  assert.equal(res.data.items.length, N);
+  assert.ok(res.data.items.every((it) => it.items.length === 1), 'detail item semua transaksi termuat');
+});

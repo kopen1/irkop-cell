@@ -27,5 +27,15 @@ export function createDb(env) {
     return { results: res, success: res.every((r) => r.success) };
   }
 
-  return { one, many, exec, batch, raw: d1 };
+  // D1 membatasi ~100 parameter per query. Pecah daftar nilai agar query
+  // `IN (?, ?, ...)` dengan banyak id tetap aman.
+  async function inChunks(values, fn) {
+    const out = [];
+    for (let i = 0; i < values.length; i += 90) {
+      out.push(...(await fn(values.slice(i, i + 90))));
+    }
+    return out;
+  }
+
+  return { one, many, exec, batch, inChunks, raw: d1 };
 }

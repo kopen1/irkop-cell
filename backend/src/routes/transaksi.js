@@ -94,12 +94,12 @@ export async function listTransaksi(db, request, ctx) {
   );
 
   const ids = rows.map((r) => r.id);
-  const items = ids.length
-    ? await db.many(
-        `SELECT * FROM transaksi_item WHERE transaksi_id IN (${ids.map(() => '?').join(',')}) ORDER BY id`,
-        ...ids
-      )
-    : [];
+  const items = await db.inChunks(ids, (chunk) =>
+    db.many(
+      `SELECT * FROM transaksi_item WHERE transaksi_id IN (${chunk.map(() => '?').join(',')}) ORDER BY id`,
+      ...chunk
+    )
+  );
   const itemMap = {};
   for (const it of items) {
     (itemMap[it.transaksi_id] = itemMap[it.transaksi_id] || []).push(it);

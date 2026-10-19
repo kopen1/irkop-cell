@@ -120,14 +120,14 @@ export async function listPembelianStok(db, request, ctx) {
     ...[...bind, limit, offset]
   );
   const ids = rows.map((r) => r.id);
-  const items = ids.length
-    ? await db.many(
-        `SELECT psi.*, p.nama AS produk_nama, p.kode AS produk_kode
-           FROM pembelian_stok_item psi LEFT JOIN produk p ON p.id = psi.produk_id
-          WHERE psi.pembelian_id IN (${ids.map(() => '?').join(',')}) ORDER BY psi.id`,
-        ...ids
-      )
-    : [];
+  const items = await db.inChunks(ids, (chunk) =>
+    db.many(
+      `SELECT psi.*, p.nama AS produk_nama, p.kode AS produk_kode
+         FROM pembelian_stok_item psi LEFT JOIN produk p ON p.id = psi.produk_id
+        WHERE psi.pembelian_id IN (${chunk.map(() => '?').join(',')}) ORDER BY psi.id`,
+      ...chunk
+    )
+  );
   const itemMap = {};
   for (const it of items) (itemMap[it.pembelian_id] = itemMap[it.pembelian_id] || []).push(it);
   return { items: rows.map((r) => ({ ...r, detail: itemMap[r.id] || [] })) };
