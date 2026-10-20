@@ -3,7 +3,6 @@
 // - Akun: rekap per akun (mutasi_saldo)
 // - Rekonsiliasi: uang keluar vs masuk
 // - Buku Kas: semua pergerakan kasir
-// - Buku Besar: detail per akun (ledger)
 // - Laporan Laba Rugi: pendapatan - beban = laba bersih
 // - Laporan Neraca: aset vs ekuitas
 // Sumber data: backend /api/laporan/*
@@ -96,12 +95,8 @@ export default function LaporanPage() {
   const [nilaiStok, setNilaiStok] = useState({ status: 'loading', data: null, error: null });
   const [rekon, setRekon] = useState({ status: 'idle', data: null, error: null });
   const [bukuKas, setBukuKas] = useState({ status: 'idle', data: null, error: null });
-  const [bukuBesar, setBukuBesar] = useState({ status: 'idle', data: null, error: null });
   const [labaRugi, setLabaRugi] = useState({ status: 'idle', data: null, error: null });
   const [neraca, setNeraca] = useState({ status: 'idle', data: null, error: null });
-  const [bukuBesarAkun, setBukuBesarAkun] = useState('');
-  const [bbTanggalDari, setBbTanggalDari] = useState('');
-  const [bbTanggalSampai, setBbTanggalSampai] = useState('');
   const [showHarian, setShowHarian] = useState(false);
   const siteName = useSiteName();
 
@@ -176,23 +171,6 @@ export default function LaporanPage() {
       .catch((err) => { if (!cancelled) setNeraca({ status: 'error', data: null, error: err }); });
     return () => { cancelled = true; };
   }, [period, year, month, refresh]);
-
-  useEffect(() => {
-    if (!isBulanan) return undefined;
-    let cancelled = false;
-    setBukuBesar({ status: 'loading', data: null, error: null });
-    const startD = `${year}-${month}-01`;
-    const lastDay = new Date(Number(year), Number(month), 0).getDate();
-    const endD = `${year}-${month}-${String(lastDay).padStart(2, '0')}`;
-    api.get('/laporan/buku-besar', {
-      akun: bukuBesarAkun || 'Tunai Laci',
-      tanggal_dari: bbTanggalDari || startD,
-      tanggal_sampai: bbTanggalSampai || endD,
-    })
-      .then((res) => { if (!cancelled) setBukuBesar({ status: 'success', data: res, error: null }); })
-      .catch((err) => { if (!cancelled) setBukuBesar({ status: 'error', data: null, error: err }); });
-    return () => { cancelled = true; };
-  }, [period, year, month, refresh, bukuBesarAkun, bbTanggalDari, bbTanggalSampai]);
 
   const handleRefresh = () => setRefresh((r) => r + 1);
 
@@ -468,9 +446,9 @@ export default function LaporanPage() {
         }
       />
 
-      <div className="filter-bar">
-        <div className="flex flex-col gap-2" style={{ flexWrap: 'wrap', alignItems: 'flex-end' }}>
-          <div className="flex gap-2">
+      <div className="filter-bar laporan-filter">
+        <div className="laporan-filter-main">
+          <div className="laporan-filter-period">
             <button type="button" className={`tab ${period === 'bulanan' ? 'active' : ''}`} onClick={() => setPeriod('bulanan')}>Bulanan</button>
             <button type="button" className={`tab ${period === 'tahunan' ? 'active' : ''}`} onClick={() => setPeriod('tahunan')}>Tahunan</button>
           </div>
@@ -486,17 +464,17 @@ export default function LaporanPage() {
               </Select>
             </Field>
           )}
-          <div className="flex flex-col gap-2" style={{ alignSelf: 'flex-end' }}>
-            <Button variant="secondary" onClick={handleRefresh} loading={status === 'loading'}>
-              <Icon name="refresh" size={14} /> Muat Ulang
-            </Button>
-            <Button variant="secondary" onClick={handlePdf} disabled={status !== 'success'}>
-              <Icon name="print" size={15} /> Cetak / PDF
-            </Button>
-            <Button variant="secondary" onClick={handleCsv} disabled={status !== 'success'}>
-              <Icon name="download" size={15} /> Export CSV
-            </Button>
-          </div>
+        </div>
+        <div className="filter-actions mobile-only">
+          <Button variant="secondary" onClick={handleRefresh} loading={status === 'loading'}>
+            <Icon name="refresh" size={14} /> Muat Ulang
+          </Button>
+          <Button variant="secondary" onClick={handlePdf} disabled={status !== 'success'}>
+            <Icon name="print" size={15} /> Cetak / PDF
+          </Button>
+          <Button variant="secondary" onClick={handleCsv} disabled={status !== 'success'}>
+            <Icon name="download" size={15} /> Export CSV
+          </Button>
         </div>
       </div>
 
@@ -621,46 +599,26 @@ export default function LaporanPage() {
                 )}
               </Card>
 
-              <Card className="mt-4" title="Buku Besar (General Ledger)">
-                <div className="flex flex-col gap-3">
-                  <Field label="Akun" style={{ maxWidth: 300 }}>
-                    <Input type="text" placeholder="Ketik nama akun..." value={bukuBesarAkun || ''} onChange={(e) => setBukuBesarAkun(e.target.value)} />
-                  </Field>
-                  <Field label="Dari Tanggal" style={{ maxWidth: 200 }}>
-                    <Input type="date" value={bbTanggalDari || ''} onChange={(e) => setBbTanggalDari(e.target.value)} />
-                  </Field>
-                  <Field label="Sampai Tanggal" style={{ maxWidth: 200 }}>
-                    <Input type="date" value={bbTanggalSampai || ''} onChange={(e) => setBbTanggalSampai(e.target.value)} />
-                  </Field>
-                </div>
-                {bukuBesar.status === 'loading' && <Loader label="Memuat buku besar ..." />}
-                {bukuBesar.status === 'error' && <ErrorState error={bukuBesar.error} onRetry={handleRefresh} />}
-                {bukuBesar.status === 'success' && bukuBesar.data?.items?.length ? (
-                  <>
-                    <div className="flex justify-between mb-2">
-                      <span className="text-sm text-muted">Saldo Awal</span>
-                      <span className="num font-bold">{formatRupiah(bukuBesar.data.saldo_awal || 0)}</span>
-                    </div>
-                    <Table className="table-fit" columns={[
-                      { key: 'tanggal', header: 'Tanggal', render: (r) => <span className="text-sm">{r.tanggal}</span> },
-                      { key: 'nama_akun', header: 'Akun', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_akun}</span> },
-                      { key: 'jenis_transaksi', header: 'Jenis', render: (r) => <span className="text-sm text-muted">{r.jenis_transaksi || '-'}</span> },
-                      { key: 'kode_transaksi', header: 'Kode Transaksi', align: 'right', render: (r) => <span className="num text-sm font-mono">{r.kode_transaksi}</span> },
-                      { key: 'jumlah', header: 'Jumlah', align: 'right', render: (r) => <span className={`num ${r.jumlah >= 0 ? 'text-success' : 'text-danger'}`}>{formatRupiah(r.jumlah)}</span> },
-                      { key: 'saldo', header: 'Saldo', align: 'right', render: (r) => <span className="num font-bold">{formatRupiah(r.saldo)}</span> },
-                    ]} rows={bukuBesar.data.items} empty={<EmptyState title="Pilih akun dan tanggal" icon="kasir" description="Pilih akun dan rentang tanggal untuk melihat buku besar." />} />
-                    <div className="flex justify-between mt-2">
-                      <span className="text-sm text-muted">Saldo Akhir</span>
-                      <span className="num font-bold">{formatRupiah(bukuBesar.data.saldo_akhir || 0)}</span>
-                    </div>
-                  </>
-                ) : null}
-                {bukuBesar.status === 'success' && !bukuBesar.data?.items?.length && (
-                  <EmptyState title="Pilih akun dan tanggal" icon="kasir" description="Pilih akun dan rentang tanggal untuk melihat buku besar." />
-                )}
-              </Card>
             </>
           )}
+
+          <Card className="mt-4" title="Produk Terlaris" subtitle={`Produk paling banyak terjual — ${periodeLabel}`}>
+            {produk.status === 'loading' ? (
+              <Loader label="Memuat produk terlaris ..." />
+            ) : produk.status === 'error' ? (
+              <ErrorState error={produk.error} onRetry={handleRefresh} />
+            ) : (
+              <Table className="table-fit" columns={[
+                { key: 'peringkat', header: '#', align: 'right', render: (r) => <span className="num">{r.peringkat}</span> },
+                { key: 'nama_produk', header: 'Produk', render: (r) => <span style={{ fontWeight: 600 }}>{r.nama_produk}</span> },
+                { key: 'nama_kategori', header: 'Kategori', render: (r) => <span className="text-sm text-muted">{r.nama_kategori}</span> },
+                { key: 'qty', header: 'Qty Terjual', align: 'right', render: (r) => <span className="num">{r.qty}</span> },
+                { key: 'jumlah_transaksi', header: 'Transaksi', align: 'right', className: 'hide-mobile', render: (r) => <span className="num">{r.jumlah_transaksi}</span> },
+                { key: 'omzet', header: 'Omzet', align: 'right', render: (r) => <span className="num">{formatRupiah(r.omzet)}</span> },
+                { key: 'laba', header: 'Laba', align: 'right', render: (r) => <span className="num">{formatRupiah(r.laba)}</span> },
+              ]} rows={produkRows} empty={<EmptyState title="Belum ada produk terjual" description="Data muncul setelah ada transaksi pada periode ini." icon="barang" />} />
+            )}
+          </Card>
         </>
       )}
     </div>
