@@ -978,6 +978,7 @@ function EngineTab() {
         digital_bank_map: {
           pulsa: map?.pulsa || 'OrderKuota',
           dana: map?.dana || 'DANA',
+          ovo_gopay: map?.ovo_gopay || 'OrderKuota',
           transfer: map?.transfer || 'SeaBank',
         },
       });
@@ -996,6 +997,7 @@ function EngineTab() {
         digital_bank_map: cfg.digital_bank_map || {
           pulsa: 'OrderKuota',
           dana: 'DANA',
+          ovo_gopay: 'OrderKuota',
           transfer: 'SeaBank',
         },
       };
@@ -1044,8 +1046,13 @@ function EngineTab() {
               {bankOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
             </Select>
           </Field>
-          <Field label="DANA / GoPay / OVO / ShopeePay (akun modal)">
+          <Field label="DANA / ShopeePay (akun modal)">
             <Select value={cfg.digital_bank_map?.dana || 'DANA'} onChange={(e) => setCfg((c) => ({ ...c, digital_bank_map: { ...c.digital_bank_map, dana: e.target.value } }))}>
+              {bankOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
+            </Select>
+          </Field>
+          <Field label="OVO / GoPay (akun modal)">
+            <Select value={cfg.digital_bank_map?.ovo_gopay || 'OrderKuota'} onChange={(e) => setCfg((c) => ({ ...c, digital_bank_map: { ...c.digital_bank_map, ovo_gopay: e.target.value } }))}>
               {bankOptions.map((b) => <option key={b.value} value={b.value}>{b.label}</option>)}
             </Select>
           </Field>
@@ -1056,7 +1063,7 @@ function EngineTab() {
           </Field>
         </div>
         <p className="text-sm text-muted">
-          Produk digital dengan sub-jenis "Pulsa" pakai akun Pulsa; "DANA" pakai akun DANA; "Transfer" pakai akun Transfer.
+          Produk digital dengan sub-jenis "Pulsa" pakai akun Pulsa; "DANA" pakai akun DANA; "OVO / GoPay" default OrderKuota; "Transfer" pakai akun Transfer.
         </p>
         <div style={{"marginTop": 12}}>
           <Button onClick={save} loading={busy}>Simpan Mapping Bank</Button>

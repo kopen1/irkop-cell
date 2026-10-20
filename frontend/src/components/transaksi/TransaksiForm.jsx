@@ -21,6 +21,7 @@ const JENIS_OPTIONS = [
 const SUB_JENIS_OPTIONS = [
   { value: 'pulsa', label: 'Pulsa / Data / Token' },
   { value: 'dana', label: 'Top Up DANA' },
+  { value: 'ovo_gopay', label: 'Top Up OVO / GoPay' },
   { value: 'transfer', label: 'Transfer / Kirim Bank' },
 ];
 
@@ -28,6 +29,7 @@ const SUB_JENIS_OPTIONS = [
 const _DEFAULT_AKUN_MAP = {
   pulsa: 'OrderKuota',
   dana: 'DANA',
+  ovo_gopay: 'OrderKuota',
   transfer: 'SeaBank',
 };
 
@@ -37,7 +39,8 @@ function tebakSubJenisDigital(p) {
   const kode = String(p?.kode || '').toLowerCase();
   const nama = String(p?.nama || '').toLowerCase();
   const teks = `${kode} ${nama}`;
-  if (/\b(dana|gopay|ovo|shopeepay|linkaja|doku|wallet)\b/.test(teks) || /^d\d/.test(kode)) return 'dana';
+  if (/\bgopay\b|\bgo ?pay\b|\bovo\b/.test(teks)) return 'ovo_gopay';
+  if (/\b(dana|shopeepay|linkaja|doku|wallet)\b/.test(teks) || /^d\d/.test(kode)) return 'dana';
   if (/\b(transfer|seabank|bank)\b/.test(teks) || /\btf\b/.test(teks) || /^b\d/.test(kode)) return 'transfer';
   return 'pulsa';
 }
@@ -132,6 +135,7 @@ export default function TransaksiForm({ initial, initialJenis, sesiAktif, onSave
   const digitalBankMap = useMemo(() => ({
     pulsa: settings.data?.digital_bank_map?.pulsa || 'OrderKuota',
     dana: settings.data?.digital_bank_map?.dana || 'DANA',
+    ovo_gopay: settings.data?.digital_bank_map?.ovo_gopay || 'OrderKuota',
     transfer: settings.data?.digital_bank_map?.transfer || 'SeaBank',
   }), [settings.data]);
 
