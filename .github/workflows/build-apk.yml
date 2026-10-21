@@ -8,6 +8,9 @@ on:
       - 'frontend/src/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -47,7 +50,7 @@ jobs:
         run: |
           cd mobile
           if [ ! -d "android" ]; then
-            npx cap init "Iirkop Cell" "id.co.irkop.cell" --web-dir "../frontend/dist"
+            npx cap init "Irkop Cell" "id.co.irkop.cell" --web-dir "../frontend/dist"
             npx cap add android
           fi
 
@@ -56,7 +59,29 @@ jobs:
           cd mobile
           npx cap sync android
 
-      - name: Build Debug APK
+      - name: Cache Debug Keystore
+        uses: actions/cache@v4
+        with:
+          path: ~/.android/debug.keystore
+          key: android-debug-keystore-v1
+
+      - name: Prepare Debug Keystore
+        run: |
+          mkdir -p ~/.android
+          if [ ! -f ~/.android/debug.keystore ]; then
+            keytool -genkeypair -v -keystore ~/.android/debug.keystore \
+              -storepass android -alias androiddebugkey -keypass android \
+              -keyalg RSA -keysize 2048 -validity 10000 \
+              -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Set APK Version
+        run: |
+          cd mobile/android
+          sed -i "s/versionCode 1$/versionCode ${GITHUB_RUN_NUMBER}/" app/build.gradle
+          sed -i "s/versionName \"1.0\"$/versionName \"1.0.${GITHUB_RUN_NUMBER}\"/" app/build.gradle
+
+      - name: Build APK
         run: |
           cd mobile/android
           ./gradlew assembleDebug
@@ -73,3 +98,16 @@ jobs:
           name: konter-debug.apk
           path: mobile/android/app/build/outputs/apk/debug/*.apk
           retention-days: 30
+
+      - name: Publish APK to GitHub Releases
+        if: github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="1.0.${GITHUB_RUN_NUMBER}"
+          TAG="apk-v${VERSION}-${GITHUB_RUN_ATTEMPT}"
+          cp mobile/android/app/build/outputs/apk/debug/app-debug.apk irkop-cell.apk
+          gh release create "$TAG" irkop-cell.apk \
+            --title "APK Irkop Cell v${VERSION}" \
+            --notes "APK terbaru Irkop Cell (build ${GITHUB_RUN_NUMBER}). Download langsung tanpa login." \
+            --latest
